@@ -925,3 +925,130 @@ Codex's round took 31 minutes, with static checks only. My first run of the focu
 - Specification scene conflicts and slot conflicts resolve in separate requests.
 - Undo re-appends a reopened conflict at the end of its list, so the UI should order conflicts by page and target,
   not by storage order.
+
+## P1c-3
+
+### CHANGED
+
+- `static/documentation_conflicts.js` adds one review controller for parts, operations, specification and work instructions. The status bar reads persisted conflict/orphan counts. The pane sorts by page and stable target, shows C/B/N and old/new evidence, and uses the existing page-selection/highlight path. Open targets have page markers and redirect attempted inline edits to review.
+- Keep mine, Use generated, nonempty Merge, Detach and explicit same-kind Restore use the existing resolve route. Each request carries the item's owner revision and conflict hash. Restore destinations come from every page of the server's restoreTargets catalogue, with no default selection. A transport retry retains its request ID; refused revisions/hashes reload the workspace and review without resolving automatically. Specification owners are resolved separately.
+- `static/index.html` loads the new module with `?v=20261110-p1c-3`, connects payload/page updates and edit guards, and adds stable target attributes to existing master text. Cover notes now also accept the existing two-press edit gesture. Review follows history undo/redo; a five-second read-only check while a reviewed workspace remains open observes external/named undo without interrupting an inline edit.
+- Parts has preview/execute Refresh from source both beside the manual-plan stale-source message and in a stale documentation workspace. Existing operations/specification/WI generation shows refresh receipt counts. Reset to generated uses an in-page preview/confirmation, shows affected IDs (first 20 plus remaining count), retains the scene and specification slot preview pairs, and states that a recoverable copy is kept. No native alert/confirm/prompt dialogs were added.
+- `tests/documentation_editor_smoke_server.py` owns the sole source-fixture reader and route, `POST /__p1c/source-fixture`. It persists a deterministic SHA-256 source binding and definition-keyed description/order changes in scratch/source-fixture.json, reapplies them on startup, validates the requested definition, and never mutates the underlying catalogue.
+- `tests/smoke_documentation_editor.py` adds restart on a new port with the same scratch stores and isolation assertions, plus a separate P1c scenario: browser description/note edits, source refresh, identity-preserving row movement, persisted C/B/N and marker/count, real captures and review/customer export checks, restart and Sage agreement, browser merge/undo/redo, restored-store Sage twin, and resolved reopen. It records a ten-minute budget check and writes p1c-refresh-receipt.png, p1c-page-marker.png, p1c-conflict-pane.png, p1c-resolved.png, p1c-resolved-reopen.png and p1c-review.pdf under .runtime/de for supervisor review.
+- `tests/documentation_conflicts.test.cjs` adds controller/request and pure-helper tests. `tests/test_documentation_conflicts_ui.py` adds pytest coverage for the launcher-only route, persisted fixture replay/refusal, and process restart/store isolation.
+- No production server route, exporter, compiler, store version, scene-free identity baseline, Sage schema or inventory changed. All P1c-2b supervisor fixes remain intact. **Neither baseline is expected to move.** Expected baseline JSON files were not edited.
+
+### TESTS
+
+- `node --test tests/documentation_conflicts.test.cjs`: **14 passed**. Covers owner revisions, hashes, explicit restore/hash validation, nonempty merge, evidence comparison, identity markers, deterministic ordering, combined receipts, stale rejection without automatic resolution, same-ID transport retry, paginated reads, specification reset pairs, named undo observation and parts refresh preview/execute.
+- `node --check static/documentation_conflicts.js`: passed.
+- Extracted all four executable inline scripts from index.html in memory and checked each with `node --input-type=module --check`: passed. Parsed its import map separately as JSON.
+- `git diff --check`: passed.
+- Node file checks: all changed/new files use LF; every added index.html line and the new module are ASCII. Existing non-ASCII index.html content is untouched. server.py is unchanged, including its BOM.
+- Compared the P1a body after removing its added branch indentation and the complete P1b function against HEAD: both are identical. Shared launcher changes were traced through initial launch, restart and final cleanup.
+- Manually traced the new Python paths and the UI against real route bodies, catalogue ordering/item assignment rules, owner revisions, target maps, reset previews and export response fields. **No Python was run**, including imports or syntax/AST checks. No runtime, browser, visual or ten-minute pass is claimed.
+
+### NOT RUN
+
+Claude must run outside the sandbox:
+
+    python -m pytest -q tests/test_documentation_refresh.py tests/test_documentation_provenance.py tests/test_documentation_change_undo.py tests/test_documentation_transactions.py tests/test_operations_manual_workspace.py tests/test_specification_sheet_workflow.py tests/test_parts_manual.py tests/test_work_instruction_workflow.py tests/test_codex_documentation_tools.py tests/test_codex_readonly_pilot.py tests/test_codex_assisted_tools.py tests/test_codex_specification_sheet_tools.py tests/test_documentation_baseline.py tests/test_documentation_store_chokepoint.py tests/test_documentation_conflicts_ui.py tests/test_documentation_editor_smoke.py
+    python tools/documentation_baseline.py --check
+    python tools/documentation_baseline.py --local --check
+    python tests/smoke_documentation_editor.py --phase P1a
+    python tests/smoke_documentation_editor.py --phase P1b
+    python tests/smoke_documentation_editor.py --phase P1c
+    python -c "import glob,sys,pytest; sys.exit(pytest.main(['-q']+sorted({p for pattern in ('tests/test_documentation*.py','tests/test_parts_manual*.py','tests/test_operations_manual*.py','tests/test_specification_sheet*.py','tests/test_work_instruction*.py','tests/test_inspection_sheet*.py') for p in glob.glob(pattern)})))"
+    python -c "import glob,sys,pytest; sys.exit(pytest.main(['-q']+sorted({p for pattern in ('tests/test_codex*.py','tests/test_facility*.py','tests/test_authored*.py','tests/test_sage*.py','tests/test_industrial*.py') for p in glob.glob(pattern)})))"
+
+The pre-existing test_operations_manual_precoding_contracts.py::test_source_ids_references_and_local_hashes_are_closed failure remains untouched. Please inspect the generated PNGs; exporter marker cosmetics remain deferred to P4.
+
+### DEVIATIONS
+
+- No production phase-scope deviation or missing server field.
+- The P1c smoke starts with a disposable copy of the approved plan whose itemAssignments are empty, and removes only that scratch copy's seed scene before the two browser edits. Grouping and occurrence membership remain approved and unchanged. This is necessary to exercise actual source-driven BOM movement: build_scoped_bom deliberately preserves explicit item numbers, so reversing catalogue input alone cannot reorder a pinned section. The source-fixture wrapper then changes the selected definition's sort key and description; the smoke asserts changed order and the unchanged definition/cell identity. P1a/P1b retain their original seed stores.
+- The stale workspace repeats the manual-plan refresh affordance so a reopened stale manual has a visible recovery path without first finding the plan panel.
+- Screenshot production and the under-ten-minute budget remain supervisor-run checks, not claimed results from this sandbox.
+
+### OPEN QUESTIONS
+
+None requiring a product decision. Runtime, shared-launcher regression, real-browser visual review and baseline gates remain pending Claude.
+
+## P1c-3 supervisor gate (Claude, 2026-11-10)
+
+Result: PASSED after supervisor fixes; committed together with this section. P1c is complete.
+
+Codex's round took 29 minutes: static checks, plus the new Node tests (14 passed) in its sandbox. My focused run
+gave 545 passed. The first P1c smoke stopped at its setup. The fixed smoke then exposed two real UI defects
+that only a browser could show.
+
+### Supervisor fixes (Claude)
+
+- Smoke setup: BOM cells are definition-keyed (part.<definitionId>.<field>) and carry that stable ID in the DOM.
+  They have no aliasMap entry, so the alias lookup raised StopIteration. It now falls back to the stable ID.
+- Review pane unusable (defect): #documentationWorkspace is a click-through overlay (pointer-events:none) whose
+  children opt back in. The pane did not opt in, so it was painted on screen while every click passed through to
+  the page beneath. It now sets pointer-events:auto.
+- Review pane covered the page (defect). In workflow mode the canvas spans the full workspace width, so the pane:
+  - hid the right-hand side of the page, where the conflicted BOM cells are;
+  - let the contextual selection toolbar (z-index 5150) sit over the pane's buttons.
+  The fix:
+  - While open, the pane docks into the workspace's right column. The workspace class
+    documentation-review-open reserves its width through --documentation-properties-width, so the canvas shrinks
+    beside it, and the inspector column is hidden.
+  - Opening the review clears the page selection.
+  - Focusing a conflict scrolls to the marked target instead of selecting it; a conflicted target is not
+    editable.
+- Polling: the five-second change check now runs only while the pane is open, because each check recompiles the
+  document on the server.
+- Node harness: the gate chain's Node run caught that the docking change broke 6 of the 14 controller tests (the
+  fake DOM element had no classList). The fake element now has a classList backed by className, and the host
+  counts clearSelection calls. Two new tests:
+  - opening docks the pane (workspace class) and clears the page selection once; Close undocks it;
+  - a closed pane never polls, and reopening resumes the change check.
+  Each new test fails on a mutant of the module without the matching code (scratch copies, not committed).
+- Count text: "1 conflict" instead of "1 conflicts" (Node test and smoke expectations updated).
+- Gate runner: doc-editor-night/baseline.sh now also runs tests/documentation*.test.cjs.
+
+### Visual review (smoke PNGs)
+
+- The refresh receipt shows: adopted 1019 | preserved 1 | kept 0 | conflicts 1 | orphans 0.
+- The page marker (orange outline and "Conflict" badge) is on the edited description cell, after the BOM rows
+  moved by identity (the fixture's part number is now item 2).
+- With the pane open, the page sits fully visible beside the docked pane. The card shows C, B, N, the evidence
+  ("unchanged"), the merge box and the three choices.
+- After the browser merge: "0 conflicts", and the BOM shows the merged text.
+
+### Numbers
+
+- Focused suites: 545 passed. Node: documentation_conflicts.test.cjs 16/16 (14 from Codex, 2 added).
+- Smoke P1c, run alone: 35/35 in 238 s (budget: 10 minutes).
+- Gate chain:
+  - smokes: P1a 27/27, P1b 46/46, P1c 35/35;
+  - baseline checks: both unchanged (exit 0);
+  - documentation suites: 642 passed, 1 failed. The failure is the pre-existing
+    test_operations_manual_precoding_contracts.py::test_source_ids_references_and_local_hashes_are_closed
+    (recorded since P1a). P1c-2b had 639 passed; the 3 new are Codex's UI pytest;
+  - wide suites: 170 failed, 9 errors, 3851 passed, the same totals as P1c-2b. Every failure is in the
+    base set; none is new.
+
+### Notes
+
+- Accepted Codex deviation: the P1c smoke clears the copied plan's item assignments in scratch only. Approved
+  item numbers keep BOM order fixed by design, so without this a source reorder cannot move rows. Grouping and
+  membership are unchanged.
+- Not ours: tests/packaging_host.test.cjs (packaging work, last changed in d20baac before this branch) fails
+  1 of 13 in this worktree. It is left for the packaging owner.
+
+### P1c summary
+
+- P1c-1 (f28cd8f): stable identities.
+- P1c-2a (68855f3): three-way refresh with persisted conflicts and orphans.
+- P1c-2b (b073edd): resolution, undo, Sage conflict tools and export marking.
+- P1c-3 (this commit): the review UI, refresh and reset controls, and smoke --phase P1c.
+The plan's P1c gate holds:
+- the browser edits a description and an unrelated note;
+- a fixture source revision reorders the BOM and changes the same field;
+- the note survives and the field shows a persistent conflict, including after a restart;
+- the user and Sage resolutions agree.

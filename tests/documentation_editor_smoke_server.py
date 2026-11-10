@@ -13,6 +13,59 @@ import socket
 import sys
 
 
+def install_source_fixture(server, scratch):
+    """Install only in the isolated launcher; no production fixture reader exists."""
+    from copy import deepcopy
+    import hashlib
+    import json
+    from fastapi import Request
+    from fastapi.responses import JSONResponse
+
+    scratch = Path(scratch).resolve()
+    fixture_path = scratch / "source-fixture.json"
+    original = server._parts_manual_catalog_for_assembly
+    fixture = json.loads(fixture_path.read_text("ascii")) if fixture_path.exists() else None
+
+    def catalog(number):
+        assembly, value = original(number)
+        if fixture is None or number != fixture["assemblyNumber"]:
+            return assembly, value
+        value = deepcopy(value)
+        value["sourceRevision"] = fixture["sourceRevision"]
+        for row in value["occurrences"]:
+            if row.get("definitionId") == fixture["definitionId"]:
+                row["description"] = fixture["description"]
+                row["partNumber"] = fixture["partNumber"]
+                row["displayPartNumber"] = fixture["partNumber"]
+        value["occurrences"].reverse()
+        return assembly, value
+
+    async def source_fixture(request: Request):
+        nonlocal fixture
+        if request.client.host not in {"127.0.0.1", "::1", "testclient"}:
+            return JSONResponse(status_code=403, content={"error": "loopback only"})
+        body = await request.json()
+        if (set(body) != {"assemblyNumber", "definitionId", "description", "partNumber"}
+                or body.get("assemblyNumber") != "MMLE-50D"
+                or any(not isinstance(value, str) or not value for value in body.values())):
+            return JSONResponse(status_code=422, content={"error": "invalid fixture"})
+        _, baseline = original(body["assemblyNumber"])
+        if body["definitionId"] not in {row.get("definitionId") for row in baseline["occurrences"]}:
+            return JSONResponse(status_code=422, content={"error": "unknown definition"})
+        candidate = {**body, "sourceRevision": hashlib.sha256(
+            json.dumps({"source": baseline["sourceRevision"], **body}, sort_keys=True).encode("ascii")).hexdigest()}
+        temporary = fixture_path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(candidate, sort_keys=True) + "\n", encoding="ascii", newline="\n")
+        temporary.replace(fixture_path)
+        fixture = candidate
+        return {"success": True, **fixture}
+
+    server._parts_manual_catalog_for_assembly = catalog
+    source_fixture.__annotations__["request"] = Request
+    server.app.add_api_route("/__p1c/source-fixture", source_fixture, methods=["POST"])
+    return catalog
+
+
 def main():
     scratch = Path(sys.argv[1]).resolve()
     port = int(sys.argv[2])
@@ -71,6 +124,8 @@ def main():
         assert getattr(server, name).resolve() == scratch / "d" / short, name
     assert Path(server.LIBRARY_DIR).resolve() == code / "400S_Sorted_Library"
 
+    install_source_fixture(server, scratch)
+
     from fastapi import Request
     from fastapi.responses import JSONResponse
     from types import SimpleNamespace
@@ -79,7 +134,9 @@ def main():
         SimpleNamespace(tenant_id="isolated-proof", principal_id="reviewer", roles=(), allowed_site_ids=()),
         {"assemblyNumber": "MMLE-50D", "documentType": "illustrated_parts_manual"},
         turn_id="documentation-browser-proof", max_calls=80, timeout=1800,
-        user_message="Change the selected description in this temporary proof document.")
+        user_message=("Resolve only the selected description conflict using merge_text with P1c reviewed merged description."
+                      if (scratch / "source-fixture.json").exists() else
+                      "Change the selected description in this temporary proof document."))
 
     async def tool(request: Request):
         if request.client.host not in {"127.0.0.1", "::1"}:

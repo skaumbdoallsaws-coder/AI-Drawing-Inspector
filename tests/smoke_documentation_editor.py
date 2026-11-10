@@ -239,10 +239,18 @@ class IsolatedDocumentationServer:
             source = safe_source(relative)
             self.original[relative] = sha(source)
             shutil.copyfile(source, self.manual / name)
-        with socket.socket() as probe:
-            probe.bind(("127.0.0.1", 0))
-            port = probe.getsockname()[1]
-        self.url = f"http://127.0.0.1:{port}"
+        return self._launch()
+
+    def _launch(self):
+        previous_url = getattr(self, "url", None)
+        while True:
+            with socket.socket() as probe:
+                probe.bind(("127.0.0.1", 0))
+                port = probe.getsockname()[1]
+            candidate_url = f"http://127.0.0.1:{port}"
+            if candidate_url != previous_url:
+                break
+        self.url = candidate_url
         # An allowlisted environment avoids inherited API credentials/proxies.
         environment = {key: value for key, value in os.environ.items()
                        if key.upper() in {"SYSTEMROOT", "WINDIR", "PATH", "COMSPEC", "PATHEXT"}}
@@ -255,7 +263,7 @@ class IsolatedDocumentationServer:
                            # Packages may live in the user site; keep it importable with APPDATA redirected.
                            PYTHONUSERBASE=site.getuserbase(),
                            INSPECTORPRO_FACILITY_LAYOUT_ROOT=str(self.scratch / "f"))
-        self.log = (self.output / "server.log").open("wb")
+        self.log = (self.output / "server.log").open("ab")
         self.process = subprocess.Popen([sys.executable, str(self.code / "smoke_server.py"), str(self.scratch), str(port)],
             cwd=self.code, env=environment, stdout=self.log, stderr=subprocess.STDOUT,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -267,12 +275,20 @@ class IsolatedDocumentationServer:
             try:
                 with opener.open(self.url + "/__p1a/isolation", timeout=2) as response:
                     self.isolation = json.load(response)
+                    assert Path(self.isolation["snapshot"]).resolve() == self.code
+                    assert self.isolation["dotenvDisabled"] and self.isolation["outboundBlocked"]
+                    assert all(Path(self.isolation["roots"][name]).resolve() == self.stores / short
+                               for name, short in ROOT_NAMES.items())
                     return self
             except OSError:
                 time.sleep(0.2)
         raise RuntimeError("Isolated server readiness timed out")
 
-    def stop(self):
+    def restart(self):
+        self._stop_process()
+        return self._launch()
+
+    def _stop_process(self):
         try:
             if self.process is not None and self.process.poll() is None:
                 self.process.terminate()
@@ -284,6 +300,11 @@ class IsolatedDocumentationServer:
         finally:
             if self.log:
                 self.log.close()
+
+    def stop(self):
+        try:
+            self._stop_process()
+        finally:
             if self.temporary:
                 self.temporary.cleanup()
 
@@ -516,6 +537,276 @@ def run_p1b(page, request, server, output, report, record, begin_edit, tool, fre
     page.remove_listener("response", observe)
 
 
+def run_p1c(page, request, server, output, report, record, begin_edit, tool, fresh_page):
+    """One Chromium, persistent real stores, UI/Sage twins and source-keyed row movement."""
+    import fitz
+
+    started = time.monotonic()
+    plan_path = server.manual / "manual-plan.json"
+    scene_path = server.manual / "documentation-scene.json"
+    # The disposable legacy-shaped plan has no pinned item numbers. This makes
+    # source sorting observable; approved explicit item assignments intentionally
+    # remain fixed in production. The grouping and occurrence membership stay intact.
+    plan = json.loads(plan_path.read_bytes())
+    for section in plan["sections"]:
+        section["itemAssignments"] = []
+    write_json(plan_path, plan)
+    scene_path.unlink(missing_ok=True)
+    report["p1cFixture"] = {"unpinnedItemAssignments": True, "groupingUnchanged": True}
+
+    def base():
+        return server.url + "/api/parts-manual/" + ASSEMBLY
+
+    def get_scene():
+        response = request.get(base() + "/documentation-scene", timeout=120000)
+        if not response.ok:
+            raise RuntimeError(response.text()[:1000])
+        return response.json()
+
+    def review():
+        response = request.get(server.url + "/api/documentation/" + DOC_TYPE + "/" + ASSEMBLY + "/conflicts?limit=100")
+        if not response.ok:
+            raise RuntimeError(response.text()[:1000])
+        return response.json()
+
+    def screenshot(name):
+        filename = "p1c-" + name + ".png"
+        page.screenshot(path=str(output / filename), full_page=True)
+        report.setdefault("visualArtifacts", {})[name] = {"path": (output / filename).relative_to(ROOT).as_posix()}
+
+    def idle():
+        page.wait_for_function("() => !document.querySelector('#documentationWorkspace.busy')", timeout=120000)
+
+    def open_workspace(stale=False):
+        nonlocal page
+        page = fresh_page()
+        page.goto(server.url + "/?assemblyProfile=MMLE-50D", wait_until="domcontentloaded", timeout=90000)
+        page.wait_for_function("""() => window.__compareDbg?.state.partNumber === 'MMLE-50D'
+            && window.__compareDbg.state.assyLiveScene""", timeout=90000)
+        page.evaluate("() => window.__compareDbg.openDocumentationWorkflow()")
+        page.locator("#documentationWorkspace").wait_for(state="visible", timeout=120000)
+        idle()
+        if stale:
+            page.locator("#documentationSourceChanged").wait_for(state="visible")
+            return
+        snapshot = page.evaluate("() => window.__compareDbg.documentationGenerationSnapshot()")
+        if not snapshot["visiblePageCount"]:
+            page.locator("#documentationRefreshRibbon").click()
+            page.wait_for_function("""() => window.__compareDbg.documentationGenerationSnapshot().visiblePageCount > 0
+                && !document.querySelector('#documentationWorkspace.busy')""", timeout=120000)
+        report["workspaceOpens"].append({"phase": "P1c",
+            "after": page.evaluate("() => window.__compareDbg.documentationGenerationSnapshot()")})
+
+    def navigate(page_id):
+        if page.locator("#documentationConflictPane").is_visible():
+            page.get_by_role("button", name="Close review", exact=True).click()
+        for attempt in range(3):
+            page.locator(f'.documentation-page-item[data-page-id="{page_id}"]').click()
+            idle()
+            page.wait_for_timeout(250)
+            if page.evaluate("() => window.__compareDbg.state.partsManualDocumentationPageId") == page_id:
+                return
+        raise RuntimeError("Page activation did not settle")
+
+    def cell(alias):
+        return page.locator(f'#documentationPublicationSurface [data-documentation-edit-target="{alias}"]:visible').first
+
+    def edit(alias, value):
+        target = cell(alias)
+        begin_edit(target)
+        target.fill(value)
+        with page.expect_response(lambda r: r.request.method == "POST" and "/documentation-scene/commands" in r.url,
+                                  timeout=120000) as saved:
+            target.press("Enter")
+        record("p1c_edit_" + alias, saved.value.ok, saved.value.json().get("command"))
+        idle()
+
+    before = get_scene()
+    chosen = next(p for p in before["document"]["pages"] if p.get("pageType") == "manual_section"
+                  and 2 <= len(p.get("bom", [])) <= 12 and not p.get("bomContinuationCount"))
+    row = chosen["bom"][0]
+    target_id = row["cellIds"]["description"]
+    # BOM cells are definition-keyed (part.<definitionId>.<field>) and carry that stable ID in the DOM; only
+    # positional page text has an aliasMap entry.
+    alias = next((a for a, entry in before["document"].get("aliasMap", {}).get(chosen["pageId"], {}).items()
+                  if entry["targetId"] == target_id), target_id)
+    baseline = row["description"]
+    human = "P1c manual service description"
+    generated = "P1c changed generated description"
+    note = "P1c unrelated service note"
+    merged = "P1c reviewed merged description"
+    order_before = [r["definitionId"] for r in chosen["bom"]]
+    open_workspace()
+    navigate(chosen["pageId"])
+    edit(alias, human)
+    cover = next(p for p in before["document"]["pages"] if p["pageType"] == "cover")
+    navigate(cover["pageId"])
+    edit("cover_subtitle", note)
+    record("p1c_two_browser_edits_saved", cell("cover_subtitle").inner_text() == note)
+
+    changed = request.post(server.url + "/__p1c/source-fixture", data={
+        "assemblyNumber": ASSEMBLY, "definitionId": row["definitionId"],
+        "description": generated, "partNumber": "ZZZ-P1c-reordered"})
+    record("p1c_source_fixture_persisted", changed.ok and (server.scratch / "source-fixture.json").is_file(),
+           changed.json())
+    open_workspace(stale=True)
+    record("p1c_source_changed_shown", "Source revision changed" in page.locator("#documentationSourceChanged").inner_text())
+    page.locator("#documentationSourceChanged").get_by_role("button", name="Refresh from source", exact=True).click()
+    dialog = page.locator("#documentationRefreshDialog")
+    dialog.get_by_role("button", name="Refresh now", exact=True).wait_for()
+    record("p1c_refresh_preview", all(value in dialog.inner_text()
+           for value in ("From binding:", "To binding:", "carries to the new source.")), dialog.inner_text())
+    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/refresh"),
+                              timeout=120000) as refreshed:
+        dialog.get_by_role("button", name="Refresh now", exact=True).click()
+    record("p1c_refresh_executed", refreshed.value.ok, refreshed.value.json().get("refreshReceipt"))
+    page.locator("#documentationRefreshReceipt").wait_for(state="visible", timeout=120000)
+    screenshot("refresh-receipt")
+    current = get_scene()
+    conflict = next(c for c in review()["conflicts"] if c["targetId"] == target_id)
+    cid, conflict_hash = conflict["conflictId"], conflict["conflictHash"]
+    record("p1c_single_persistent_conflict", current["openConflictCount"] == 1)
+    moved = next(p for p in current["document"]["pages"] if p["pageId"] == chosen["pageId"])
+    order_after = [r["definitionId"] for r in moved["bom"]]
+    record("p1c_rows_move_by_identity", order_before != order_after and set(order_before) == set(order_after)
+           and order_after[-1] == row["definitionId"]
+           and next(r for r in moved["bom"] if r["definitionId"] == row["definitionId"])["cellIds"]["description"] == target_id,
+           {"before": order_before, "after": order_after})
+    navigate(cover["pageId"])
+    record("p1c_note_survives_refresh", cell("cover_subtitle").inner_text() == note)
+    navigate(chosen["pageId"])
+    marker = cell(alias)
+    record("p1c_current_value_and_page_marker", marker.inner_text() == human
+           and marker.get_attribute("data-documentation-conflict") == cid)
+    screenshot("page-marker")
+    # A double press must review this conflict instead of entering an editor.
+    marker.dblclick()
+    page.locator("#documentationConflictPane").wait_for(state="visible")
+    record("p1c_conflict_blocks_inline_editor", not page.locator('[contenteditable="true"]').count())
+    page.locator(f'[data-conflict-id="{cid}"]').wait_for()
+    card = page.locator(f'[data-conflict-id="{cid}"]')
+    record("p1c_pane_shows_B_C_N", all(card.locator(f'[data-conflict-side="{side}"]').inner_text() == value
+           for side, value in (("B", baseline), ("C", human), ("N", generated))))
+    record("p1c_status_count", page.locator("#documentationConflictCount").inner_text() == "1 conflict")
+    screenshot("conflict-pane")
+
+    page.get_by_role("button", name="Close review", exact=True).click()
+    # Real capture path, as P1b: no fixture raster or forged publication status.
+    page.locator("#documentationCaptureAllRibbon").click(no_wait_after=True)
+    page.wait_for_function("""() => {
+        const figures = (window.__compareDbg.state.partsManualDocumentation?.document?.pages || []).filter(p => p.renderRequest);
+        return figures.length && figures.every(p => p.renderRequest.image?.status === 'ready')
+            && !document.querySelector('#documentationWorkspace.busy');
+    }""", timeout=240000)
+    record("p1c_real_figures_captured", True)
+
+    def export(mode):
+        document = get_scene()["document"]
+        return request.post(base() + "/pdf?mode=" + mode, data={k: document[k]
+            for k in ("sourceRevision", "manualPlanRevision", "documentRevision")}, timeout=120000)
+
+    exported = export("review")
+    record("p1c_review_export_created", exported.ok, exported.json())
+    if not exported.ok:
+        raise RuntimeError("Review export failed: " + exported.text()[:1000])
+    artifact = exported.json()["artifact"]
+    pdf_response = request.get(server.url + artifact["url"], timeout=120000)
+    pdf_bytes = pdf_response.body()
+    (output / "p1c-review.pdf").write_bytes(pdf_bytes)
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as pdf:
+        text = "\n".join(p.get_text() for p in pdf)
+    record("p1c_review_marks_conflict_and_count", "Open manual edit conflict" in text and cid in text
+           and "Open manual edit conflicts: 1; unplaced manual content: 0" in text)
+    blocked = export("customer")
+    record("p1c_customer_export_blocked", not blocked.ok and blocked.json().get("error") == "manual_edit_conflict"
+           and cid in blocked.json().get("details", {}).get("conflictIds", []), blocked.json())
+
+    # Close the tab before stopping so intentional connection shutdowns are not
+    # mislabeled as application failures. fresh_page removes observers first.
+    page = fresh_page()
+    retained = {name: sha(server.manual / name) for name in ("manual-plan.json", "documentation-scene.json")}
+    server.restart()
+    record("p1c_restart_keeps_stores", retained == {name: sha(server.manual / name) for name in retained})
+    open_workspace()
+    navigate(chosen["pageId"])
+    record("p1c_restart_marker_and_count", cell(alias).get_attribute("data-documentation-conflict") == cid
+           and page.locator("#documentationConflictCount").inner_text() == "1 conflict")
+    page.locator("#documentationConflictCount").click()
+    page.locator(f'[data-conflict-id="{cid}"]').wait_for()
+    reopened = review()
+    record("p1c_restart_same_conflict", reopened["conflicts"][0]["conflictHash"] == conflict_hash
+           and reopened["conflicts"][0]["conflictId"] == cid)
+    bound = tool("read_document_pages", {"documentType": DOC_TYPE, "targets": [{"targetId": target_id}]})
+    if not bound.get("ok"):
+        raise RuntimeError(repr(bound))
+    sage = tool("read_document_conflicts", {"documentId": bound["data"]["documentId"]})
+    record("p1c_sage_sees_same_conflict", sage.get("ok") and sage["data"]["conflicts"][0]["conflictId"] == cid
+           and sage["data"]["conflicts"][0]["conflictHash"] == conflict_hash, sage)
+    copies = {name: (server.manual / name).read_bytes() for name in retained}
+
+    def stored_result():
+        state = json.loads(scene_path.read_bytes())
+        history = next(c for c in state["resolutionHistory"] if c["conflictId"] == cid)
+        values = [p["pageElementOverrides"][target_id] for p in state["pages"].values()
+                  if target_id in p.get("pageElementOverrides", {})]
+        return {"values": values, "status": history["status"], "choice": history["resolution"]["choice"],
+                "B": state["generatedBaseline"][target_id], "conflictB": history["B"]}
+
+    card = page.locator(f'[data-conflict-id="{cid}"]')
+    card.get_by_role("textbox", name="Merged text", exact=True).fill(merged)
+    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/conflicts/resolve"),
+                              timeout=120000) as resolved:
+        card.get_by_role("button", name="Merge", exact=True).click()
+    record("p1c_browser_merge_saved", resolved.value.ok, resolved.value.json())
+    page.wait_for_function("() => document.querySelector('#documentationConflictCount')?.textContent === '0 conflicts'")
+    browser_result = stored_result()
+    record("p1c_merge_stays_manual", browser_result["values"] and browser_result["values"][0]["text"] == merged)
+    screenshot("resolved")
+    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/undo"),
+                              timeout=120000) as undone:
+        page.locator("#documentationUndoRibbon").click()
+    record("p1c_browser_undo_succeeded", undone.value.ok)
+    page.locator(f'[data-conflict-id="{cid}"]').wait_for()
+    reopened_conflict = review()["conflicts"][0]
+    record("p1c_undo_reopens_same_conflict", reopened_conflict["conflictHash"] == conflict_hash
+           and all(reopened_conflict[side] == conflict[side] for side in ("B", "C", "N")))
+    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/redo"),
+                              timeout=120000) as redone:
+        page.locator("#documentationRedoRibbon").click()
+    record("p1c_browser_redo_succeeded", redone.value.ok)
+    page.wait_for_function("() => document.querySelector('#documentationConflictCount')?.textContent === '0 conflicts'")
+    record("p1c_redo_same_stored_result", stored_result() == browser_result)
+
+    page = fresh_page()
+    server._stop_process()
+    for name, raw in copies.items():
+        (server.manual / name).write_bytes(raw)
+    server.restart()
+    bound = tool("read_document_pages", {"documentType": DOC_TYPE, "targets": [{"targetId": target_id}]})
+    if not bound.get("ok"):
+        raise RuntimeError(repr(bound))
+    sage_read = tool("read_document_conflicts", {"documentId": bound["data"]["documentId"]})
+    if not sage_read.get("ok"):
+        raise RuntimeError(repr(sage_read))
+    twin = sage_read["data"]["conflicts"][0]
+    sage_result = tool("resolve_document_conflicts", {
+        "documentId": sage_read["data"]["documentId"], "expectedRevision": twin["revision"], "requestId": "p1c-sage-twin",
+        "resolutions": [{"conflictId": cid, "expectedConflictHash": twin["conflictHash"],
+                         "choice": "merge_text", "mergedText": merged}]})
+    record("p1c_sage_merge_saved", sage_result.get("ok"), sage_result)
+    record("p1c_ui_and_sage_agree", stored_result() == browser_result, stored_result())
+    allowed = export("customer")
+    record("p1c_resolved_customer_not_conflict_blocked", allowed.ok or allowed.json().get("error") != "manual_edit_conflict",
+           allowed.json())
+    open_workspace()
+    navigate(chosen["pageId"])
+    record("p1c_resolved_reopen", cell(alias).inner_text() == merged
+           and not cell(alias).get_attribute("data-documentation-conflict")
+           and page.locator("#documentationConflictCount").inner_text() == "0 conflicts")
+    screenshot("resolved-reopen")
+    record("p1c_under_ten_minutes", time.monotonic() - started < 600, time.monotonic() - started)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--phase", required=True, choices=PHASES)
@@ -593,8 +884,8 @@ def main():
         raise RuntimeError("Inline edit did not start after three double presses")
 
     try:
-        if args.phase not in {"P1a", "P1b"}:
-            raise RuntimeError("Only the P1a and P1b cumulative gates are implemented.")
+        if args.phase not in {"P1a", "P1b", "P1c"}:
+            raise RuntimeError("Only the P1a, P1b and P1c gates are implemented.")
         from playwright.sync_api import sync_playwright
         server.start()
         report["isolation"] = server.isolation
@@ -683,170 +974,173 @@ def main():
                 raise RuntimeError(f"Tool HTTP {response.status}: {response.text()[:800]}")
             return response.json()
 
-        copied_scene_hash = sha(server.manual / "documentation-scene.json")
-        before = get_scene()
-        write_json(output / "before.json", before)
-        legacy_before = {name: sha(server.manual / name) for name in ("documentation-scene.json", "manual-plan.json")}
-        record("opening_does_not_rewrite", sha(server.manual / "documentation-scene.json") == copied_scene_hash)
-        chosen = next(p for p in before["document"]["pages"] if p.get("bom"))
-        # Derive the real definition-keyed alias with the production reader,
-        # never an invented HTML fixture or a test-only renderer.
-        initial_read = tool("read_document_pages", {"documentType": DOC_TYPE,
-                            "fromPage": chosen["pageNumber"], "pageCount": 1})
-        if not initial_read.get("ok"):
-            raise RuntimeError("Sage page read failed: " + repr(initial_read))
-        read_page = initial_read["data"]["pages"][0]
-        row = next(block for block in read_page["blocks"] if block["type"] == "parts_list")["rows"][0]
-        alias = row[2].get("legacyTargetId") or row[2].get("id") or row[2]["targetId"]
-        full = tool("read_document_pages", {"documentType": DOC_TYPE,
-                    "targets": [{"pageId": chosen["pageId"], "targetId": alias}]})
-        record("full_target_read_bound", full.get("ok") and full.get("data", {}).get("documentId")
-               and isinstance(full.get("data", {}).get("revision"), int), full)
-        # Even an incomplete gateway must proceed through the real DOM race;
-        # missing metadata stays a failed check, never a skip/pass fallback.
-        stale_arguments = {"documentType": DOC_TYPE, "edits": [{"pageId": chosen["pageId"],
-                           "targetId": alias, "text": "Stale Sage replacement must be refused"}]}
+        if args.phase == "P1c":
+            run_p1c(page, request, server, output, report, record, begin_edit, tool, fresh_page)
+        else:
+            copied_scene_hash = sha(server.manual / "documentation-scene.json")
+            before = get_scene()
+            write_json(output / "before.json", before)
+            legacy_before = {name: sha(server.manual / name) for name in ("documentation-scene.json", "manual-plan.json")}
+            record("opening_does_not_rewrite", sha(server.manual / "documentation-scene.json") == copied_scene_hash)
+            chosen = next(p for p in before["document"]["pages"] if p.get("bom"))
+            # Derive the real definition-keyed alias with the production reader,
+            # never an invented HTML fixture or a test-only renderer.
+            initial_read = tool("read_document_pages", {"documentType": DOC_TYPE,
+                                "fromPage": chosen["pageNumber"], "pageCount": 1})
+            if not initial_read.get("ok"):
+                raise RuntimeError("Sage page read failed: " + repr(initial_read))
+            read_page = initial_read["data"]["pages"][0]
+            row = next(block for block in read_page["blocks"] if block["type"] == "parts_list")["rows"][0]
+            alias = row[2].get("legacyTargetId") or row[2].get("id") or row[2]["targetId"]
+            full = tool("read_document_pages", {"documentType": DOC_TYPE,
+                        "targets": [{"pageId": chosen["pageId"], "targetId": alias}]})
+            record("full_target_read_bound", full.get("ok") and full.get("data", {}).get("documentId")
+                   and isinstance(full.get("data", {}).get("revision"), int), full)
+            # Even an incomplete gateway must proceed through the real DOM race;
+            # missing metadata stays a failed check, never a skip/pass fallback.
+            stale_arguments = {"documentType": DOC_TYPE, "edits": [{"pageId": chosen["pageId"],
+                               "targetId": alias, "text": "Stale Sage replacement must be refused"}]}
 
-        def open_workspace():
-            stored_before = {name: sha(server.manual / name) for name in legacy_before}
-            page.goto(server.url + "/?assemblyProfile=MMLE-50D", wait_until="domcontentloaded", timeout=90000)
-            page.wait_for_function("""() => window.__compareDbg?.state.partNumber === 'MMLE-50D'
-                && window.__compareDbg.state.assyLiveScene""", timeout=90000)
-            page.evaluate("() => window.__compareDbg.openDocumentationWorkflow()")
-            page.locator("#documentationWorkspace").wait_for(state="visible", timeout=120000)
-            page.wait_for_function("""() => window.__compareDbg.state.partsManualDocumentation
-                && !document.querySelector('#documentationWorkspace.busy')""", timeout=120000)
-            snapshot = page.evaluate("() => window.__compareDbg.documentationGenerationSnapshot()")
-            used_refresh = snapshot["visiblePageCount"] == 0
-            if used_refresh:
-                # The real Refresh control calls _documentationReloadWorkflow ->
-                # _documentationRefreshScene({revealAll:true}). No generation,
-                # publication, test-only state changes or localStorage seeding.
-                with page.expect_response(lambda response: response.request.method == "GET"
-                                          and response.url == scene_url, timeout=120000) as refreshed:
-                    page.locator("#documentationRefreshRibbon").click()
-                if not refreshed.value.ok:
-                    raise RuntimeError(f"Refresh scene HTTP {refreshed.value.status}")
-            page.wait_for_function("""() => {
-                const snapshot = window.__compareDbg.documentationGenerationSnapshot();
-                return snapshot.workspaceOpen && !snapshot.blank && snapshot.visiblePageCount > 0
-                    && !document.querySelector('#documentationWorkspace.busy');
-            }""", timeout=120000)
-            revealed = page.evaluate("() => window.__compareDbg.documentationGenerationSnapshot()")
-            report["workspaceOpens"].append({"before": snapshot, "after": revealed, "usedRefresh": used_refresh})
-            number = len(report["workspaceOpens"])
-            record(f"workspace_open_{number}_reveals_saved_pages",
-                   revealed["visiblePageCount"] == len(before["document"]["pages"]), revealed)
-            record(f"workspace_open_{number}_does_not_rewrite_stores", stored_before ==
-                   {name: sha(server.manual / name) for name in legacy_before})
-            page.locator(f'.documentation-page-item[data-page-id="{chosen["pageId"]}"]').click()
+            def open_workspace():
+                stored_before = {name: sha(server.manual / name) for name in legacy_before}
+                page.goto(server.url + "/?assemblyProfile=MMLE-50D", wait_until="domcontentloaded", timeout=90000)
+                page.wait_for_function("""() => window.__compareDbg?.state.partNumber === 'MMLE-50D'
+                    && window.__compareDbg.state.assyLiveScene""", timeout=90000)
+                page.evaluate("() => window.__compareDbg.openDocumentationWorkflow()")
+                page.locator("#documentationWorkspace").wait_for(state="visible", timeout=120000)
+                page.wait_for_function("""() => window.__compareDbg.state.partsManualDocumentation
+                    && !document.querySelector('#documentationWorkspace.busy')""", timeout=120000)
+                snapshot = page.evaluate("() => window.__compareDbg.documentationGenerationSnapshot()")
+                used_refresh = snapshot["visiblePageCount"] == 0
+                if used_refresh:
+                    # The real Refresh control calls _documentationReloadWorkflow ->
+                    # _documentationRefreshScene({revealAll:true}). No generation,
+                    # publication, test-only state changes or localStorage seeding.
+                    with page.expect_response(lambda response: response.request.method == "GET"
+                                              and response.url == scene_url, timeout=120000) as refreshed:
+                        page.locator("#documentationRefreshRibbon").click()
+                    if not refreshed.value.ok:
+                        raise RuntimeError(f"Refresh scene HTTP {refreshed.value.status}")
+                page.wait_for_function("""() => {
+                    const snapshot = window.__compareDbg.documentationGenerationSnapshot();
+                    return snapshot.workspaceOpen && !snapshot.blank && snapshot.visiblePageCount > 0
+                        && !document.querySelector('#documentationWorkspace.busy');
+                }""", timeout=120000)
+                revealed = page.evaluate("() => window.__compareDbg.documentationGenerationSnapshot()")
+                report["workspaceOpens"].append({"before": snapshot, "after": revealed, "usedRefresh": used_refresh})
+                number = len(report["workspaceOpens"])
+                record(f"workspace_open_{number}_reveals_saved_pages",
+                       revealed["visiblePageCount"] == len(before["document"]["pages"]), revealed)
+                record(f"workspace_open_{number}_does_not_rewrite_stores", stored_before ==
+                       {name: sha(server.manual / name) for name in legacy_before})
+                page.locator(f'.documentation-page-item[data-page-id="{chosen["pageId"]}"]').click()
 
-        open_workspace()
-        cell = page.locator(f'#documentationPublicationSurface [data-documentation-edit-target="{alias}"]:visible').first
-        cell.wait_for(state="visible", timeout=30000)
-        original_text = cell.inner_text()
-        human_text = original_text + " P1a browser edit"
-        begin_edit(cell)
-        cell.fill(human_text)
-        with page.expect_response(lambda response: response.request.method == "POST"
-                                  and ("documentation-scene/commands" in response.url or "/edits" in response.url),
-                                  timeout=120000) as response_info:
+            open_workspace()
+            cell = page.locator(f'#documentationPublicationSurface [data-documentation-edit-target="{alias}"]:visible').first
+            cell.wait_for(state="visible", timeout=30000)
+            original_text = cell.inner_text()
+            human_text = original_text + " P1a browser edit"
+            begin_edit(cell)
+            cell.fill(human_text)
+            with page.expect_response(lambda response: response.request.method == "POST"
+                                      and ("documentation-scene/commands" in response.url or "/edits" in response.url),
+                                      timeout=120000) as response_info:
+                cell.press("Enter")
+            response = response_info.value
+            saved = response.json()
+            record("ui_commit_succeeded", response.ok, saved.get("receipt"))
+            after = get_scene()
+            write_json(output / "after.json", after)
+            disk_before_stale = {p.name: sha(p) for p in server.manual.iterdir() if p.is_file()}
+            stale = tool("edit_document_text", stale_arguments)
+            record("stale_sage_host_write_rejected", stale.get("ok") is False and
+                   stale.get("error", {}).get("code") in {"content_hash_mismatch", "stale_revision"}, stale)
+            record("stale_request_keeps_stores_byte_identical", disk_before_stale ==
+                   {p.name: sha(p) for p in server.manual.iterdir() if p.is_file()})
+            open_workspace()
+            reopened_text = page.locator(f'#documentationPublicationSurface [data-documentation-edit-target="{alias}"]:visible').first.inner_text()
+            record("reopen_preserves_human_text", reopened_text == human_text, reopened_text)
+            reopened = get_scene()
+            write_json(output / "reopened.json", reopened)
+            page.screenshot(path=str(output / "reopened.png"), full_page=True)
+            record("scene_upgraded_in_place", reopened["scene"]["schemaVersion"] == 4
+                   and not (server.manual / "edit.json").exists())
+            record("original_v2_bytes_retained", sha(server.manual / "documentation-scene.v2.json") == copied_scene_hash)
+            record("manual_plan_unchanged", sha(server.manual / "manual-plan.json") == legacy_before["manual-plan.json"])
+
+            # A fresh complete read now authorizes one two-target Sage batch.
+            other_alias = row[1].get("legacyTargetId") or row[1]["id"]
+            fresh = tool("read_document_pages", {"documentType": DOC_TYPE, "targets": [
+                {"pageId": chosen["pageId"], "targetId": alias},
+                {"pageId": chosen["pageId"], "targetId": other_alias}]})
+            if not fresh.get("ok"):
+                raise RuntimeError("Fresh full read failed: " + repr(fresh))
+            targets = fresh["data"]["targets"]
+            batch = {"documentId": fresh["data"]["documentId"], "expectedRevision": fresh["data"]["revision"],
+                     "requestId": "p1a-browser-sage-batch", "operations": [
+                         {"operation": "replace_text", "targetId": item["targetId"],
+                          "expectedContentHash": item["contentHash"], "text": item["text"] + " P1a Sage batch"}
+                         for item in targets]}
+            applied = tool("apply_document_edits", batch)
+            record("sage_batch_succeeded", applied.get("ok"), applied)
+            if not applied.get("ok"):
+                raise RuntimeError("Fresh Sage batch failed: " + repr(applied))
+            receipt = applied["data"]["receipt"]
+            persisted = json.loads((server.manual / "documentation-scene.json").read_bytes())
+            record("receipt_and_scene_committed_together",
+                   persisted["receipts"][receipt["requestId"]]["receipt"] == receipt
+                   and persisted["commands"][-1]["operation"] == "batch"
+                   and len(persisted["commands"][-1]["commands"]) == 2)
+            report.update(documentId=receipt["documentId"], revision=receipt["revision"])
+            write_json(output / "committed-scene.json", persisted)
+            committed_files = {p.name: sha(p) for p in server.manual.iterdir() if p.is_file()}
+            retry = tool("apply_document_edits", batch)
+            record("retry_returns_stored_receipt_without_write", retry.get("data", {}).get("receipt") == receipt
+                   and committed_files == {p.name: sha(p) for p in server.manual.iterdir() if p.is_file()})
+            open_workspace()
+            with page.expect_response(lambda response: response.request.method == "POST" and "/undo" in response.url,
+                                      timeout=120000):
+                page.locator("#documentationUndoRibbon").click()
+            open_workspace()
+            record("batch_undo_is_one_step", page.locator(
+                f'#documentationPublicationSurface [data-documentation-edit-target="{alias}"]:visible').first.inner_text() == human_text
+                and page.locator(f'#documentationPublicationSurface [data-documentation-edit-target="{other_alias}"]:visible').first.inner_text() == targets[1]["text"])
+            with page.expect_response(lambda response: response.request.method == "POST" and "/undo" in response.url,
+                                      timeout=120000):
+                page.locator("#documentationUndoRibbon").click()
+            undone = get_scene()
+            write_json(output / "undone.json", undone)
+            open_workspace()
+            undo_text = page.locator(f'#documentationPublicationSurface [data-documentation-edit-target="{alias}"]:visible').first.inner_text()
+            record("ui_undo_and_reopen_restore_prior_text", undo_text == original_text, undo_text)
+            # Hold the real DOM save request, switch through the visible type
+            # selector, then release it. Its response must not replace the sheet.
+            held = []
+            route_pattern = "**/api/parts-manual/MMLE-50D/documentation-scene/commands"
+            page.route(route_pattern, lambda pending: held.append(pending))
+            cell = page.locator(f'#documentationPublicationSurface [data-documentation-edit-target="{alias}"]:visible').first
+            begin_edit(cell)
+            cell.fill(original_text + " delayed save")
             cell.press("Enter")
-        response = response_info.value
-        saved = response.json()
-        record("ui_commit_succeeded", response.ok, saved.get("receipt"))
-        after = get_scene()
-        write_json(output / "after.json", after)
-        disk_before_stale = {p.name: sha(p) for p in server.manual.iterdir() if p.is_file()}
-        stale = tool("edit_document_text", stale_arguments)
-        record("stale_sage_host_write_rejected", stale.get("ok") is False and
-               stale.get("error", {}).get("code") in {"content_hash_mismatch", "stale_revision"}, stale)
-        record("stale_request_keeps_stores_byte_identical", disk_before_stale ==
-               {p.name: sha(p) for p in server.manual.iterdir() if p.is_file()})
-        open_workspace()
-        reopened_text = page.locator(f'#documentationPublicationSurface [data-documentation-edit-target="{alias}"]:visible').first.inner_text()
-        record("reopen_preserves_human_text", reopened_text == human_text, reopened_text)
-        reopened = get_scene()
-        write_json(output / "reopened.json", reopened)
-        page.screenshot(path=str(output / "reopened.png"), full_page=True)
-        record("scene_upgraded_in_place", reopened["scene"]["schemaVersion"] == 4
-               and not (server.manual / "edit.json").exists())
-        record("original_v2_bytes_retained", sha(server.manual / "documentation-scene.v2.json") == copied_scene_hash)
-        record("manual_plan_unchanged", sha(server.manual / "manual-plan.json") == legacy_before["manual-plan.json"])
-
-        # A fresh complete read now authorizes one two-target Sage batch.
-        other_alias = row[1].get("legacyTargetId") or row[1]["id"]
-        fresh = tool("read_document_pages", {"documentType": DOC_TYPE, "targets": [
-            {"pageId": chosen["pageId"], "targetId": alias},
-            {"pageId": chosen["pageId"], "targetId": other_alias}]})
-        if not fresh.get("ok"):
-            raise RuntimeError("Fresh full read failed: " + repr(fresh))
-        targets = fresh["data"]["targets"]
-        batch = {"documentId": fresh["data"]["documentId"], "expectedRevision": fresh["data"]["revision"],
-                 "requestId": "p1a-browser-sage-batch", "operations": [
-                     {"operation": "replace_text", "targetId": item["targetId"],
-                      "expectedContentHash": item["contentHash"], "text": item["text"] + " P1a Sage batch"}
-                     for item in targets]}
-        applied = tool("apply_document_edits", batch)
-        record("sage_batch_succeeded", applied.get("ok"), applied)
-        if not applied.get("ok"):
-            raise RuntimeError("Fresh Sage batch failed: " + repr(applied))
-        receipt = applied["data"]["receipt"]
-        persisted = json.loads((server.manual / "documentation-scene.json").read_bytes())
-        record("receipt_and_scene_committed_together",
-               persisted["receipts"][receipt["requestId"]]["receipt"] == receipt
-               and persisted["commands"][-1]["operation"] == "batch"
-               and len(persisted["commands"][-1]["commands"]) == 2)
-        report.update(documentId=receipt["documentId"], revision=receipt["revision"])
-        write_json(output / "committed-scene.json", persisted)
-        committed_files = {p.name: sha(p) for p in server.manual.iterdir() if p.is_file()}
-        retry = tool("apply_document_edits", batch)
-        record("retry_returns_stored_receipt_without_write", retry.get("data", {}).get("receipt") == receipt
-               and committed_files == {p.name: sha(p) for p in server.manual.iterdir() if p.is_file()})
-        open_workspace()
-        with page.expect_response(lambda response: response.request.method == "POST" and "/undo" in response.url,
-                                  timeout=120000):
-            page.locator("#documentationUndoRibbon").click()
-        open_workspace()
-        record("batch_undo_is_one_step", page.locator(
-            f'#documentationPublicationSurface [data-documentation-edit-target="{alias}"]:visible').first.inner_text() == human_text
-            and page.locator(f'#documentationPublicationSurface [data-documentation-edit-target="{other_alias}"]:visible').first.inner_text() == targets[1]["text"])
-        with page.expect_response(lambda response: response.request.method == "POST" and "/undo" in response.url,
-                                  timeout=120000):
-            page.locator("#documentationUndoRibbon").click()
-        undone = get_scene()
-        write_json(output / "undone.json", undone)
-        open_workspace()
-        undo_text = page.locator(f'#documentationPublicationSurface [data-documentation-edit-target="{alias}"]:visible').first.inner_text()
-        record("ui_undo_and_reopen_restore_prior_text", undo_text == original_text, undo_text)
-        # Hold the real DOM save request, switch through the visible type
-        # selector, then release it. Its response must not replace the sheet.
-        held = []
-        route_pattern = "**/api/parts-manual/MMLE-50D/documentation-scene/commands"
-        page.route(route_pattern, lambda pending: held.append(pending))
-        cell = page.locator(f'#documentationPublicationSurface [data-documentation-edit-target="{alias}"]:visible').first
-        begin_edit(cell)
-        cell.fill(original_text + " delayed save")
-        cell.press("Enter")
-        page.wait_for_timeout(100)
-        if len(held) != 1:
-            raise RuntimeError("Delayed save request was not captured")
-        page.locator("#documentationTypeRibbonTrigger").click()
-        page.locator("#documentationTypeRibbonOption-product_specification_sheet").click()
-        page.wait_for_function("() => window.__compareDbg.state.documentationDocumentType === 'product_specification_sheet'")
-        with page.expect_response(lambda response: response.request.method == "POST"
-                                  and "documentation-scene/commands" in response.url, timeout=120000):
-            held[0].continue_()
-        page.unroute(route_pattern)
-        page.wait_for_timeout(300)
-        record("delayed_save_does_not_retarget_document", page.evaluate("""() => {
-            const s = window.__compareDbg.state;
-            return s.documentationDocumentType === 'product_specification_sheet'
-                && (!s.partsManualDocumentation || s.partsManualDocumentation.document.documentType === 'product_specification_sheet');
-        }"""))
-        page.screenshot(path=str(output / "switched.png"), full_page=True)
-        if args.phase == "P1b":
-            run_p1b(page, request, server, output, report, record, begin_edit, tool, fresh_page)
+            page.wait_for_timeout(100)
+            if len(held) != 1:
+                raise RuntimeError("Delayed save request was not captured")
+            page.locator("#documentationTypeRibbonTrigger").click()
+            page.locator("#documentationTypeRibbonOption-product_specification_sheet").click()
+            page.wait_for_function("() => window.__compareDbg.state.documentationDocumentType === 'product_specification_sheet'")
+            with page.expect_response(lambda response: response.request.method == "POST"
+                                      and "documentation-scene/commands" in response.url, timeout=120000):
+                held[0].continue_()
+            page.unroute(route_pattern)
+            page.wait_for_timeout(300)
+            record("delayed_save_does_not_retarget_document", page.evaluate("""() => {
+                const s = window.__compareDbg.state;
+                return s.documentationDocumentType === 'product_specification_sheet'
+                    && (!s.partsManualDocumentation || s.partsManualDocumentation.document.documentType === 'product_specification_sheet');
+            }"""))
+            page.screenshot(path=str(output / "switched.png"), full_page=True)
+            if args.phase == "P1b":
+                run_p1b(page, request, server, output, report, record, begin_edit, tool, fresh_page)
     except Exception as error:
         report["fatalError"] = f"{type(error).__name__}: {error}"
         if type(error).__name__ == "TimeoutError" and page is not None and not page.is_closed() and probe_session:

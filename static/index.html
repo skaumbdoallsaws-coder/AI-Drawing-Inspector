@@ -11,6 +11,7 @@
     <link rel="stylesheet" href="/static/cad_viewport.css">
     <link rel="stylesheet" href="/static/packaging_ribbon_icons.css">
     <script src="/static/documentation_commands.js?v=20261109-p1b-3"></script>
+    <script src="/static/documentation_conflicts.js?v=20261110-p1c-3"></script>
     <script src="/static/cad_viewport.js"></script>
     <script>
         // Theme bootstrap — set data-theme BEFORE the stylesheet is parsed
@@ -35088,6 +35089,7 @@
                     `Generated ${scenePayload.document?.pageCount || 0} operations-manual pages. Review and export are available.`,
                     'success'
                 );
+                DocumentationConflicts.refreshed(scenePayload);
                 if (ownsWork) {
                     _documentationEndSageWork(
                         work,
@@ -35167,6 +35169,7 @@
                     'Generated the one-page specification sheet with a fresh product capture.',
                     'success'
                 );
+                DocumentationConflicts.refreshed(scenePayload);
                 if (ownsWork) {
                     _documentationEndSageWork(
                         work,
@@ -35257,6 +35260,7 @@
                     `Generated ${scenePayload.document?.pageCount || 0} work-instruction pages from ${stageCount} process stages.`,
                     'success'
                 );
+                DocumentationConflicts.refreshed(scenePayload);
                 if (ownsWork) {
                     _documentationEndSageWork(
                         work,
@@ -38928,6 +38932,75 @@
             }
         }
 
+        function _documentationReviewHost() {
+            return {
+                context: () => ({
+                    kind: _documentationIsOperationsManual() ? 'operations_and_maintenance_manual'
+                        : _documentationIsWorkInstructions() ? 'work_instructions'
+                        : _documentationIsSpecificationSheet() ? 'product_specification_sheet'
+                        : 'illustrated_parts_manual',
+                    number: assemblyContext?.assembly_number,
+                    payload: _documentationPayload(),
+                    pageId: _documentationActivePage()?.pageId,
+                    sourceCurrent: state.partsManualPayload?.sourceCurrent,
+                }),
+                refreshSource: () => _documentationRefreshPartsFromSource(state.partsManualPayload),
+                clearSelection: () => _documentationSelectTarget(null, { silent: true }),
+                reload: async () => {
+                    const base = _documentationApiBase();
+                    const result = await _partsManualApi(base + '/documentation-scene');
+                    if (base === _documentationApiBase()) _documentationUpdatePayload(result);
+                },
+                label: item => {
+                    const page = _documentationAllPages().find(p => p.pageId === item.pageId);
+                    const aliases = _documentationPayload()?.document?.aliasMap?.[item.pageId] || {};
+                    const alias = Object.keys(aliases).find(name => aliases[name].targetId === item.targetId) || item.alias;
+                    return _documentationTargetsForPage(page).find(target => target.targetId === alias)?.name;
+                },
+                focus: async item => {
+                    const pages = _documentationAllPages();
+                    const page = pages.find(p => p.pageId === item.pageId)
+                        || pages.find(p => Object.values(_documentationPayload()?.document?.aliasMap?.[p.pageId] || {})
+                            .some(entry => entry.targetId === item.targetId || (item.scopeId && entry.ownerId === item.scopeId)));
+                    if (!page) return;
+                    await _documentationActivatePage(page.pageId);
+                    const aliases = _documentationPayload()?.document?.aliasMap?.[page.pageId] || {};
+                    const alias = Object.keys(aliases).find(name => aliases[name].targetId === item.targetId)
+                        || Object.keys(aliases).find(name => aliases[name].ownerId === item.targetId || (item.scopeId && aliases[name].ownerId === item.scopeId))
+                        || item.alias;
+                    // Review focuses by scrolling to the marked target; selecting it would raise the floating
+                    // selection toolbar over the review pane, and a conflicted target is not editable.
+                    const node = document.querySelector('#documentationPublicationSurface [data-documentation-conflict="'
+                        + CSS.escape(item.conflictId || item.orphanId) + '"]')
+                        || document.querySelector('#documentationPublicationSurface [data-documentation-edit-target="'
+                            + CSS.escape(alias) + '"]');
+                    node?.scrollIntoView({ block: 'center', inline: 'center' });
+                },
+            };
+        }
+
+        function _documentationSyncReview() {
+            DocumentationConflicts.sync(_documentationReviewHost());
+        }
+
+        function _documentationRefreshPartsFromSource(payload) {
+            const number = payload.assemblyNumber || assemblyContext?.assembly_number;
+            DocumentationConflicts.preview('refresh', {
+                context: () => ({ kind: 'illustrated_parts_manual', number }),
+                reload: async () => {
+                    const fresh = await _partsManualApi('/api/parts-manual/' + encodeURIComponent(number));
+                    state.partsManualPayload = fresh;
+                    _renderPartsManualPanel(fresh);
+                    const scene = await _partsManualApi('/api/parts-manual/' + encodeURIComponent(number) + '/documentation-scene');
+                    _documentationUpdatePayload(scene, { revealAll: true });
+                    if (!document.getElementById('documentationWorkspace')) {
+                        await _showDocumentationWorkspace({ workflowMode: true, restore: true });
+                    }
+                    _documentationSyncReview();
+                },
+            });
+        }
+
         function _documentationUpdatePayload(result, options = {}) {
             state.partsManualDocumentation = result;
             if (options.revealAll) {
@@ -39345,6 +39418,7 @@
 
         function _documentationBeginInlineTextEdit(event, target, element) {
             if (!target || !element || element.isContentEditable) return;
+            if (DocumentationConflicts.blockEdit(_documentationActivePage()?.pageId, target.targetId)) return;
             event?.preventDefault?.();
             event?.stopPropagation?.();
             _documentationSelectTarget(target, { silent: true });
@@ -42488,6 +42562,7 @@
         }
 
         function _specSheetBeginSlotEdit(slot) {
+            if (DocumentationConflicts.blockEdit(_documentationActivePage()?.pageId, 'slot:' + slot)) return;
             if (state.specSheetSaving) {
                 state.specSheetSaving.then(() => _specSheetBeginSlotEdit(slot));
                 return;
@@ -43099,6 +43174,7 @@
                     ? override.text : defaultMeta;
                 _documentationApplyElementStyle(headerMeta, override.style);
                 headerMeta.classList.add('documentation-editable-page-text');
+                headerMeta.dataset.documentationEditTarget = 'header_meta';
                 headerMeta.onpointerdown = event => {
                     event.stopPropagation();
                     _documentationSelectTarget(
@@ -43120,6 +43196,7 @@
                     ? override.text : defaultTitle;
                 _documentationApplyElementStyle(headerTitle, override.style);
                 headerTitle.classList.add('documentation-editable-page-text');
+                headerTitle.dataset.documentationEditTarget = 'header_title';
                 headerTitle.onpointerdown = event => {
                     event.stopPropagation();
                     _documentationSelectTarget(
@@ -43192,6 +43269,7 @@
                     ? override.text : defaultFooter;
                 _documentationApplyElementStyle(left, override.style);
                 left.classList.add('documentation-editable-page-text');
+                left.dataset.documentationEditTarget = 'footer';
                 left.onpointerdown = event => {
                     event.stopPropagation();
                     _documentationSelectTarget(
@@ -43214,6 +43292,7 @@
         }
 
         function _documentationRenderPublicationPage(page, options = {}) {
+            queueMicrotask(_documentationSyncReview);
             const surface = document.getElementById('documentationPublicationSurface');
             const header = document.getElementById('documentationPageHeader');
             const illustration = document.getElementById('documentationIllustrationFrame');
@@ -43270,6 +43349,7 @@
                     ? override.text : defaultMeta;
                 _documentationApplyElementStyle(headerMeta, override.style);
                 headerMeta.classList.add('documentation-editable-page-text');
+                headerMeta.dataset.documentationEditTarget = 'header_meta';
                 headerMeta.onpointerdown = event => {
                     event.stopPropagation();
                     _documentationSelectTarget(
@@ -43289,6 +43369,7 @@
                     ? override.text : defaultTitle;
                 _documentationApplyElementStyle(headerTitle, override.style);
                 headerTitle.classList.add('documentation-editable-page-text');
+                headerTitle.dataset.documentationEditTarget = 'header_title';
                 headerTitle.onpointerdown = event => {
                     event.stopPropagation();
                     _documentationSelectTarget(
@@ -43311,8 +43392,10 @@
                     ? override.text : product;
                 _documentationApplyElementStyle(subtitle, override.style);
                 subtitle.classList.add('documentation-editable-page-text');
+                subtitle.dataset.documentationEditTarget = 'cover_subtitle';
                 subtitle.onpointerdown = event => {
                     event.stopPropagation();
+                    if (_documentationTextPressed('cover_subtitle', event.timeStamp)) return;
                     _documentationSelectTarget(
                         _documentationPageElementTarget(page, 'cover_subtitle'), { silent: true }
                     );
@@ -43521,6 +43604,7 @@
                         ? override.text : defaultFooter;
                     _documentationApplyElementStyle(left, override.style);
                     left.classList.add('documentation-editable-page-text');
+                    left.dataset.documentationEditTarget = 'footer';
                     left.onpointerdown = event => {
                         event.stopPropagation();
                         _documentationSelectTarget(
@@ -44752,6 +44836,12 @@
                 : readiness.findings?.[0]?.message || 'Complete the manual structure before previewing pages.';
             summary.appendChild(summaryText);
             summary.appendChild(sourceState);
+            if (!payload.sourceCurrent) {
+                const refresh = _partsManualButton('Refresh from source', 'primary');
+                refresh.id = 'documentationRefreshSource';
+                refresh.addEventListener('click', () => _documentationRefreshPartsFromSource(payload));
+                summary.appendChild(refresh);
+            }
             body.appendChild(summary);
 
             const proposalActions = document.createElement('div');

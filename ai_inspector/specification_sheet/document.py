@@ -15,7 +15,7 @@ from .slots import (
     FEATURE_COUNT,
     MAX_ROWS,
     PROSE_SLOTS,
-    SLOT_SCHEMA_VERSION,
+    SLOT_LAYOUT_VERSION,
     SOURCE_LABELS,
     SlotStore,
     TemplateStore,
@@ -648,7 +648,7 @@ def build_specification_sheet_document(
         manual_plan_revision = _stable_revision({
             "assemblyNumber": assembly_number,
             "sourceRevision": catalog.get("sourceRevision"),
-            "slotsVersion": SLOT_SCHEMA_VERSION,
+            "slotsVersion": SLOT_LAYOUT_VERSION,
         })
     used = data["usedClaimIds"]
     citations = _citation_receipt(snapshot, used) if profile else []

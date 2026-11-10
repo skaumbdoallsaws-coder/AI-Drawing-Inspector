@@ -24,6 +24,7 @@ def test_contract_has_no_commit_approval_or_shell_capability(setup):
     assert {s["name"] for s in edit_tool_specs()} == {"preview_facility_operations", "preview_facility_undo",
                                                       "preview_planned_design", "preview_floor_plan_import",
                                                       "prepare_model_asset", "register_model_asset"}
+    assert "apply_document_edits" not in {spec["name"] for spec in gateway.specs}
     for spec in gateway.specs:
         Draft202012Validator.check_schema(spec["input_schema"])
 

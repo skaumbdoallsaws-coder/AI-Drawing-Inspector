@@ -473,6 +473,8 @@ def _step(name, args, names, edit_mode):
         return EXPORT, "the fillable specification PDF" if args.get("fillable") else "the specification sheet PDF"
     if name == "read_document_pages":
         return READ, f"the {DOCUMENTS.get(args.get('documentType'), 'document')} pages"
+    if name == "apply_document_edits":
+        return UPDATE, "the document fields"
     if name == "edit_document_text":
         count = len(args.get("edits") or [])
         return UPDATE, (f"{count} text{'' if count == 1 else 's'} in the "

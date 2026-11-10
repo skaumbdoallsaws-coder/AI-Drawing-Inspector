@@ -10,6 +10,7 @@
     <title>InspectorPro</title>
     <link rel="stylesheet" href="/static/cad_viewport.css">
     <link rel="stylesheet" href="/static/packaging_ribbon_icons.css">
+    <script src="/static/documentation_commands.js?v=20261109-p1a-2"></script>
     <script src="/static/cad_viewport.js"></script>
     <script>
         // Theme bootstrap — set data-theme BEFORE the stylesheet is parsed
@@ -38932,6 +38933,7 @@
         }
 
         function _documentationCommandRefreshMode(command) {
+            if (command?.operation === 'batch' && command.commands?.every(item => item.operation === 'update_text')) return 'page_only';
             const operation = String(command?.operation || '');
             const targetType = String(command?.targetType || '');
             if (['document_theme', 'page_element', 'document_object'].includes(targetType)) {
@@ -39055,9 +39057,31 @@
             return mode;
         }
 
+        async function _documentationReportSaveError(bound, error) {
+            const current = () => DocumentationCommands.isCurrent(bound, _documentationPayload(), _documentationApiBase());
+            if (!current()) return;
+            if (/revision|hash|conflict|stale|changed/i.test(String(error?.message || ''))) {
+                try {
+                    const latest = await _partsManualApi(bound.apiBase + '/documentation-scene');
+                    if (!current()) return;
+                    // Refresh only the bound model. Keep the rejected draft on
+                    // the canvas for copying/review; reopening redraws it.
+                    state.partsManualDocumentation = latest;
+                    _documentationRenderPageRail();
+                    _documentationUpdateToolbar();
+                } catch (_) {
+                    if (!current()) return;
+                }
+            }
+            _documentationSetStatus(DocumentationCommands.message(error), 'error');
+        }
+
         async function _documentationDispatchCommand(operation, translation = null, options = {}) {
-            const payload = _documentationPayload();
-            const page = _documentationActivePage();
+            const bound = options.editContext || DocumentationCommands.capture(
+                _documentationPayload(), _documentationActivePage(), _documentationApiBase());
+            const payload = bound?.payload;
+            const page = bound?.page;
+            const stillCurrent = () => DocumentationCommands.isCurrent(bound, _documentationPayload(), _documentationApiBase());
             const selection = options.selection || state.partsManualDocumentationSelection;
             const globalOperation = ['set_theme', 'apply_template'].includes(operation);
             if (!payload || !page || (!selection && operation !== 'arrange' && !globalOperation)) {
@@ -39101,13 +39125,14 @@
                 if (options.theme) body.theme = options.theme;
                 if (options.pageMasters) body.pageMasters = options.pageMasters;
                 const result = await _partsManualApi(
-                    `${_documentationApiBase(payload.scene.assemblyNumber)}/documentation-scene/commands`,
+                    `${bound.apiBase}/documentation-scene/commands`,
                     {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(body),
                     }
                 );
+                if (!stillCurrent()) return true;
                 const appliedCommand = result.command || body;
                 _documentationUpdatePayload(result);
                 const updatedPage = _documentationActivePage();
@@ -39182,11 +39207,13 @@
                 );
                 return true;
             } catch (error) {
-                _documentationSetStatus(error.message, 'error');
+                await _documentationReportSaveError(bound, error);
                 return false;
             } finally {
-                _documentationSetBusy(false);
-                _documentationRenderPageRail();
+                if (_documentationApiBase() === bound?.apiBase) {
+                    _documentationSetBusy(false);
+                    _documentationRenderPageRail();
+                }
             }
         }
 
@@ -39308,6 +39335,7 @@
             event?.preventDefault?.();
             event?.stopPropagation?.();
             _documentationSelectTarget(target, { silent: true });
+            const editContext = DocumentationCommands.capture(_documentationPayload(), _documentationActivePage(), _documentationApiBase());
             const original = element.textContent || '';
             element.contentEditable = 'true';
             element.spellcheck = true;
@@ -39332,6 +39360,7 @@
                 await _documentationDispatchCommand('update_text', null, {
                     selection: target,
                     text: value,
+                    editContext,
                 });
             };
             const onBlur = () => finish(false);
@@ -39660,6 +39689,8 @@
         async function _documentationMoveHistory(direction) {
             const payload = _documentationPayload();
             if (!payload) return;
+            const bound = DocumentationCommands.capture(payload, _documentationActivePage(), _documentationApiBase());
+            const stillCurrent = () => DocumentationCommands.isCurrent(bound, _documentationPayload(), _documentationApiBase());
             const commands = payload.scene?.commands || [];
             const cursor = Number(payload.scene?.historyCursor || 0);
             const historyCommand = direction === 'undo'
@@ -39668,7 +39699,7 @@
             _documentationSetBusy(true, direction === 'undo' ? 'Undoing...' : 'Redoing...');
             try {
                 const result = await _partsManualApi(
-                    `${_documentationApiBase(payload.scene.assemblyNumber)}/documentation-scene/${direction}`,
+                    `${bound.apiBase}/documentation-scene/${direction}`,
                     {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -39679,6 +39710,7 @@
                         }),
                     }
                 );
+                if (!stillCurrent()) return;
                 const selection = state.partsManualDocumentationSelection;
                 _documentationUpdatePayload(result);
                 const page = _documentationActivePage();
@@ -39695,10 +39727,12 @@
                 _documentationSelectTarget(restored, { silent: true });
                 _documentationSetStatus(direction === 'undo' ? 'Undid the last edit.' : 'Redid the edit.', 'success');
             } catch (error) {
-                _documentationSetStatus(error.message, 'error');
+                await _documentationReportSaveError(bound, error);
             } finally {
-                _documentationSetBusy(false);
-                _documentationRenderPageRail();
+                if (_documentationApiBase() === bound.apiBase) {
+                    _documentationSetBusy(false);
+                    _documentationRenderPageRail();
+                }
             }
         }
 
@@ -42409,6 +42443,7 @@
             const info = _specSheetSlot(slot);
             if (!element || !info || element.isContentEditable) return;
             _specSheetSelectSlot(slot, element);
+            const editContext = DocumentationCommands.capture(_documentationPayload(), _documentationActivePage(), _documentationApiBase());
             const original = info.open ? '' : String(info.value || '');
             element.classList.remove('open', 'spec-slot-overflow');
             element.style.fontSize = '';
@@ -42438,7 +42473,7 @@
                     const what = /\.label$/.test(slot) ? 'Row name' : info.name;
                     const result = await _specSheetPost(
                         'values', { values: [{ slot, value }] },
-                        value ? `${what} saved.` : `${what} cleared.`
+                        value ? `${what} saved.` : `${what} cleared.`, editContext
                     );
                     saved = Boolean(result);
                     current = result?.renamedSlots?.[slot] || slot;
@@ -42471,11 +42506,14 @@
             element.addEventListener('keydown', onKeyDown);
         }
 
-        async function _specSheetPost(path, body, message = '') {
+        async function _specSheetPost(path, body, message = '', editContext = null) {
             const documentModel = _specSheetDocument();
             const assembly = documentModel?.product?.assemblyNumber
                 || _documentationPayload()?.scene?.assemblyNumber;
             if (!assembly) return null;
+            const bound = editContext || DocumentationCommands.capture(_documentationPayload(), _documentationActivePage(), _documentationApiBase(assembly));
+            const stillCurrent = () => DocumentationCommands.isCurrent(bound, _documentationPayload(), _documentationApiBase());
+            const requestBody = DocumentationCommands.slotRequest(bound, path, body);
             const previous = state.specSheetSaving;
             let release = () => {};
             const saving = new Promise(resolve => { release = resolve; });
@@ -42484,13 +42522,14 @@
             _documentationSetStatus('Saving...');
             try {
                 const result = await _partsManualApi(
-                    `${_documentationApiBase(assembly)}/${path}`,
+                    `${bound.apiBase}/${path}`,
                     {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(body),
+                        body: JSON.stringify(requestBody),
                     }
                 );
+                if (!stillCurrent()) return null;
                 const renamed = result?.renamedSlots || {};
                 if (renamed[state.specSheetSlotSelected]) {
                     state.specSheetSlotSelected = renamed[state.specSheetSlotSelected];
@@ -42500,8 +42539,7 @@
                 _documentationSetStatus(message || 'Saved.');
                 return result;
             } catch (error) {
-                _documentationSetStatus(error?.message || 'The sheet could not be saved.', 'error');
-                _documentationRenderPublicationPage(_documentationActivePage());
+                await _documentationReportSaveError(bound, error);
                 return null;
             } finally {
                 if (state.specSheetSaving === saving) state.specSheetSaving = null;

@@ -825,7 +825,7 @@ def test_table_cells_list_items_and_captions_are_edited_on_the_page_and_exported
     assert "Edited cell 42 Nm" in sheet.get_text()
 
 
-def test_sage_reads_and_edits_page_text_through_the_page_routes(tmp_path: Path, monkeypatch) -> None:
+def test_sage_reads_and_edits_page_text_through_one_batch(tmp_path: Path, monkeypatch) -> None:
     from ai_inspector.codex_runtime.documentation_tools import document_page_text
     from ai_inspector.codex_runtime.policy import PilotError
 
@@ -839,9 +839,19 @@ def test_sage_reads_and_edits_page_text_through_the_page_routes(tmp_path: Path, 
     shown = document_page_text(page)
     cell = next(block for block in shown["blocks"] if block["id"] == table["blockId"])["rows"][0][0]
     assert cell["id"] == f"{table['blockId']}.r0.c0"
-    changed = host.edit_document_text("MMLE-50D", "operations_and_maintenance_manual", [
+    edits = [
         {"pageId": page["pageId"], "targetId": cell["id"], "text": "Sage cell"},
-        {"pageId": paragraph_page["pageId"], "targetId": paragraph["blockId"], "text": "Sage paragraph."}])
+        {"pageId": paragraph_page["pageId"], "targetId": paragraph["blockId"], "text": "Sage paragraph."}]
+    from ai_inspector.documentation.targets import ReadBindings, read_targets
+    from ai_inspector.documentation.commands import DocumentEditError
+    snapshot = host.document_snapshot("MMLE-50D", "operations_and_maintenance_manual")
+    read = read_targets(snapshot["state"], snapshot["targets"], edits)
+    cache = ReadBindings("test-turn")
+    cache.record("operations_and_maintenance_manual", read)
+    observed = cache.bind("operations_and_maintenance_manual", {"edits": edits})
+    result = host.edit_document_text("MMLE-50D", "operations_and_maintenance_manual", edits, observed=observed)
+    changed = result["changed"]
+    assert result["receipt"]["undoable"]
     assert [row["targetId"] for row in changed] == [cell["id"], paragraph["blockId"]]
     after = {row["pageId"]: row for row in host.document_pages("MMLE-50D", "operations_and_maintenance_manual")}
     shown = document_page_text(after[page["pageId"]])
@@ -849,10 +859,10 @@ def test_sage_reads_and_edits_page_text_through_the_page_routes(tmp_path: Path, 
         "Sage cell")
     assert next(block for block in document_page_text(after[paragraph_page["pageId"]])["blocks"]
                 if block["id"] == paragraph["blockId"])["text"] == "Sage paragraph."
-    with pytest.raises(PilotError) as refused:
+    with pytest.raises(DocumentEditError) as refused:
         host.edit_document_text("MMLE-50D", "operations_and_maintenance_manual", [
             {"pageId": page["pageId"], "targetId": "not-on-this-page", "text": "x"}])
-    assert refused.value.code == "document_text_edit_failed"
+    assert refused.value.code == "document_read_required"
 
 
 def test_a_text_edit_keeps_the_figures_captured_and_a_figure_edit_does_not(tmp_path: Path, monkeypatch) -> None:

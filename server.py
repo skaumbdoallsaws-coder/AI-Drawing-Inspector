@@ -46,6 +46,13 @@ from typing import (
 )
 from urllib.parse import urlsplit
 
+from ai_inspector.documentation.commands import (
+    DocumentEditError, document_id as documentation_document_id, binding as documentation_binding_data,
+    content_hash as documentation_content_hash, request_hash as documentation_request_hash,
+    prior_receipt as documentation_prior_receipt, operation_store as documentation_operation_store,
+)
+from ai_inspector.documentation.targets import text_targets as documentation_text_targets, hash_values as documentation_hash_values
+
 from dotenv import load_dotenv
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -16050,7 +16057,7 @@ class DocumentationTemplateSaveBody(BaseModel):
 
 
 def _operations_manual_scene_repository() -> DocumentationSceneRepository:
-    return DocumentationSceneRepository(OPERATIONS_MANUAL_ROOT)
+    return DocumentationSceneRepository(OPERATIONS_MANUAL_ROOT, "operations_and_maintenance_manual")
 
 
 def _operations_manual_base_document(
@@ -16215,7 +16222,7 @@ def _operations_manual_error_response(
 
 
 def _specification_sheet_scene_repository() -> DocumentationSceneRepository:
-    return DocumentationSceneRepository(SPECIFICATION_SHEET_ROOT)
+    return DocumentationSceneRepository(SPECIFICATION_SHEET_ROOT, "product_specification_sheet")
 
 
 _SPECIFICATION_SHEET_EXTENTS_CACHE: Dict[Tuple[Any, ...], Optional[Dict[str, float]]] = {}
@@ -16341,12 +16348,16 @@ def _specification_sheet_build_document_with_scene(
         documentation_scene=loaded_scene["scene"],
         documentation_scene_revision=str(loaded_scene["revision"]),
     )
+    snapshot = _documentation_snapshot_payload({**loaded_scene, "document": document}, "product_specification_sheet")
+    loaded_scene["slotBinding"] = {**documentation_binding_data(snapshot["state"]), "hashes": snapshot["hashes"]}
     return document, loaded_scene
 
 
 def _specification_sheet_error_response(
     error: Exception, *, operation: str
 ) -> JSONResponse:
+    if isinstance(error, DocumentEditError):
+        return JSONResponse(status_code=409, content={"success": False, "error": error.code, "message": str(error), **error.details})
     if isinstance(error, DocumentationSceneConflictError):
         return JSONResponse(
             status_code=409,
@@ -16387,7 +16398,7 @@ def _specification_sheet_error_response(
 
 
 def _work_instruction_scene_repository() -> DocumentationSceneRepository:
-    return DocumentationSceneRepository(WORK_INSTRUCTION_ROOT)
+    return DocumentationSceneRepository(WORK_INSTRUCTION_ROOT, "work_instructions")
 
 
 def _work_instruction_process_inputs(
@@ -18401,14 +18412,52 @@ async def specification_sheet_page_render(
 
 # Specification-sheet slots (docs/specification-sheet-slots-plan.md): the values the user types or says, the row
 # list, accepting unreviewed values, the units and machine type, and the per-type templates.
+class DocumentationSlotEditBinding(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    documentId: str = Field(min_length=1, max_length=128)
+    expectedRevision: int = Field(ge=0)
+    sourceRevision: str = Field(min_length=1, max_length=160)
+    manualPlanRevision: str = Field(min_length=1, max_length=160)
+    requestId: str = Field(min_length=1, max_length=128)
+    hashes: Dict[str, str] = Field(min_length=1, max_length=41)
+    payload: Optional[Dict[str, Any]] = None
+
+
+def _specification_sheet_observed(body, kind):
+    if body.editBinding is None:
+        return None
+    observed = body.editBinding.model_dump()
+    # Hash the actual operation, never a caller's account of its payload.
+    observed["payload"] = {"kind": kind, "body": body.model_dump(exclude={"editBinding"})}
+    hashes = observed["hashes"]
+    if kind == "values":
+        required = {"slot:" + str(item.get("slot")) for item in body.values}
+        if any(key.endswith(".label") for key in required):
+            required.add("@sheet")
+    elif kind == "accept":
+        required = {"slot:" + key for key in body.slots}
+    else:
+        required = {"@sheet"}
+    if "@sheet" not in hashes and not required.issubset(hashes):
+        raise DocumentEditError("document_read_required", "Every edited field requires its observed hash.")
+    if "@sheet" in required and "@sheet" not in hashes:
+        raise DocumentEditError("document_read_required", "Read the sheet structure before changing it.")
+    return observed
+
+
 class SpecificationSheetValuesBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    editBinding: Optional[DocumentationSlotEditBinding] = None
 
     values: List[Dict[str, Any]] = Field(min_length=1, max_length=40)
 
 
 class SpecificationSheetRowsBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    editBinding: Optional[DocumentationSlotEditBinding] = None
 
     operation: str
     key: Optional[str] = None
@@ -18422,11 +18471,15 @@ class SpecificationSheetRowsBody(BaseModel):
 class SpecificationSheetAcceptBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    editBinding: Optional[DocumentationSlotEditBinding] = None
+
     slots: List[str] = Field(min_length=1, max_length=40)
 
 
 class SpecificationSheetSettingsBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    editBinding: Optional[DocumentationSlotEditBinding] = None
 
     units: Optional[str] = None
     type: Optional[str] = None
@@ -18435,6 +18488,8 @@ class SpecificationSheetSettingsBody(BaseModel):
 
 class SpecificationSheetTemplateBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    editBinding: Optional[DocumentationSlotEditBinding] = None
 
     type: str
 
@@ -18449,27 +18504,57 @@ _SPECIFICATION_SHEET_SLOT_ERRORS = (
 )
 
 
-def _specification_sheet_slot_change(assembly_number: str, change) -> Dict[str, Any]:
-    """Apply one change to the sheet's stored slots and return the sheet as the viewport shows it."""
-    assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
-    base = _specification_sheet_compile(assembly_data, catalog)
-    store = SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, str(catalog["assemblyNumber"]))
-    outcome = change(base, store) or {}
-    try:
-        document, loaded_scene = _specification_sheet_build_document_with_scene(
-            assembly_data=assembly_data,
-            catalog=catalog,
-        )
-    except DocumentationSceneBindingError:
-        document, loaded_scene = _specification_sheet_compile(assembly_data, catalog), {}
-    return {
-        "success": True,
-        **loaded_scene,
-        **outcome,
-        "document": document,
-        "occurrences": catalog["occurrences"],
-        "editableTargets": _operations_manual_editable_page_targets(document),
-    }
+def _documentation_snapshot_payload(payload, document_type):
+    document, scene = payload["document"], payload["scene"]
+    number = str(scene["assemblyNumber"])
+    stored = (SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, number).read()
+              if document_type == "product_specification_sheet" else scene)
+    state = {"documentId": documentation_document_id(document_type, number),
+             "revision": stored["editRevision"], "sourceRevision": str(document["sourceRevision"]),
+             "manualPlanRevision": str(document["manualPlanRevision"]), "sceneRevision": payload["revision"],
+             "fieldVersions": stored["fieldVersions"], "editEpoch": stored["editEpoch"], "scene": scene}
+    targets = documentation_text_targets(state, document)
+    hashes = {key: documentation_content_hash(state, key, value)
+              for key, value in documentation_hash_values(targets).items()}
+    if document_type == "product_specification_sheet":
+        # Structural operations depend on the entire row/settings/value collection.
+        hashes["@sheet"] = documentation_content_hash(state, "@sheet", {
+            "slots": document["slots"], "sheet": document["sheet"], "sourceRevision": state["sourceRevision"],
+            "manualPlanRevision": state["manualPlanRevision"]})
+    return {"state": state, "targets": targets, "hashes": hashes, "document": document}
+
+
+def _documentation_check_binding(observed, state):
+    for key in ("documentId", "sourceRevision", "manualPlanRevision"):
+        if observed.get(key) != state[key]:
+            raise DocumentEditError("document_binding_changed", "The document or its source binding changed.", field=key)
+
+
+def _specification_sheet_slot_change(assembly_number: str, change, *, observed=None, actor="user") -> Dict[str, Any]:
+    """One in-place slot transaction, including compound row/returned-value changes."""
+    with DocumentationSceneRepository.transaction_lock, SpecificationSlotStore.transaction_lock:
+        assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
+        if observed is None:
+            base, loaded_scene = _specification_sheet_compile(assembly_data, catalog), {}
+        else:
+            base, loaded_scene = _specification_sheet_build_document_with_scene(assembly_data=assembly_data, catalog=catalog)
+        store = SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, str(catalog["assemblyNumber"]))
+        options = {}
+        if observed is not None:
+            snapshot = _documentation_snapshot_payload({**loaded_scene, "document": base}, "product_specification_sheet")
+            _documentation_check_binding(observed, snapshot["state"])
+            options = {"expected_revision": observed["expectedRevision"], "request_id": observed["requestId"],
+                       "expected_hashes": observed["hashes"], "current_hashes": snapshot["hashes"],
+                       "payload": observed, "actor": actor}
+        outcome = store.transaction(lambda candidate: change(base, candidate), **options) or {}
+        try:
+            document, loaded_scene = _specification_sheet_build_document_with_scene(assembly_data=assembly_data, catalog=catalog)
+        except DocumentationSceneBindingError:
+            document, loaded_scene = _specification_sheet_compile(assembly_data, catalog), {}
+        return {"success": True, **loaded_scene, **outcome,
+                **({"receipt": store.last_receipt} if store.last_receipt is not None else {}),
+                "document": document, "occurrences": catalog["occurrences"],
+                "editableTargets": _operations_manual_editable_page_targets(document)}
 
 
 def _specification_sheet_store_values(
@@ -18641,6 +18726,7 @@ def specification_sheet_values(assembly_number: str, body: SpecificationSheetVal
         return _specification_sheet_slot_change(
             assembly_number,
             lambda base, store: _specification_sheet_store_values(base, store, body.values, "workspace"),
+            observed=_specification_sheet_observed(body, "values"),
         )
     except _SPECIFICATION_SHEET_SLOT_ERRORS as error:
         return _specification_sheet_error_response(error, operation="values")
@@ -18652,6 +18738,7 @@ def specification_sheet_rows(assembly_number: str, body: SpecificationSheetRowsB
         return _specification_sheet_slot_change(
             assembly_number,
             lambda base, store: _specification_sheet_rows_change(base, store, body),
+            observed=_specification_sheet_observed(body, "rows"),
         )
     except _SPECIFICATION_SHEET_SLOT_ERRORS as error:
         return _specification_sheet_error_response(error, operation="rows")
@@ -18666,7 +18753,7 @@ def specification_sheet_accept(assembly_number: str, body: SpecificationSheetAcc
         return {"acceptedSlots": store.accept(body.slots, "workspace")}
 
     try:
-        return _specification_sheet_slot_change(assembly_number, change)
+        return _specification_sheet_slot_change(assembly_number, change, observed=_specification_sheet_observed(body, "accept"))
     except _SPECIFICATION_SHEET_SLOT_ERRORS as error:
         return _specification_sheet_error_response(error, operation="accept")
 
@@ -18681,7 +18768,7 @@ def specification_sheet_settings(assembly_number: str, body: SpecificationSheetS
         return {}
 
     try:
-        return _specification_sheet_slot_change(assembly_number, change)
+        return _specification_sheet_slot_change(assembly_number, change, observed=_specification_sheet_observed(body, "settings"))
     except _SPECIFICATION_SHEET_SLOT_ERRORS as error:
         return _specification_sheet_error_response(error, operation="settings")
 
@@ -18692,6 +18779,7 @@ def specification_sheet_template_approve(assembly_number: str, body: Specificati
         return _specification_sheet_slot_change(
             assembly_number,
             lambda _base, store: _specification_sheet_approve_template(store, body.type, "workspace"),
+            observed=_specification_sheet_observed(body, "template"),
         )
     except _SPECIFICATION_SHEET_SLOT_ERRORS as error:
         return _specification_sheet_error_response(error, operation="template_approve")
@@ -41142,23 +41230,24 @@ class _DocumentationAgentHost:
                       "unreviewed": sum(1 for item in view["findings"] if item["topic"] == "unreviewed"),
                       "captureCurrent": view["export"]["captureCurrent"]},
         }
-        if detail:
-            data["specificationSheet"] = view
+        data["specificationSheet"] = view
         return {"ok": True, "data": data}
 
     def specification_sheet(self, assembly_number):
-        """The sheet as Sage reads it: each slot's value and source (open ones with their hint), the rows, the
-        machine type and its names, the units, the release gate, the approved types, and whether the product picture
-        is current, so the sheet can be exported now."""
-        assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
-        document = _specification_sheet_compile(assembly_data, catalog)
-        try:
-            bound, _scene = _specification_sheet_build_document_with_scene(assembly_data=assembly_data,
-                                                                           catalog=catalog)
-            capture_current = specification_export_readiness(bound)["status"] == "READY"
-        except DocumentationSceneError:
-            capture_current = False
-        return self._specification_view(document, capture_current)
+        with DocumentationSceneRepository.transaction_lock, SpecificationSlotStore.transaction_lock:
+            snapshot = self.document_snapshot(assembly_number, "product_specification_sheet")
+            document, state = snapshot["document"], snapshot["state"]
+            view = self._specification_view(document, specification_export_readiness(document)["status"] == "READY")
+            view.update(documentation_binding_data(state))
+            view["sceneRevision"] = state["sceneRevision"]
+            view["structureHash"] = snapshot["hashes"]["@sheet"]
+            for slot, entry in view["slots"].items():
+                target = snapshot["targets"]["slot:" + slot]
+                entry.update({"targetId": target["targetId"], "pageId": target["pageId"],
+                              "contentHash": snapshot["hashes"][target["targetId"]], "hashVersion": 1,
+                              "isExcerpt": False, "fullLength": len(target["text"]),
+                              "provenance": copy.deepcopy(document["slots"][slot]), "capabilities": ["set_slot_value"]})
+            return view
 
     def _specification_view(self, document, capture_current):
         slots, sheet, gate = document["slots"], document["sheet"], document["releaseGate"]
@@ -41211,10 +41300,13 @@ class _DocumentationAgentHost:
             return result
 
         try:
-            response = _specification_sheet_slot_change(assembly_number, change)
+            response = _specification_sheet_slot_change(assembly_number, change, observed=payload.get("_edit"), actor="sage")
+        except DocumentEditError:
+            raise
         except _SPECIFICATION_SHEET_SLOT_ERRORS as exc:
             raise PilotError("specification_sheet_change_failed", self._short(exc), 422) from exc
-        return {**outcome, "sheet": {"openSlots": response["document"]["releaseGate"].get("openSlotCount"),
+        return {**outcome, **({"receipt": response["receipt"]} if "receipt" in response else {}),
+                "sheet": {"openSlots": response["document"]["releaseGate"].get("openSlotCount"),
                                      "gate": response["document"]["releaseGate"].get("message"),
                                      "rows": [{"key": row["key"], "label": row["label"], "unit": row.get("unit")}
                                               for row in response["document"]["sheet"].get("rows") or []]}}
@@ -41223,6 +41315,8 @@ class _DocumentationAgentHost:
     # documentation-scene routes the page's own double-click edits use, so Sage's edits are the user's kind
     # (pageElementOverrides) and the exports use them.
     _TEXT_ROUTES = {
+        "product_specification_sheet": ("specification_sheet_documentation_scene_get",
+                                        "specification_sheet_documentation_scene_command"),
         "operations_and_maintenance_manual": ("operations_manual_documentation_scene_get",
                                               "operations_manual_documentation_scene_command"),
         "work_instructions": ("work_instructions_documentation_scene_get",
@@ -41233,7 +41327,7 @@ class _DocumentationAgentHost:
 
     def _text_scene(self, assembly_number, document_type):
         from ai_inspector.codex_runtime.policy import PilotError
-        if is_library_machine(assembly_profiles.get(assembly_number)):
+        if document_type != "product_specification_sheet" and is_library_machine(assembly_profiles.get(assembly_number)):
             raise PilotError("library_machine_bodies", f"{assembly_number} is a library machine: only the "
                              "Specification Sheet is offered for it.", 409)
         payload = globals()[self._TEXT_ROUTES[document_type][0]](assembly_number)
@@ -41242,27 +41336,84 @@ class _DocumentationAgentHost:
         return payload
 
     def document_pages(self, assembly_number, document_type):
-        return self._text_scene(assembly_number, document_type)["document"].get("pages") or []
+        return self.document_snapshot(assembly_number, document_type)["document"].get("pages") or []
 
-    def edit_document_text(self, assembly_number, document_type, edits):
-        from ai_inspector.codex_runtime.policy import PilotError
-        scene = self._text_scene(assembly_number, document_type)
-        command = globals()[self._TEXT_ROUTES[document_type][1]]
-        revision, document = scene["revision"], scene["document"]
-        changed = []
-        for edit in edits:
-            response = command(assembly_number, DocumentationSceneCommandBody(
-                baseRevision=revision, sourceRevision=str(document["sourceRevision"]),
-                manualPlanRevision=str(document["manualPlanRevision"]), operation="update_text",
-                pageId=edit["pageId"], targetType="page_element", targetId=edit["targetId"],
-                text=edit["text"], actor="sage"))
-            if isinstance(response, JSONResponse):
-                made = f" The {len(changed)} edit(s) before it were made." if changed else ""
-                raise PilotError("document_text_edit_failed",
-                                 f"{edit['targetId'][:80]}: {self._error(response)['message']}{made}", 422)
-            revision = response["revision"]
-            changed.append({"pageId": edit["pageId"], "targetId": edit["targetId"]})
-        return changed
+    @staticmethod
+    def _edit_repository(document_type):
+        factory = {"illustrated_parts_manual": _documentation_scene_repository,
+                   "operations_and_maintenance_manual": _operations_manual_scene_repository,
+                   "work_instructions": _work_instruction_scene_repository,
+                   "product_specification_sheet": _specification_sheet_scene_repository}.get(document_type)
+        if factory is None:
+            raise DocumentEditError("invalid_document_operation", "This document has no prose editing capability.")
+        return factory()
+
+    def document_snapshot(self, assembly_number, document_type):
+        with DocumentationSceneRepository.transaction_lock, SpecificationSlotStore.transaction_lock:
+            return _documentation_snapshot_payload(self._text_scene(assembly_number, document_type), document_type)
+
+    def edit_document_text(self, assembly_number, document_type, edits, *, observed=None):
+        if observed is None:
+            raise DocumentEditError("document_read_required", "Read the complete targets before editing.")
+        result = self.apply_document_edits(assembly_number, document_type, observed)
+        return {"changed": [{"pageId": e["pageId"], "targetId": e["targetId"]} for e in edits],
+                "receipt": result["receipt"]}
+
+    def apply_document_edits(self, assembly_number, document_type, observed):
+        operations = observed["operations"]
+        destination = documentation_operation_store(operations)
+        if destination == "slots":
+            if document_type != "product_specification_sheet":
+                raise DocumentEditError("invalid_document_operation", "This document has no specification slots.")
+            # Generic agent value writes have the same user-stated-value guard in
+            # the gateway as provide_document_values; no source/approval input.
+            hashes = {op["targetId"]: op["expectedContentHash"] for op in operations}
+            if any(op["targetId"].endswith(".label") for op in operations):
+                if not observed.get("structureHash"):
+                    raise DocumentEditError("document_read_required", "Read the sheet before changing a row label.")
+                hashes["@sheet"] = observed["structureHash"]
+            return self.specification_sheet_change(assembly_number, "values", {
+                "source": "chat", "values": [{"slot": op["targetId"].removeprefix("slot:"), "value": op["value"]}
+                                              for op in operations],
+                "_edit": {**observed, "hashes": hashes}})
+        if document_type == "product_specification_sheet":
+            raise DocumentEditError("invalid_document_operation", "Use typed slot value edits for this sheet.")
+        repository = self._edit_repository(document_type)
+        with repository.transaction_lock:
+            # Receipt lookup precedes current target resolution: a successful
+            # retry remains valid even after an intervening target deletion.
+            loaded = repository.read(assembly_number, observed["sourceRevision"], observed["manualPlanRevision"])
+            scene = loaded["scene"]
+            _documentation_check_binding(observed, {"documentId": documentation_document_id(document_type, assembly_number),
+                "sourceRevision": scene["sourceRevision"], "manualPlanRevision": scene["manualPlanRevision"]})
+            previous = documentation_prior_receipt(scene, observed["requestId"],
+                                                   documentation_request_hash(observed["requestId"], observed))
+            # Confirm the live source/plan binding even on retry.
+            snapshot = self.document_snapshot(assembly_number, document_type)
+            _documentation_check_binding(observed, snapshot["state"])
+            if previous is not None:
+                return {"receipt": previous, "changed": previous["changedIds"]}
+            commands, expected = [], {}
+            for index, operation in enumerate(operations):
+                target = snapshot["targets"].get(operation["targetId"])
+                if target is None:
+                    raise DocumentEditError("target_not_found", "The read target is no longer present.",
+                                            operationIndex=index, targetId=operation["targetId"])
+                if target["operation"] != "replace_text":
+                    raise DocumentEditError("read_only_derived_field", "This target is not editable text.")
+                expected[operation["targetId"]] = operation["expectedContentHash"]
+                commands.append({"operation": "update_text", "pageId": PART_TEXT_PAGE_ID if target["alias"].startswith("part.") else target["pageId"],
+                    "targetType": target["targetType"], "targetId": target["alias"], "text": operation["text"],
+                    "_noChange": target["text"] == operation["text"]})
+            document = snapshot["document"]
+            targets = (_parts_manual_editable_page_targets(document) if document_type == "illustrated_parts_manual"
+                       else _operations_manual_editable_page_targets(document))
+            result = repository.apply_batch(assembly_number, observed["sourceRevision"], observed["manualPlanRevision"],
+                base_revision=observed.get("sceneRevision"), expected_revision=observed["expectedRevision"],
+                request_id=observed["requestId"], commands=commands, page_targets=targets,
+                expected_hashes=expected, current_hashes=snapshot["hashes"],
+                hashes_revision=snapshot["state"]["sceneRevision"], actor="sage", payload=observed)
+            return {"receipt": result["receipt"], "changed": result["changed"]}
 
     def export_specification_sheet(self, assembly_number, fillable=False):
         from ai_inspector.codex_runtime.policy import PilotError

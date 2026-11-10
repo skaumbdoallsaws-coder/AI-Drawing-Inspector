@@ -85,6 +85,18 @@ class Host:
                 for index in range(50)]
         return {"scope": section_id or "whole assembly", "rows": rows}
 
+    def document_snapshot(self, number, document_type):
+        from ai_inspector.documentation.commands import document_id, content_hash
+        from ai_inspector.documentation.targets import text_targets, hash_values
+        pages = self.document_pages(number, document_type)
+        scene = {"pages": {page["pageId"]: deepcopy(page.get("documentationComposition") or {}) for page in pages}}
+        state = {"documentId": document_id(document_type, number), "revision": 0, "sourceRevision": self.revision,
+                 "manualPlanRevision": "plan-1", "sceneRevision": "scene-1", "scene": scene}
+        document = {"pages": pages}
+        targets = text_targets(state, document)
+        return {"state": state, "document": document, "targets": targets,
+                "hashes": {key: content_hash(state, key, value) for key, value in hash_values(targets).items()}}
+
     def build_inspection_sheet(self, number):
         self.builds.append(number)
         sheet = self.states["inspection_sheet"]["data"]
@@ -118,6 +130,8 @@ def call(reader, name, arguments):
 def test_the_tool_set_is_exact_typed_and_closed():
     specs = tool_specs()
     assert tuple(spec["name"] for spec in specs) == NAMES
+    assert {s["name"] for s in specs if s["name"] in {"read_document_pages", "edit_document_text", "apply_document_edits"}} == {"read_document_pages", "edit_document_text", "apply_document_edits"}
+    assert next(s for s in specs if s["name"] == "apply_document_edits")["read_only"] is False
     for spec in specs:
         schema = spec["input_schema"]
         assert schema["type"] == "object" and schema["additionalProperties"] is False, spec["name"]
@@ -344,6 +358,16 @@ def test_bill_of_materials_pages_and_budget_receipts():
     assert all(len(receipt["argumentHash"]) == 64 for receipt in reader.receipts)
 
 
+def legacy_text(value):
+    """Compare existing output keys while testing additive binding metadata separately."""
+    if isinstance(value, list):
+        return [legacy_text(item) for item in value]
+    if isinstance(value, dict):
+        return {key: legacy_text(item) for key, item in value.items()
+                if key in {"id", "text", "label", "type"}}
+    return value
+
+
 def test_page_text_is_read_with_the_users_edits_and_changed_through_the_host():
     page = {"pageId": "page-7", "pageNumber": 7, "title": "Pre-Use Inspection", "documentationComposition": {
         "pageElementOverrides": {"checks.r0.c1": {"text": "Edited by the user"}}},
@@ -365,9 +389,11 @@ def test_page_text_is_read_with_the_users_edits_and_changed_through_the_host():
             self.reads.append(("pages", number, document_type))
             return [page, other]
 
-        def edit_document_text(self, number, document_type, edits):
+        def edit_document_text(self, number, document_type, edits, *, observed):
             self.edits.append((number, document_type, edits))
-            return [{"pageId": row["pageId"], "targetId": row["targetId"]} for row in edits]
+            assert observed["expectedRevision"] == 0 and observed["operations"][0]["expectedContentHash"]
+            return {"changed": [{"pageId": row["pageId"], "targetId": row["targetId"]} for row in edits],
+                    "receipt": {"requestId": observed["requestId"], "revision": 1}}
 
     host = TextHost()
     reader = gateway(host)
@@ -378,10 +404,12 @@ def test_page_text_is_read_with_the_users_edits_and_changed_through_the_host():
     blocks = {block["id"]: block for block in shown[0]["blocks"]}
     assert "toc" not in blocks
     assert blocks["intro"]["text"] == "Check the lift before use."
-    assert blocks["checks"]["rows"][0] == [{"id": "checks.r0.c0", "text": "Hoses"},
+    assert legacy_text(blocks["checks"]["rows"][0]) == [{"id": "checks.r0.c0", "text": "Hoses"},
                                            {"id": "checks.r0.c1", "text": "Edited by the user"}]
-    assert blocks["steps"]["items"] == [{"id": "steps.i0", "label": "Step 1", "text": "Lower the arms"}]
-    assert blocks["fig"] == {"id": "fig", "type": "caption", "text": "Figure 3"}
+    assert legacy_text(blocks["steps"]["items"]) == [{"id": "steps.i0", "label": "Step 1", "text": "Lower the arms"}]
+    assert legacy_text(blocks["fig"]) == {"id": "fig", "type": "caption", "text": "Figure 3"}
+    assert blocks["checks"]["rows"][0][1]["isExcerpt"] is False
+    assert blocks["checks"]["rows"][0][1]["contentHash"]
     edits = [{"pageId": "page-7", "targetId": "checks.r0.c1", "text": "No leaks at the fittings"}]
     edited = call(reader, "edit_document_text", {"documentType": "work_instructions", "edits": edits})
     assert edited["ok"], edited
@@ -406,9 +434,11 @@ def test_parts_manual_parts_lists_are_read_and_changed_through_the_host():
         def document_pages(self, number, document_type):
             return [page]
 
-        def edit_document_text(self, number, document_type, edits):
+        def edit_document_text(self, number, document_type, edits, *, observed):
             self.edits.append((document_type, edits))
-            return [{"pageId": row["pageId"], "targetId": row["targetId"]} for row in edits]
+            assert observed["expectedRevision"] == 0 and observed["operations"][0]["expectedContentHash"]
+            return {"changed": [{"pageId": row["pageId"], "targetId": row["targetId"]} for row in edits],
+                    "receipt": {"requestId": observed["requestId"], "revision": 1}}
 
     host = PartsHost()
     reader = gateway(host)
@@ -416,9 +446,9 @@ def test_parts_manual_parts_lists_are_read_and_changed_through_the_host():
     assert read["ok"], read
     (block,) = read["data"]["pages"][0]["blocks"]
     assert block["columns"] == ["ITEM", "PART NUMBER", "DESCRIPTION", "QTY"]
-    assert block["rows"][0] == [{"text": "1"}, {"id": "part.item-wheel.partNumber", "text": "1030134"},
+    assert legacy_text(block["rows"][0]) == [{"text": "1"}, {"id": "part.item-wheel.partNumber", "text": "1030134"},
                                 {"id": "part.item-wheel.description", "text": "Caster Wheel"}, {"text": "2"}]
-    assert block["rows"][1][1] == {"id": "part.item-axle.partNumber", "text": "Not specified"}
+    assert legacy_text(block["rows"][1][1]) == {"id": "part.item-axle.partNumber", "text": "Not specified"}
     edits = [{"pageId": "page-section-1", "targetId": "part.item-wheel.description", "text": "Polyurethane Wheel"}]
     edited = call(reader, "edit_document_text", {"documentType": "illustrated_parts_manual", "edits": edits})
     assert edited["ok"], edited
@@ -695,3 +725,53 @@ def test_sage_moves_parts_manual_parts_on_the_server_and_the_workspace_reloads()
                                                                   "toSectionId": "section-bbbbbbbb"}]})
     assert not refused["ok"] and refused["error"]["code"] == "codex_tool_arguments_invalid"
     assert len(host.moves) == 1
+
+
+@pytest.mark.parametrize("text", ["small", "  exact\n\tspacing  " + "long " * 500])
+def test_text_gateway_requires_full_observed_read_before_mutation(text):
+    class BoundHost(Host):
+        def document_pages(self, _number, _kind):
+            return [{"pageId": "p", "pageNumber": 1, "layoutBlocks": [
+                {"blockId": "note", "blockType": "paragraph", "text": text}]}]
+        def edit_document_text(self, _number, _kind, edits, *, observed):
+            self.observed = observed
+            return {"changed": edits, "receipt": {"requestId": observed["requestId"], "revision": 1}}
+    host, args = BoundHost(), {"documentType": "work_instructions", "edits": [
+        {"pageId": "p", "targetId": "note", "text": "replacement"}]}
+    reader = gateway(host, max_calls=10)
+    assert call(reader, "edit_document_text", args)["error"]["code"] == "document_read_required"
+    summary = call(reader, "read_document_pages", {"documentType": "work_instructions"})
+    assert summary["ok"], summary
+    item = summary["data"]["pages"][0]["blocks"][0]
+    assert item["fullLength"] == len(text) and item["contentHash"]
+    if item["isExcerpt"]:
+        assert call(reader, "edit_document_text", args)["error"]["code"] == "full_read_required"
+        assert not hasattr(host, "observed")
+    full = call(reader, "read_document_pages", {"documentType": "work_instructions",
+                "targets": [{"pageId": "p", "targetId": "note"}]})
+    assert full["data"]["targets"][0]["text"] == text
+    assert call(reader, "edit_document_text", args)["ok"]
+    assert host.observed["operations"][0]["expectedContentHash"] == full["data"]["targets"][0]["contentHash"]
+
+
+def test_apply_document_edits_mixed_store_request_is_closed_and_refused():
+    arguments = {"documentId": "document", "expectedRevision": 0, "requestId": "mixed", "operations": [
+        {"operation": "replace_text", "targetId": "a", "expectedContentHash": "a" * 64, "text": "new"},
+        {"operation": "set_slot_value", "targetId": "slot:title", "expectedContentHash": "b" * 64, "value": "new"}]}
+    result = call(gateway(), "apply_document_edits", arguments)
+    assert result["error"]["code"] == "invalid_document_operation", result
+    assert "send text and value edits as separate requests" in result["error"]["message"]
+
+
+def test_failed_oversize_read_does_not_create_a_write_binding():
+    class LargeHost(Host):
+        def document_pages(self, _number, _kind):
+            return [{"pageId": "p", "pageNumber": 1, "layoutBlocks": [
+                {"blockId": "note", "blockType": "paragraph", "text": "x" * 70000}]}]
+    reader = gateway(LargeHost())
+    result = call(reader, "read_document_pages", {"documentType": "work_instructions",
+        "targets": [{"targetId": "note", "pageId": "p"}]})
+    assert result["error"]["code"] == "read_result_too_large"
+    refused = call(reader, "edit_document_text", {"documentType": "work_instructions",
+        "edits": [{"pageId": "p", "targetId": "note", "text": "cannot truncate unseen text"}]})
+    assert refused["error"]["code"] == "document_read_required"

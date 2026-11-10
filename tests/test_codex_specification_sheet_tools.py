@@ -29,11 +29,23 @@ def client(tmp_path, monkeypatch):
 def turn(message):
     return DocumentationGateway(server._DOCUMENTATION_AGENT_HOST, PRINCIPAL,
                                 {"assemblyNumber": "100001", "documentType": SPEC},
-                                turn_id="turn", max_calls=24, user_message=message)
+                                turn_id="turn", max_calls=48, user_message=message)
+
+
+def raw_call(gateway, name, arguments):
+    return asyncio.run(gateway.call(name, arguments))
 
 
 def call(gateway, name, arguments):
-    return asyncio.run(gateway.call(name, arguments))
+    # These existing authority/wording tests now perform an explicit model-visible
+    # read before each intended edit. Separate tests below deliberately omit it
+    # or retain an old snapshot; host validation reads must never substitute.
+    if name in {"propose_specification_template", "approve_specification_template", "provide_document_values",
+                "draft_specification_text", "record_researched_values", "accept_specification_values",
+                "edit_specification_sheet"}:
+        read = raw_call(gateway, "inspect_documentation_type", {"documentType": SPEC})
+        assert read["ok"], read
+    return raw_call(gateway, name, arguments)
 
 
 def slots(client):
@@ -166,3 +178,56 @@ def test_export_attaches_the_pdf_when_the_picture_is_current_and_queues_the_publ
     final = call(exported_turn, "export_specification_sheet", {})
     assert final["data"]["pdfUrl"].endswith("/pdf") and final["data"]["docxUrl"].endswith("/docx")
     assert [card["url"].rsplit("/", 1)[-1] for card in exported_turn.files] == ["fillable-pdf", "pdf"]
+
+
+def test_specialized_values_require_observed_read_and_reject_stale_target(client):
+    gateway = turn("Use New title.")
+    arguments = {"documentType": SPEC, "values": [{"slot": "title", "value": "New title"}]}
+    missing = raw_call(gateway, "provide_document_values", arguments)
+    assert missing["error"]["code"] == "document_read_required"
+    assert raw_call(gateway, "inspect_documentation_type", {"documentType": SPEC})["ok"]
+    assert client.post("/api/specification-sheet/100001/values", json={"values": [
+        {"slot": "title", "value": "Newer human title"}]}).status_code == 200
+    stale = raw_call(gateway, "provide_document_values", arguments)
+    assert stale["error"]["code"] == "content_hash_mismatch"
+    assert slots(client)["slots"]["title"]["value"] == "Newer human title"
+
+
+def test_specialized_old_inputs_allow_unrelated_change_and_return_retry_receipt(client):
+    gateway = turn("Use New title.")
+    assert raw_call(gateway, "inspect_documentation_type", {"documentType": SPEC})["ok"]
+    assert client.post("/api/specification-sheet/100001/values", json={"values": [
+        {"slot": "caption", "value": "Another field"}]}).status_code == 200
+    arguments = {"documentType": SPEC, "values": [{"slot": "title", "value": "New title"}]}
+    result = raw_call(gateway, "provide_document_values", arguments)
+    assert result["ok"], result
+    receipt = result["data"]["receipt"]
+    assert receipt["beforeRevision"] > receipt["expectedRevision"]
+    retry = raw_call(gateway, "provide_document_values", arguments)
+    assert retry["ok"] and retry["data"]["receipt"] == receipt
+    assert slots(client)["slots"]["caption"]["value"] == "Another field"
+
+
+def test_workspace_slot_binding_covers_actual_values_and_request_payload(client):
+    read = client.get("/api/specification-sheet/100001/documentation-scene").json()["slotBinding"]
+    observed = {"documentId": read["documentId"], "expectedRevision": read["revision"],
+                "sourceRevision": read["sourceRevision"], "manualPlanRevision": read["manualPlanRevision"],
+                "requestId": "workspace-request", "hashes": {"slot:caption": read["hashes"]["slot:caption"]}}
+    body = {"editBinding": observed, "values": [{"slot": "title", "value": "first"}]}
+    assert client.post("/api/specification-sheet/100001/values", json=body).json()["error"] == "document_read_required"
+    observed["hashes"] = {"slot:title": read["hashes"]["slot:title"]}
+    first = client.post("/api/specification-sheet/100001/values", json=body)
+    assert first.status_code == 200, first.text
+    body["values"][0]["value"] = "different payload"
+    reused = client.post("/api/specification-sheet/100001/values", json=body)
+    assert reused.status_code == 409 and reused.json()["error"] == "request_id_reused"
+    assert slots(client)["slots"]["title"]["value"] == "first"
+
+
+def test_internal_readiness_checks_do_not_authorize_slot_writes(client):
+    gateway = turn("Use New title.")
+    assert gateway._state("100001", SPEC, detail=True)["ok"]
+    assert gateway.sheet_read is None
+    refused = raw_call(gateway, "provide_document_values", {"documentType": SPEC,
+        "values": [{"slot": "title", "value": "New title"}]})
+    assert refused["error"]["code"] == "document_read_required"

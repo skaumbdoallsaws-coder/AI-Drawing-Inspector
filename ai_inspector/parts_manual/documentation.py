@@ -23,7 +23,13 @@ import time
 from typing import Any, Dict, Iterable, Mapping, Optional
 
 
-DOCUMENTATION_SCENE_SCHEMA_VERSION = 2
+from ai_inspector.documentation.commands import (
+    DocumentEditError, transaction_defaults, validate_transaction_metadata,
+    request_hash, prior_receipt, check_preconditions, make_receipt, retain_receipt,
+    document_id, scene_field_key,
+)
+
+DOCUMENTATION_SCENE_SCHEMA_VERSION = 3
 DOCUMENTATION_TARGET_TYPES = frozenset(
     {
         "manual_group",
@@ -242,7 +248,14 @@ def canonical_documentation_bytes(value: Any) -> bytes:
 
 
 def documentation_scene_revision(value: Any) -> str:
-    return hashlib.sha256(canonical_documentation_bytes(value)).hexdigest()
+    # Rendering/capture identity is the historical projection, not retry/history
+    # metadata. An untouched v2 document keeps its exact export identity.
+    projection = {key: copy.deepcopy(value[key]) for key in (
+        "schemaVersion", "assemblyNumber", "sourceRevision", "manualPlanRevision",
+        "createdAt", "updatedAt", "pages", "theme", "pageMasters", "commands", "historyCursor"
+    ) if key in value}
+    projection["schemaVersion"] = 2
+    return hashlib.sha256(canonical_documentation_bytes(projection)).hexdigest()
 
 
 def _write_atomic(path: Path, payload: bytes) -> None:
@@ -1014,10 +1027,43 @@ def _replay_target_command(
     _remove_empty_target_override(collection, target_id)
 
 
+def _leaf_commands(commands):
+    for command in commands:
+        if command.get("operation") == "batch":
+            children = command.get("commands")
+            if (not isinstance(children, list) or not 1 <= len(children) <= 12
+                    or any(not isinstance(c, Mapping) or c.get("operation") == "batch" for c in children)
+                    or command.get("actor") not in DOCUMENTATION_COMMAND_ACTORS
+                    or not isinstance(command.get("requestId"), str)
+                    or not 1 <= len(command["requestId"]) <= 128):
+                raise DocumentationSceneError("invalid documentation batch history")
+            yield from children
+        else:
+            yield command
+
+
+def _advance_edit_versions(scene, commands):
+    keys = set()
+    for command in _leaf_commands(commands):
+        operation, page = command.get("operation"), str(command.get("pageId") or "")
+        if operation in {"set_theme", "apply_template"}:
+            scene["editEpoch"] += 1
+        elif operation in {"reset_page", "add_object", "remove_object"}:
+            keys.add("@page:" + page)
+        if operation == "arrange":
+            for target in command.get("transforms") or []:
+                keys.add(scene_field_key(page, target["targetType"], target["targetId"]))
+        else:
+            keys.add(scene_field_key(page, str(command.get("targetType") or ""), str(command.get("targetId") or "")))
+    for key in keys:
+        scene["fieldVersions"][key] = scene["fieldVersions"].get(key, 0) + 1
+    scene["editRevision"] += 1
+
+
 def replay_documentation_commands(commands: Iterable[Mapping[str, Any]]) -> Dict[str, Any]:
     """Build the active page overrides from the command prefix."""
     pages: Dict[str, Any] = {}
-    for source_command in commands:
+    for source_command in _leaf_commands(commands):
         command = dict(source_command)
         page_id = str(command.get("pageId") or "")
         target_type = str(command.get("targetType") or "")
@@ -1105,7 +1151,7 @@ def replay_documentation_theme(
 ) -> tuple[Dict[str, Any], Dict[str, Any]]:
     theme = copy.deepcopy(DEFAULT_DOCUMENT_THEME)
     page_masters = copy.deepcopy(DEFAULT_PAGE_MASTERS)
-    for source_command in commands:
+    for source_command in _leaf_commands(commands):
         operation = str(source_command.get("operation") or "")
         if operation == "set_theme":
             patch = source_command.get("theme")
@@ -1166,7 +1212,7 @@ def _arrange_transforms(value: Any) -> list[Dict[str, Any]]:
 
 def _upgrade_documentation_scene(scene: Dict[str, Any]) -> Dict[str, Any]:
     schema_version = scene.get("schemaVersion")
-    if schema_version not in {1, DOCUMENTATION_SCENE_SCHEMA_VERSION}:
+    if schema_version not in {1, 2, DOCUMENTATION_SCENE_SCHEMA_VERSION}:
         raise DocumentationSceneError("unsupported documentation scene schema")
     commands = scene.get("commands")
     if not isinstance(commands, list):
@@ -1175,6 +1221,7 @@ def _upgrade_documentation_scene(scene: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(cursor, int) or isinstance(cursor, bool):
         raise DocumentationSceneError("documentation history cursor is invalid")
     active_commands = commands[:cursor]
+    transaction_defaults(scene)
     scene["schemaVersion"] = DOCUMENTATION_SCENE_SCHEMA_VERSION
     scene["pages"] = replay_documentation_commands(active_commands)
     theme, page_masters = replay_documentation_theme(active_commands)
@@ -1194,13 +1241,14 @@ def validate_documentation_scene(scene: Mapping[str, Any]) -> None:
         raise DocumentationSceneError("documentation scene source revision is required")
     if not str(scene.get("manualPlanRevision") or ""):
         raise DocumentationSceneError("documentation scene manual-plan revision is required")
+    validate_transaction_metadata(scene)
     commands = scene.get("commands")
     if not isinstance(commands, list) or len(commands) > _MAX_COMMANDS:
         raise DocumentationSceneError("documentation command history is invalid")
     cursor = scene.get("historyCursor")
     if not isinstance(cursor, int) or isinstance(cursor, bool) or not 0 <= cursor <= len(commands):
         raise DocumentationSceneError("documentation history cursor is invalid")
-    for command in commands:
+    for command in _leaf_commands(commands):
         if not isinstance(command, Mapping):
             raise DocumentationSceneError("documentation command must be an object")
         if command.get("operation") not in DOCUMENTATION_COMMAND_OPERATIONS:
@@ -1405,8 +1453,11 @@ def validate_documentation_scene(scene: Mapping[str, Any]) -> None:
 
 
 class DocumentationSceneRepository:
-    def __init__(self, root: str | Path):
+    transaction_lock = _WRITE_LOCK
+
+    def __init__(self, root: str | Path, document_type: str = "illustrated_parts_manual"):
         self.root = Path(root).resolve()
+        self.document_type = document_type
 
     def _scene_path(self, assembly_number: str) -> Path:
         value = str(assembly_number or "").strip()
@@ -1419,13 +1470,33 @@ class DocumentationSceneRepository:
             raise DocumentationSceneNotFoundError("unknown assembly") from exc
         return directory / "documentation-scene.json"
 
+    def _save(self, assembly_number, scene):
+        validate_documentation_scene(scene)
+        payload = canonical_documentation_bytes(scene)
+        if len(payload) > 16 * 1024 * 1024:
+            raise DocumentEditError("invalid_document_operation", "Scene history exceeds its storage limit.")
+        path = self._scene_path(assembly_number)
+        if path.is_file():
+            original = path.read_bytes()
+            old_version = json.loads(original).get("schemaVersion")
+            if old_version not in {1, 2, DOCUMENTATION_SCENE_SCHEMA_VERSION}:
+                raise DocumentEditError("unsupported_document_schema", "This scene needs a newer editor.")
+            if old_version in {1, 2}:
+                backup = path.with_name("documentation-scene.v2.json")
+                if backup.exists():
+                    if backup.read_bytes() != original:
+                        raise DocumentEditError("legacy_store_changed", "The original scene differs from its rollback copy.")
+                else:
+                    _write_atomic(backup, original)
+        _write_atomic(path, payload)
+
     @staticmethod
     def new_scene(
         assembly_number: str,
         source_revision: str,
         manual_plan_revision: str,
     ) -> Dict[str, Any]:
-        return {
+        return transaction_defaults({
             "schemaVersion": DOCUMENTATION_SCENE_SCHEMA_VERSION,
             "assemblyNumber": str(assembly_number),
             "sourceRevision": str(source_revision),
@@ -1437,7 +1508,7 @@ class DocumentationSceneRepository:
             "pageMasters": copy.deepcopy(DEFAULT_PAGE_MASTERS),
             "commands": [],
             "historyCursor": 0,
-        }
+        })
 
     def read(
         self,
@@ -1495,6 +1566,10 @@ class DocumentationSceneRepository:
                 source_revision,
                 manual_plan_revision,
             )
+            for key in ("receipts", "receiptOrder", "fieldVersions"):
+                scene[key] = copy.deepcopy(previous[key])
+            scene["editRevision"] = previous["editRevision"] + 1
+            scene["editEpoch"] = previous["editEpoch"] + 1
             if preserve_theme:
                 scene["theme"] = copy.deepcopy(
                     previous.get("theme") or DEFAULT_DOCUMENT_THEME
@@ -1506,10 +1581,7 @@ class DocumentationSceneRepository:
             scene["createdAt"] = now
             scene["updatedAt"] = now
             validate_documentation_scene(scene)
-            _write_atomic(
-                self._scene_path(assembly_number),
-                canonical_documentation_bytes(scene),
-            )
+            self._save(assembly_number, scene)
             return {
                 "scene": copy.deepcopy(scene),
                 "revision": documentation_scene_revision(scene),
@@ -1546,10 +1618,12 @@ class DocumentationSceneRepository:
             if not loaded["sourceCurrent"] or not loaded["manualPlanCurrent"]:
                 return False
             scene = loaded["scene"]
+            scene["editRevision"] += 1
+            scene["editEpoch"] += 1
             scene["manualPlanRevision"] = str(manual_plan_revision)
             scene["updatedAt"] = _utc_now()
             validate_documentation_scene(scene)
-            _write_atomic(path, canonical_documentation_bytes(scene))
+            self._save(assembly_number, scene)
             return True
 
     @staticmethod
@@ -1613,279 +1687,10 @@ class DocumentationSceneRepository:
             self._assert_revision(scene, base_revision)
             self._assert_binding(scene, source_revision, manual_plan_revision)
 
-            operation = str(command.get("operation") or "")
-            target_type = str(command.get("targetType") or "")
-            page_id = str(command.get("pageId") or "")
-            target_id = str(command.get("targetId") or "")
-            actor = str(command.get("actor") or "user")
-            if operation not in DOCUMENTATION_COMMAND_OPERATIONS:
-                raise DocumentationSceneError("unsupported documentation command")
-            if target_type not in DOCUMENTATION_TARGET_TYPES:
-                raise DocumentationSceneError("unsupported documentation target type")
-            if actor not in DOCUMENTATION_COMMAND_ACTORS:
-                raise DocumentationSceneError("unsupported documentation command actor")
-            transforms = None
-            arrangement = None
-            global_operation = operation in {"set_theme", "apply_template"}
-            add_object_operation = operation == "add_object"
-            if operation == "arrange":
-                if target_type != "selection":
-                    raise DocumentationSceneError(
-                        "arrangement requires a target selection"
-                    )
-                arrangement = str(command.get("arrangement") or "")
-                if arrangement not in DOCUMENTATION_ARRANGEMENTS:
-                    raise DocumentationSceneError(
-                        "unsupported documentation arrangement"
-                    )
-                transforms = _arrange_transforms(command.get("transforms"))
-                for transform in transforms:
-                    self._validate_target(
-                        page_id=page_id,
-                        target_type=transform["targetType"],
-                        target_id=transform["targetId"],
-                        page_targets=page_targets,
-                    )
-            elif global_operation:
-                if target_type != "document_theme" or target_id != "company-theme":
-                    raise DocumentationSceneError("document theme target is invalid")
-                if page_id not in page_targets:
-                    raise DocumentationSceneError("documentation page is not editable")
-            elif add_object_operation:
-                if target_type != "document_object":
-                    raise DocumentationSceneError("object insertion target is invalid")
-                if page_id not in page_targets:
-                    raise DocumentationSceneError("documentation page is not editable")
-                existing = {
-                    str(value)
-                    for value in page_targets[page_id].get("document_object") or []
-                }
-                if target_id in existing:
-                    raise DocumentationSceneError("documentation object already exists")
-            else:
-                if target_type == "selection":
-                    raise DocumentationSceneError(
-                        "selection targets require an arrangement"
-                    )
-                self._validate_target(
-                    page_id=page_id,
-                    target_type=target_type,
-                    target_id=target_id,
-                    page_targets=page_targets,
-                )
-            translation = None
-            if operation == "translate":
-                translation = (
-                    _annotation_vector(command.get("translation"))
-                    if target_type in {
-                        "balloon",
-                        "leader",
-                        "page_element",
-                        "document_object",
-                    }
-                    else _vector(command.get("translation"))
-                )
-                if _is_zero_vector(translation):
-                    raise DocumentationSceneError("translation must move the target")
-            rotation = None
-            if operation == "rotate":
-                if target_type not in {
-                    "figure",
-                    "manual_group",
-                    "occurrence",
-                    "document_object",
-                }:
-                    raise DocumentationSceneError(
-                        "only CAD presentation targets and document objects can rotate"
-                    )
-                rotation = _rotation_vector(command.get("rotation"))
-                if _is_zero_vector(rotation):
-                    raise DocumentationSceneError("rotation must turn the target")
-            size_delta = None
-            if operation == "resize":
-                if target_type not in {"page_element", "document_object"}:
-                    raise DocumentationSceneError("only publication objects can resize")
-                size_delta = _size_vector(command.get("sizeDelta"))
-                if _is_zero_vector(size_delta):
-                    raise DocumentationSceneError("resize must change the target size")
-            camera_preset = None
-            if operation == "set_view":
-                if target_type != "figure":
-                    raise DocumentationSceneError(
-                        "only figures have publication views"
-                    )
-                camera_preset = str(command.get("cameraPreset") or "")
-                if camera_preset not in DOCUMENTATION_CAMERA_PRESETS:
-                    raise DocumentationSceneError(
-                        "unsupported documentation camera preset"
-                    )
-            explode_delta = None
-            if operation == "adjust_explode":
-                if target_type != "figure":
-                    raise DocumentationSceneError(
-                        "only figures have explosion spacing"
-                    )
-                explode_delta = _explode_delta(command.get("explodeDelta"))
-                if abs(explode_delta) < 1e-12:
-                    raise DocumentationSceneError(
-                        "explode adjustment must change spacing"
-                    )
-            if operation == "reset_page" and target_type != "figure":
-                raise DocumentationSceneError("page reset requires the figure target")
-            if operation in {"clear_callouts", "restore_callouts"} and target_type != "figure":
-                raise DocumentationSceneError(
-                    "page callout collection commands require the figure target"
-                )
-            if operation == "add_callout" and target_type not in {
-                "occurrence",
-                "manual_group",
-            }:
-                raise DocumentationSceneError(
-                    "adding a callout requires a component or manual group target"
-                )
-            if operation == "remove_callout" and target_type != "balloon":
-                raise DocumentationSceneError(
-                    "removing a callout requires a balloon target"
-                )
-            callout_items = None
-            if operation in {"clear_callouts", "add_callout", "remove_callout"}:
-                callout_items = _callout_items(command.get("calloutItems"))
-            elif operation == "restore_callouts":
-                if command.get("calloutItems") is not None:
-                    raise DocumentationSceneError(
-                        "restoring generated callouts must clear the manual callout override"
-                    )
-            anchor_side = None
-            anchor_point = None
-            if operation == "set_anchor":
-                if target_type != "leader":
-                    raise DocumentationSceneError("only leaders have editable anchors")
-                if command.get("anchorPoint") is not None:
-                    anchor_point = _anchor_point(command.get("anchorPoint"))
-                else:
-                    anchor_side = str(command.get("anchorSide") or "")
-                    if anchor_side not in DOCUMENTATION_ANCHOR_SIDES:
-                        raise DocumentationSceneError("unsupported documentation anchor side")
-            leader_style = None
-            if operation == "set_leader_style":
-                if target_type != "leader":
-                    raise DocumentationSceneError("only leaders have editable route styles")
-                leader_style = str(command.get("leaderStyle") or "")
-                if leader_style not in DOCUMENTATION_LEADER_STYLES:
-                    raise DocumentationSceneError("unsupported documentation leader style")
-            end_condition = None
-            if operation == "set_end_condition":
-                if target_type != "leader":
-                    raise DocumentationSceneError(
-                        "only leaders have editable end conditions"
-                    )
-                end_condition = str(command.get("endCondition") or "")
-                if end_condition not in DOCUMENTATION_LEADER_END_CONDITIONS:
-                    raise DocumentationSceneError(
-                        "unsupported documentation leader end condition"
-                    )
-            repeated_part_strategy = None
-            if operation == "set_repeated_strategy":
-                if target_type != "leader":
-                    raise DocumentationSceneError(
-                        "only leaders have an editable repeated-part strategy"
-                    )
-                repeated_part_strategy = str(command.get("repeatedPartStrategy") or "")
-                if repeated_part_strategy not in DOCUMENTATION_REPEATED_PART_STRATEGIES:
-                    raise DocumentationSceneError(
-                        "unsupported documentation repeated-part strategy"
-                    )
-            document_object = None
-            if operation == "add_object":
-                document_object = _document_object(
-                    command.get("documentObject"), expected_id=target_id
-                )
-            if operation == "remove_object" and target_type != "document_object":
-                raise DocumentationSceneError("only document objects can be removed")
-            text = None
-            if operation == "update_text":
-                if target_type not in {"page_element", "document_object"}:
-                    raise DocumentationSceneError("selected target has no editable text")
-                text = str(command.get("text") or "")
-                if len(text) > _MAX_DOCUMENT_TEXT:
-                    raise DocumentationSceneError("documentation text is too long")
-            style = None
-            if operation == "update_style":
-                if target_type not in {"page_element", "document_object"}:
-                    raise DocumentationSceneError("selected target has no editable style")
-                style = _document_style(command.get("style"), allow_empty=False)
-            theme = None
-            page_masters = None
-            if operation == "set_theme":
-                theme = _document_theme(command.get("theme"))
-            elif operation == "apply_template":
-                theme = _document_theme(command.get("theme"))
-                page_masters = _page_masters(command.get("pageMasters"))
-
-            cursor = int(scene.get("historyCursor") or 0)
-            commands = list(scene.get("commands") or [])[:cursor]
-            if len(commands) >= _MAX_COMMANDS:
-                raise DocumentationSceneError("documentation command history is full")
-            now = _utc_now()
-            persisted_command: Dict[str, Any] = {
-                "commandId": f"documentation-command-{secrets.token_hex(8)}",
-                "operation": operation,
-                "targetType": target_type,
-                "targetId": target_id if target_type != "figure" else page_id,
-                "pageId": page_id,
-                "actor": actor,
-                "createdAt": now,
-            }
-            if translation is not None:
-                persisted_command["translation"] = translation
-            if rotation is not None:
-                persisted_command["rotation"] = rotation
-            if size_delta is not None:
-                persisted_command["sizeDelta"] = size_delta
-            if transforms is not None:
-                persisted_command["transforms"] = transforms
-                persisted_command["arrangement"] = arrangement
-            if camera_preset is not None:
-                persisted_command["cameraPreset"] = camera_preset
-            if explode_delta is not None:
-                persisted_command["explodeDelta"] = explode_delta
-            if anchor_side is not None:
-                persisted_command["anchorSide"] = anchor_side
-            if anchor_point is not None:
-                persisted_command["anchorPoint"] = anchor_point
-            if leader_style is not None:
-                persisted_command["leaderStyle"] = leader_style
-            if end_condition is not None:
-                persisted_command["endCondition"] = end_condition
-            if repeated_part_strategy is not None:
-                persisted_command["repeatedPartStrategy"] = repeated_part_strategy
-            if document_object is not None:
-                persisted_command["documentObject"] = copy.deepcopy(document_object)
-            if text is not None:
-                persisted_command["text"] = text
-            if style is not None:
-                persisted_command["style"] = copy.deepcopy(style)
-            if theme is not None:
-                persisted_command["theme"] = copy.deepcopy(theme)
-            if page_masters is not None:
-                persisted_command["pageMasters"] = copy.deepcopy(page_masters)
-            if operation in {"clear_callouts", "add_callout", "remove_callout"}:
-                persisted_command["calloutItems"] = copy.deepcopy(callout_items)
-            elif operation == "restore_callouts":
-                persisted_command["calloutItems"] = None
-            commands.append(persisted_command)
-            if not scene.get("createdAt"):
-                scene["createdAt"] = now
-            scene["updatedAt"] = now
-            scene["commands"] = commands
-            scene["historyCursor"] = len(commands)
-            scene["pages"] = replay_documentation_commands(commands)
-            scene["theme"], scene["pageMasters"] = replay_documentation_theme(commands)
-            validate_documentation_scene(scene)
-            _write_atomic(
-                self._scene_path(assembly_number),
-                canonical_documentation_bytes(scene),
-            )
+            candidate = apply_documentation_command_candidate(scene, command, page_targets)
+            scene, persisted_command = candidate["scene"], candidate["command"]
+            _advance_edit_versions(scene, [persisted_command])
+            self._save(assembly_number, scene)
             return {
                 "scene": copy.deepcopy(scene),
                 "command": copy.deepcopy(persisted_command),
@@ -1896,6 +1701,67 @@ class DocumentationSceneRepository:
                 "canUndo": True,
                 "canRedo": False,
             }
+
+    def apply_batch(self, assembly_number, source_revision, manual_plan_revision, *,
+                    base_revision, expected_revision, request_id, commands, page_targets,
+                    expected_hashes, current_hashes, hashes_revision, actor="sage", payload=None):
+        """One history entry and one replace. The host compiles/hash-checks under
+        transaction_lock and supplies hashes_revision to reject an unlocked race.
+        """
+        if not isinstance(commands, list) or not 1 <= len(commands) <= 12:
+            raise DocumentEditError("invalid_document_operation", "Submit 1-12 commands.")
+        if actor not in DOCUMENTATION_COMMAND_ACTORS:
+            raise DocumentEditError("invalid_document_operation", "Invalid trusted actor.")
+        payload_hash = request_hash(request_id, payload if payload is not None else {
+            "commands": commands, "expectedRevision": expected_revision, "hashes": expected_hashes,
+            "sourceRevision": source_revision, "manualPlanRevision": manual_plan_revision, "actor": actor})
+        with _WRITE_LOCK:
+            loaded = self.read(assembly_number, source_revision, manual_plan_revision)
+            scene = loaded["scene"]
+            self._assert_binding(scene, source_revision, manual_plan_revision)
+            previous = prior_receipt(scene, request_id, payload_hash)
+            if previous is not None:
+                return {**loaded, "receipt": previous, "changed": previous["changedIds"]}
+            if hashes_revision != loaded["revision"]:
+                raise DocumentEditError("stale_revision", "The host snapshot changed before the batch; read again.")
+            if len(expected_hashes) != len(commands):
+                raise DocumentEditError("invalid_document_operation", "Every target requires a pre-image hash.")
+            # Even matching base revisions require the observed target hashes.
+            # The integer revision distinguishes old from future opaque hashes.
+            check_preconditions(scene, expected_revision, expected_hashes, current_hashes)
+            if expected_revision == scene["editRevision"] and base_revision != loaded["revision"]:
+                raise DocumentEditError("stale_revision", "The read revision does not match its scene binding.")
+            candidate = copy.deepcopy(scene)
+            persisted = []
+            changed = []
+            for index, (target, command) in enumerate(zip(expected_hashes, commands)):
+                try:
+                    item = apply_documentation_command_candidate(candidate, {**command, "actor": actor}, page_targets)
+                except DocumentationSceneError as error:
+                    raise DocumentEditError("invalid_document_operation", str(error), operationIndex=index, targetId=target) from error
+                # A text replacement that leaves the effective projection equal
+                # is marked by the host, but still went through domain validation.
+                if command.get("_noChange"):
+                    continue
+                candidate = item["scene"]
+                persisted.append(item["command"])
+                changed.append(target)
+            receipt = make_receipt(scene, request_id=request_id, payload_hash=payload_hash,
+                document=document_id(self.document_type, assembly_number), expected_revision=expected_revision,
+                changed=changed, undoable=True)
+            if not changed:
+                retain_receipt(candidate, receipt)
+                self._save(assembly_number, candidate)
+                return {**self.read(assembly_number, source_revision, manual_plan_revision), "receipt": receipt, "changed": []}
+            cursor = scene["historyCursor"]
+            candidate["commands"] = list(scene["commands"][:cursor]) + [{
+                "operation": "batch", "commands": persisted, "requestId": request_id, "actor": actor}]
+            candidate["historyCursor"] = cursor + 1
+            _advance_edit_versions(candidate, persisted)
+            retain_receipt(candidate, receipt)
+            self._save(assembly_number, candidate)
+            return {**self.read(assembly_number, source_revision, manual_plan_revision),
+                    "receipt": receipt, "changed": changed}
 
     def move_history(
         self,
@@ -1922,6 +1788,7 @@ class DocumentationSceneRepository:
             next_cursor = cursor - 1 if direction == "undo" else cursor + 1
             if next_cursor < 0 or next_cursor > len(commands):
                 raise DocumentationSceneError(f"nothing to {direction}")
+            _advance_edit_versions(scene, [commands[next_cursor if direction == "undo" else cursor]])
             scene["historyCursor"] = next_cursor
             active_commands = commands[:next_cursor]
             scene["pages"] = replay_documentation_commands(active_commands)
@@ -1930,10 +1797,7 @@ class DocumentationSceneRepository:
             )
             scene["updatedAt"] = _utc_now()
             validate_documentation_scene(scene)
-            _write_atomic(
-                self._scene_path(assembly_number),
-                canonical_documentation_bytes(scene),
-            )
+            self._save(assembly_number, scene)
             return {
                 "scene": copy.deepcopy(scene),
                 "revision": documentation_scene_revision(scene),
@@ -1943,3 +1807,285 @@ class DocumentationSceneRepository:
                 "canUndo": next_cursor > 0,
                 "canRedo": next_cursor < len(commands),
             }
+
+
+def apply_documentation_command_candidate(
+    scene: Mapping[str, Any], command: Mapping[str, Any],
+    page_targets: Mapping[str, Mapping[str, Iterable[str]]],
+) -> Dict[str, Any]:
+    """Validate and replay one command without reading or writing a store.
+
+    The document transaction owns binding, locking and persistence. Keep the
+    legacy command shape and validators for rendering/export compatibility.
+    """
+    scene = copy.deepcopy(dict(scene))
+    operation = str(command.get("operation") or "")
+    target_type = str(command.get("targetType") or "")
+    page_id = str(command.get("pageId") or "")
+    target_id = str(command.get("targetId") or "")
+    actor = str(command.get("actor") or "user")
+    if operation not in DOCUMENTATION_COMMAND_OPERATIONS:
+        raise DocumentationSceneError("unsupported documentation command")
+    if target_type not in DOCUMENTATION_TARGET_TYPES:
+        raise DocumentationSceneError("unsupported documentation target type")
+    if actor not in DOCUMENTATION_COMMAND_ACTORS:
+        raise DocumentationSceneError("unsupported documentation command actor")
+    transforms = None
+    arrangement = None
+    global_operation = operation in {"set_theme", "apply_template"}
+    add_object_operation = operation == "add_object"
+    if operation == "arrange":
+        if target_type != "selection":
+            raise DocumentationSceneError(
+                "arrangement requires a target selection"
+            )
+        arrangement = str(command.get("arrangement") or "")
+        if arrangement not in DOCUMENTATION_ARRANGEMENTS:
+            raise DocumentationSceneError(
+                "unsupported documentation arrangement"
+            )
+        transforms = _arrange_transforms(command.get("transforms"))
+        for transform in transforms:
+            DocumentationSceneRepository._validate_target(
+                page_id=page_id,
+                target_type=transform["targetType"],
+                target_id=transform["targetId"],
+                page_targets=page_targets,
+            )
+    elif global_operation:
+        if target_type != "document_theme" or target_id != "company-theme":
+            raise DocumentationSceneError("document theme target is invalid")
+        if page_id not in page_targets:
+            raise DocumentationSceneError("documentation page is not editable")
+    elif add_object_operation:
+        if target_type != "document_object":
+            raise DocumentationSceneError("object insertion target is invalid")
+        if page_id not in page_targets:
+            raise DocumentationSceneError("documentation page is not editable")
+        existing = {
+            str(value)
+            for value in page_targets[page_id].get("document_object") or []
+        }
+        if target_id in existing:
+            raise DocumentationSceneError("documentation object already exists")
+    else:
+        if target_type == "selection":
+            raise DocumentationSceneError(
+                "selection targets require an arrangement"
+            )
+        DocumentationSceneRepository._validate_target(
+            page_id=page_id,
+            target_type=target_type,
+            target_id=target_id,
+            page_targets=page_targets,
+        )
+    translation = None
+    if operation == "translate":
+        translation = (
+            _annotation_vector(command.get("translation"))
+            if target_type in {
+                "balloon",
+                "leader",
+                "page_element",
+                "document_object",
+            }
+            else _vector(command.get("translation"))
+        )
+        if _is_zero_vector(translation):
+            raise DocumentationSceneError("translation must move the target")
+    rotation = None
+    if operation == "rotate":
+        if target_type not in {
+            "figure",
+            "manual_group",
+            "occurrence",
+            "document_object",
+        }:
+            raise DocumentationSceneError(
+                "only CAD presentation targets and document objects can rotate"
+            )
+        rotation = _rotation_vector(command.get("rotation"))
+        if _is_zero_vector(rotation):
+            raise DocumentationSceneError("rotation must turn the target")
+    size_delta = None
+    if operation == "resize":
+        if target_type not in {"page_element", "document_object"}:
+            raise DocumentationSceneError("only publication objects can resize")
+        size_delta = _size_vector(command.get("sizeDelta"))
+        if _is_zero_vector(size_delta):
+            raise DocumentationSceneError("resize must change the target size")
+    camera_preset = None
+    if operation == "set_view":
+        if target_type != "figure":
+            raise DocumentationSceneError(
+                "only figures have publication views"
+            )
+        camera_preset = str(command.get("cameraPreset") or "")
+        if camera_preset not in DOCUMENTATION_CAMERA_PRESETS:
+            raise DocumentationSceneError(
+                "unsupported documentation camera preset"
+            )
+    explode_delta = None
+    if operation == "adjust_explode":
+        if target_type != "figure":
+            raise DocumentationSceneError(
+                "only figures have explosion spacing"
+            )
+        explode_delta = _explode_delta(command.get("explodeDelta"))
+        if abs(explode_delta) < 1e-12:
+            raise DocumentationSceneError(
+                "explode adjustment must change spacing"
+            )
+    if operation == "reset_page" and target_type != "figure":
+        raise DocumentationSceneError("page reset requires the figure target")
+    if operation in {"clear_callouts", "restore_callouts"} and target_type != "figure":
+        raise DocumentationSceneError(
+            "page callout collection commands require the figure target"
+        )
+    if operation == "add_callout" and target_type not in {
+        "occurrence",
+        "manual_group",
+    }:
+        raise DocumentationSceneError(
+            "adding a callout requires a component or manual group target"
+        )
+    if operation == "remove_callout" and target_type != "balloon":
+        raise DocumentationSceneError(
+            "removing a callout requires a balloon target"
+        )
+    callout_items = None
+    if operation in {"clear_callouts", "add_callout", "remove_callout"}:
+        callout_items = _callout_items(command.get("calloutItems"))
+    elif operation == "restore_callouts":
+        if command.get("calloutItems") is not None:
+            raise DocumentationSceneError(
+                "restoring generated callouts must clear the manual callout override"
+            )
+    anchor_side = None
+    anchor_point = None
+    if operation == "set_anchor":
+        if target_type != "leader":
+            raise DocumentationSceneError("only leaders have editable anchors")
+        if command.get("anchorPoint") is not None:
+            anchor_point = _anchor_point(command.get("anchorPoint"))
+        else:
+            anchor_side = str(command.get("anchorSide") or "")
+            if anchor_side not in DOCUMENTATION_ANCHOR_SIDES:
+                raise DocumentationSceneError("unsupported documentation anchor side")
+    leader_style = None
+    if operation == "set_leader_style":
+        if target_type != "leader":
+            raise DocumentationSceneError("only leaders have editable route styles")
+        leader_style = str(command.get("leaderStyle") or "")
+        if leader_style not in DOCUMENTATION_LEADER_STYLES:
+            raise DocumentationSceneError("unsupported documentation leader style")
+    end_condition = None
+    if operation == "set_end_condition":
+        if target_type != "leader":
+            raise DocumentationSceneError(
+                "only leaders have editable end conditions"
+            )
+        end_condition = str(command.get("endCondition") or "")
+        if end_condition not in DOCUMENTATION_LEADER_END_CONDITIONS:
+            raise DocumentationSceneError(
+                "unsupported documentation leader end condition"
+            )
+    repeated_part_strategy = None
+    if operation == "set_repeated_strategy":
+        if target_type != "leader":
+            raise DocumentationSceneError(
+                "only leaders have an editable repeated-part strategy"
+            )
+        repeated_part_strategy = str(command.get("repeatedPartStrategy") or "")
+        if repeated_part_strategy not in DOCUMENTATION_REPEATED_PART_STRATEGIES:
+            raise DocumentationSceneError(
+                "unsupported documentation repeated-part strategy"
+            )
+    document_object = None
+    if operation == "add_object":
+        document_object = _document_object(
+            command.get("documentObject"), expected_id=target_id
+        )
+    if operation == "remove_object" and target_type != "document_object":
+        raise DocumentationSceneError("only document objects can be removed")
+    text = None
+    if operation == "update_text":
+        if target_type not in {"page_element", "document_object"}:
+            raise DocumentationSceneError("selected target has no editable text")
+        text = str(command.get("text") or "")
+        if len(text) > _MAX_DOCUMENT_TEXT:
+            raise DocumentationSceneError("documentation text is too long")
+    style = None
+    if operation == "update_style":
+        if target_type not in {"page_element", "document_object"}:
+            raise DocumentationSceneError("selected target has no editable style")
+        style = _document_style(command.get("style"), allow_empty=False)
+    theme = None
+    page_masters = None
+    if operation == "set_theme":
+        theme = _document_theme(command.get("theme"))
+    elif operation == "apply_template":
+        theme = _document_theme(command.get("theme"))
+        page_masters = _page_masters(command.get("pageMasters"))
+
+    cursor = int(scene.get("historyCursor") or 0)
+    commands = list(scene.get("commands") or [])[:cursor]
+    if len(commands) >= _MAX_COMMANDS:
+        raise DocumentationSceneError("documentation command history is full")
+    now = _utc_now()
+    persisted_command: Dict[str, Any] = {
+        "commandId": f"documentation-command-{secrets.token_hex(8)}",
+        "operation": operation,
+        "targetType": target_type,
+        "targetId": target_id if target_type != "figure" else page_id,
+        "pageId": page_id,
+        "actor": actor,
+        "createdAt": now,
+    }
+    if translation is not None:
+        persisted_command["translation"] = translation
+    if rotation is not None:
+        persisted_command["rotation"] = rotation
+    if size_delta is not None:
+        persisted_command["sizeDelta"] = size_delta
+    if transforms is not None:
+        persisted_command["transforms"] = transforms
+        persisted_command["arrangement"] = arrangement
+    if camera_preset is not None:
+        persisted_command["cameraPreset"] = camera_preset
+    if explode_delta is not None:
+        persisted_command["explodeDelta"] = explode_delta
+    if anchor_side is not None:
+        persisted_command["anchorSide"] = anchor_side
+    if anchor_point is not None:
+        persisted_command["anchorPoint"] = anchor_point
+    if leader_style is not None:
+        persisted_command["leaderStyle"] = leader_style
+    if end_condition is not None:
+        persisted_command["endCondition"] = end_condition
+    if repeated_part_strategy is not None:
+        persisted_command["repeatedPartStrategy"] = repeated_part_strategy
+    if document_object is not None:
+        persisted_command["documentObject"] = copy.deepcopy(document_object)
+    if text is not None:
+        persisted_command["text"] = text
+    if style is not None:
+        persisted_command["style"] = copy.deepcopy(style)
+    if theme is not None:
+        persisted_command["theme"] = copy.deepcopy(theme)
+    if page_masters is not None:
+        persisted_command["pageMasters"] = copy.deepcopy(page_masters)
+    if operation in {"clear_callouts", "add_callout", "remove_callout"}:
+        persisted_command["calloutItems"] = copy.deepcopy(callout_items)
+    elif operation == "restore_callouts":
+        persisted_command["calloutItems"] = None
+    commands.append(persisted_command)
+    if not scene.get("createdAt"):
+        scene["createdAt"] = now
+    scene["updatedAt"] = now
+    scene["commands"] = commands
+    scene["historyCursor"] = len(commands)
+    scene["pages"] = replay_documentation_commands(commands)
+    scene["theme"], scene["pageMasters"] = replay_documentation_theme(commands)
+    validate_documentation_scene(scene)
+    return {"scene": scene, "command": persisted_command}

@@ -1,7 +1,7 @@
 # Documentation editor implementation plan
 
 Date: 2026-11-09. Builder: Codex. Reviewer, independent tester and committer:
-Claude. Approval covers Phases 0-5; this handoff implements **P0 only**. Read with
+Claude. Approval covers Phases 0-5; P0 is committed and P1a is the current review gate. Read with
 [the audit](documentation-editor-audit-and-strategy.md), especially sections
 6.4-6.6 and 7, and [the capability matrix](documentation-editor-capability-matrix.md).
 The user retains the PyMuPDF licensing decision. No release approval is inferred.
@@ -21,7 +21,7 @@ slices into a larger checkpoint. Re-estimate after the P2 proof.
 
 | Slice | Bounded deliverable | Report |
 | --- | --- | --- |
-| P1a | Read-bound service, atomic scene/slot batches, receipts | `P1a.md` |
+| P1a | Read-bound service, atomic batches within each store, receipts | `P1a.md` |
 | P1b | Citation integrity, UI, named-change undo and text-safe figure captures | `P1b.md` |
 | P1c | Stable generated identities, three-way refresh and conflict UI | `P1c.md` |
 | P2a | One authored-region Tiptap adapter under a development flag | `P2a.md` |
@@ -132,86 +132,71 @@ specification document 1, slots 1, work-instruction document 1 / plan 2,
 inspection values 1. Preserve the existing parts plan version and narrow
 `rebind_manual_plan` behavior. Inspection remains a typed form, not rich prose.
 
-Introduce `ai_inspector/documentation/edit_store.py`, with one authoritative
-`<existing-type-root>/<assembly>/edit.json`. Type roots already separate manuals,
-sheets and instructions; do not put long document IDs into filenames.
+Supervisor decision for P1: add guarantees **in place**. DocumentationSceneRepository
+in parts_manual/documentation.py remains the only owner of documentation-scene.json;
+SlotStore in specification_sheet/slots.py remains the only owner of slots.json.
+There is no authoritative envelope, reader cutover, cross-file transaction, or
+cross-process lock. The desktop's single backend process is assumed. Each owner
+uses its process RLock around read/check/stage/fsync/replace. The host holds those
+same locks while compiling effective target hashes; repositories do not compile.
 
-P1a `DocumentEditState` schema 1:
+P1a scene schema 2 -> 3 adds editRevision (monotonic integer), editEpoch,
+fieldVersions, receipts and receiptOrder. Rendering identity excludes these
+transaction fields and uses the historical schema-2 projection. Old command
+entries replay exactly as before. New batch history entries contain operation
+"batch", commands, requestId and actor; they replay and undo/redo as ONE step
+through the existing historyCursor. A legacy apply_command remains compatible
+and advances mutation counters. No second undo stack is introduced.
 
-```text
-schemaVersion: 1
-documentId: deterministic UUID5(namespace, documentType + normalized assemblyNumber)
-documentType, assemblyNumber, sourceRevision, manualPlanRevision
-revision: monotonic integer (never reused after undo)
-fieldVersions: targetId -> monotonic mutation counter (also for structural containers)
-scene: existing schema-2 scene projection
-slots: existing schema-1 slot projection, or null
-base: initial scene/slots snapshots for journal replay
-history: ordered change records; bounded active groups with a retained base snapshot
-receipts: requestId -> payloadHash + committed structured receipt
-```
+Slot schema 1 -> 2 adds the same transaction fields inside slots.json. Value,
+row, settings and compound operations stage all their changes before one write.
+Slot undo remains P1b work. The two stores have independent monotonic revisions.
+A documentId is UUID5(namespace, documentType + normalized assemblyNumber), never
+a long directory name. Reads also return source/plan bindings and opaque scene
+revision when applicable. There is no single undo group spanning slots and page text.
 
-The existing schema-2 `commands` remain replayable; a change group records its
-scene command range plus before/after slot state. Canonical user undo uses the
-envelope groups. The old scene cursor is a compatibility projection, not another
-undo stack. Validate scene replay and envelope replay together. Never expose a
-half-committed combination of `slots.json` and `documentation-scene.json`.
+Read migration is pure: old files upgrade in memory with unchanged rendering and
+no write on open, export or read. The first explicit write preserves original
+bytes atomically beside the file as documentation-scene.v2.json (also accepts the
+older v1 scene input) or slots.v1.json. Subsequent writes retain that rollback
+input. A differing pre-existing backup rejects the upgrade. Unknown future
+schemas are refused with a schema error and their bytes are never overwritten;
+this slice does not attempt to render a future format it cannot validate.
 
-Read migration is pure: if `edit.json` is absent, load the legacy scene and slots,
-derive identity/revision in memory, and return their exact rendering. No save on
-open, export or read. On the **first explicit mutation**, validate old file hashes
-under the store lock, preserve original bytes in `bak/0/`, then atomically install
-the envelope. Read-after-write prefers the envelope exclusively. All legacy
-writers become facades over this service; do not maintain writable mirror stores.
-The original files remain immutable rollback inputs. If a legacy file changes
-after adoption, report `legacy_store_changed`; do not merge it silently.
+Under the scene/slot lock, validate document/source bindings, look up the receipt
+before stale checks, compare every observed target hash, stage and validate the
+entire candidate, then replace once. Retained identical retries return the
+original receipt; same requestId with a different payload is request_id_reused.
+The host passes current effective hashes and the scene revision they describe;
+a stale unlocked snapshot cannot authorize a write. Every affected target must
+have a matching pre-image and no open conflict, including with an older observed
+revision. Future revisions fail. Manual legacy scene routes keep their stricter
+baseRevision check; Sage batches and bound slot writes allow matching older reads.
 
-One process lock plus an exclusive short lock file protects the entire store
-transaction across processes. Recheck revision under the lock, stage/validate a
-candidate, fsync and replace one file. Lock failure reports `document_busy`;
-stale lock recovery requires verified dead owner, never time alone. Readers see
-old or new complete envelopes. Receipts are in the same replace, so retry after
-commit/before-response returns the committed result. No speculative success.
+Retain the newest 1,000 receipts in commit order, keyed by request IDs of 1-128
+characters. Eviction happens in the same atomic write. Include monotonic per-field
+and structural mutation counters in hashes, advancing them on every mutation,
+undo and redo. Thus evicted retries cannot apply a change twice even after an
+undo or change-then-revert. Unrelated writes do not invalidate target hashes.
+Bounded requests are at most 256 KiB; scene history retains its existing 2,000
+entry cap and scene files are limited to 16 MiB. A no-op changes no content,
+revision or cursor; its receipt may be persisted as transaction metadata.
 
-Retain the newest 1,000 committed receipts, keyed by bounded 128-character IDs;
-evict oldest receipts in the same atomic commit. A long-lived manual never becomes
-uneditable because its receipt history is full. Every mutation carries the
-observed revision and pre-image hashes for its complete dependency set. A retry
-whose receipt was evicted fails `stale_revision` or `content_hash_mismatch` and
-cannot apply twice. Retained retries still return the original receipt. Undo
-history and receipt retention are independent; cap request bytes/history size.
-Include each target's monotonic fieldVersion in its pre-image hash, advancing it
-on every committed mutation, including undo/redo/refresh. This also closes the
-change-then-revert (ABA) retry case while allowing edits to unrelated fields.
-Structural insertions hash the parent collection as well as the anchor; no-op
-requests produce no mutation/revision increment. Test eviction, intervening
-unrelated writes, change-then-revert and structural retries explicitly.
+Future slices version additive keys in these same stores: P1b adds fieldMeta and
+named-change metadata (including a slot undo journal); P1c adds identities,
+generatedBaseline, conflicts, orphans and refresh receipts where relevant.
+P2a adds versioned richText, P3 advances its typography/table schema, and P4 adds
+object and page-setup metadata to the scene. Assign each store's next version at
+that slice, with pure read migration and old-shape fixtures. Generated parts
+documents advance 4 -> 5 in P1b and 5 -> 6 in P1c; operations/specification/work
+advance 1 -> 2 -> 3 for provenance and identity. Rich payloads carry their own
+version and advance generated-document versions when first introduced.
 
-P1b envelope schema 2 adds `fieldMeta` (provenance below). P1c schema 3 adds
-`identities`, `generatedBaseline`, `conflicts`, `orphans`, and `refreshReceipts`.
-P2a schema 4 adds field `richText` payloads (rich text schema 1). P3a rich text
-schema 2 adds typography/spacing attributes; P3b rich text schema 3 adds tables.
-P4a envelope schema 5 adds object crop/order/aspect metadata; P4b schema 6 adds
-page setup. Old envelopes migrate in memory with no default rendering changes.
-Generated parts documents advance 4 -> 5 in P1b and 5 -> 6 in P1c;
-operations/specification/work documents advance 1 -> 2 in P1b and 2 -> 3 in
-P1c, for provenance and then stable identity output. Rich payloads carry their
-own explicit versions in P2/P3; the enclosing generated document advances again
-when it first gains those payloads (parts 6 -> 7, others 3 -> 4 in P2). Their source
-plans and existing slots keep their current version unless their own shape changes.
-
-Newer unknown schemas open read-only, preserving bytes and reporting
-`unsupported_document_schema`; never coerce, strip unknown fields or overwrite.
-Keep a versioned old-shape JSON fixture for every transition under
-`tests/fixtures/documentation_editor/` (small synthetic JSON or reduced, sanitized
-excerpts of the authorized local MMLE scene; never the full local files). In P1a,
-use the supplied old-shape `generated/parts_manual/mmle-50d/documentation-scene.json`
-to cover an existing saved scene, preserving representative overrides/history in
-any tracked excerpt and removing private paths/unneeded data. Test raw file
-hashes before/after load, identical rendering/exports of untouched content, first
-write adoption, restart, and refusal by an older writer. A backup is not a promise
-that an old executable understands a new edited document; rollback restores the
-pre-upgrade version and retains new files for later recovery.
+Keep a reduced, sanitized old MMLE scene under tests/fixtures/documentation_editor/.
+Test exact bytes before/after read, preserved history/projection, original-byte
+backup on first write, restart, retry and refused unsupported versions. Rollback
+restores the pre-upgrade file into a separate temporary store; it does not promise
+that an old executable understands new edited content. Keep new files for recovery.
 
 ### 3.2 Target identity, hashes and bindings
 
@@ -228,7 +213,8 @@ to another field does not bounce Sage's write. If a hash differs, a dependency
 was deleted/rebound or a target has an open conflict, reject the entire batch
 with `content_hash_mismatch`, `stale_revision` or `manual_edit_conflict` as applicable.
 Future revisions and changed document/source bindings are rejected. This rule
-applies equally to manual and Sage writes. Conflict-resolution operations instead
+applies to Sage batches and bound slot writes. Existing manual scene commands
+keep the stricter exact baseRevision requirement. Conflict-resolution operations instead
 validate the explicitly named conflict's hash and all affected field hashes;
 they are the only operations allowed to resolve an open conflict. The receipt
 records `expectedRevision` (requested), `beforeRevision` (actual commit base) and
@@ -299,6 +285,9 @@ operation (tagged union):
   set_slot_value {targetId, expectedContentHash, value}
 output: {receipt: <above>, changed: [stable target IDs]}
 ```
+
+A request cannot span stores. Mixed text/value operations return
+`invalid_document_operation`: "send text and value edits as separate requests".
 
 The service infers actor from the authenticated host context. Slot numeric/source
 restrictions still apply; raw `source`, `accepted` or `actor` supplied by Sage
@@ -476,63 +465,55 @@ nothing. Missing legacy baseline is a conflict, never permission to clear edits.
 
 ### P1a - read-bound atomic edits
 
-Change/add: `ai_inspector/documentation/edit_store.py`, `commands.py`, `targets.py`;
-`parts_manual/documentation.py` (narrow pure candidate application extraction);
-`specification_sheet/slots.py` (service facade); `server.py` documentation host and
-legacy routes; `codex_runtime/documentation_tools.py`; the pinned tool tests.
-Frontend: `static/documentation_commands.js` plus a versioned load in `index.html`.
-It holds the displayed revision, uses receipts, reloads only the bound document,
-and displays stale errors without overwriting an active edit. Do not depend on
-the active tab when a delayed request finishes.
+Change/add commands.py and targets.py under ai_inspector/documentation/;
+parts_manual/documentation.py (pure candidate command function and in-place
+apply_batch), specification_sheet/slots.py (staged transactions), server.py host
+and additive request bindings, codex_runtime/documentation_tools.py and playbook,
+and the pinned tool tests. Remove the superseded edit_store.py foundation.
+Frontend documentation_commands.js captures the displayed document/revision at
+edit start. Keep existing save routes; stale saves report a clear error, reload
+only the bound model, and preserve the visible draft. Delayed responses cannot
+retarget the active document after switching. Version its script URL.
 
-Implement envelope 1, migration, service and tool contracts in section 3. All
-existing scene and slot mutations, including settings/rows/returned values,
-route through the same lock and authoritative store; builders receive projected
-state. Preserve dedicated form validators and existing tool names. Initial
-`apply_document_edits` exposes only text and eligible slot values.
+Implement section 3's in-place guarantees. edit_document_text submits one scene
+batch rather than committing each edit independently. apply_document_edits permits
+one store per request: mixed replace_text/set_slot_value operations return
+invalid_document_operation with "send text and value edits as separate requests".
+Existing specialized slot tools retain their authority rules and inputs, adding
+optional preconditions and receipts. Internal validation reads never authorize
+an unseen mutation. No provenance, named undo, refresh or rich text in this slice.
 
-Add `tests/test_documentation_store_chokepoint.py`. Scan production Python sources
-(`server.py`, `ai_inspector/`) with AST/literal checks for direct reads, opens and
-writes of `documentation-scene.json` or `slots.json`, including Path/open helpers
-and assigned filename constants. Only `documentation/edit_store.py` may own these
-filenames/I/O. Keep a checked explicit allowlist for any unavoidable compatibility
-reference, keyed by file and function with reason; initially no other I/O owner
-is allowed. Tests/tools constructing legacy fixtures are outside the production
-scan. Include scan fixtures demonstrating missed readers/writers fail. All readers
-must use the same authoritative service after adoption, not stale legacy files.
+The ownership test scans production server.py and ai_inspector/ Python with
+AST/literal checks, including assigned names and indirect path helpers. Only
+parts_manual/documentation.py may own documentation-scene.json and only
+specification_sheet/slots.py may own slots.json. Keep an explicit reviewed
+(file, function) allowlist, initially empty. Test fixtures/tools are outside the
+production scan. There is no reader/writer cutover: all existing callers continue
+to use their existing repository, with guarantees implemented there.
 
-If P1a cannot finish in one session, stop at a coherent boundary: either **every**
-scene/slot writer goes through the service or **none** does. Keep incomplete service
-work unwired if necessary and state the incomplete gate in P1a.md. Never deliver
-half-migrated writers or permit adoption of edit.json with legacy readers/writers
-still active. Claude reviews this boundary before committing or resuming.
+Tests cover v2 scene/v1 slot reads without writes, one-time byte backups,
+atomic invalid-second-operation failure, single cursor batch undo/redo, stale
+hash rejection, matching older-revision acceptance, open-conflict rejection,
+future revision/source-binding refusal, retained receipt retry after restart,
+request-ID reuse, bounded eviction including undo/structural ABA, two threads
+racing one read, denied replace, and crash after commit/before response. Gateway
+tests cover full whitespace-preserving reads, excerpt refusal, old inputs,
+explicit tool schema, separate-store refusal and specialized value authority.
 
-Tests to add: `tests/test_documentation_transactions.py` with
-`test_legacy_read_does_not_write`, `test_stale_revision_matching_hashes_accepted`,
-`test_stale_revision_changed_target_rejected`, `test_open_conflict_rejects_write`,
-`test_invalid_second_edit_commits_nothing`, `test_mixed_scene_slot_batch_atomic`,
-`test_identical_retry_returns_receipt_after_restart`,
-`test_evicted_retry_does_not_apply_twice`, `test_evicted_retry_after_undo_rejected`,
-`test_evicted_structural_retry_rejected`, `test_receipt_records_requested_and_actual_revision`,
-`test_request_id_reuse_is_rejected`, `test_two_writers_one_revision`,
-`test_full_read_preserves_whitespace`, `test_old_tool_inputs_use_read_snapshot`,
-`test_excerpt_cannot_replace_full_field`, `test_ui_switch_does_not_retarget`.
-Use a subprocess for two-writer locking and crash/response receipt recovery.
-
-Gate: shared commands in section 9 plus
-`python -m pytest -q tests/test_documentation_transactions.py tests/test_documentation_store_chokepoint.py` and
-`python tests/smoke_documentation_editor.py --phase P1a` (add this script in P1a).
-Expected: invalid edits and stale writes with changed target hashes leave both
-stores byte-identical; stale writes after unrelated edits succeed; 12 edits are one
-group; retry adds no command; switch documents during delayed save cannot redirect
-it; old caller names/inputs validate and safe read-then-write works. Browser must
-double-click a real page, edit, trigger a stale Sage-host request, reopen, and
-inspect the returned receipt. Risk: all legacy write entry points must be found.
-Leave rich text, regeneration and full citation UI out of this slice.
+Gate: section 9 commands plus
+python -m pytest -q tests/test_documentation_transactions.py tests/test_documentation_store_chokepoint.py
+and python tests/smoke_documentation_editor.py --phase P1a.
+The real MMLE browser smoke double-clicks text, commits, rejects a stale Sage-host
+HTTP request, reopens, checks original bytes and disk receipts, retries a two-target
+Sage batch, undoes it in one UI step, and switches documents during a delayed save.
+It redirects all five document roots and both appearance roots to a temporary
+snapshot, blocks outbound traffic and emits JSON/nonzero failure status. Claude
+runs it; a deterministic host bridge is not a live provider inference test.
 
 ### P1b - provenance, undo and text-safe figure captures
 
-Envelope 2 migration adds metadata without rewriting old stores. Change
+The next additive scene/slot versions add fieldMeta and named-change metadata
+without rewriting old stores on read. Change
 `documentation/commands.py`, add `provenance.py`, update operations/specification/
 work document compilers and their `exports.py`, `codex_runtime/documentation_tools.py`,
 `server.py`, `static/documentation_commands.js`, `index.html` and pinned tests.
@@ -573,7 +554,8 @@ affected field's current content/provenance with the chosen change's after-state
 revert all or report `undo_conflict`. Unrelated later edits remain. Deletions,
 table structure and compound slot row operations compare their dependency set.
 Redo is an equally guarded inverse of the undo. Frontend Ctrl+Z outside an active
-editor and scene undo endpoints use one group; no skipped slot changes. Existing
+editor and scene undo endpoints use one scene group. Slot undo uses its own slots.json
+journal; there is no cross-store undo group. Existing
 inspection measurements/signatures stay on their current guarded form path and
 are explicitly not advertised as generic document undo.
 
@@ -626,7 +608,8 @@ out; user confirmation as entered-by-user content is included in this slice.
 
 ### P1c - stable identity and safe refresh
 
-Envelope 3 and the next generated-document versions from section 3.1. Add
+The next additive scene/slot versions add identities, generatedBaseline, conflicts
+and refresh receipts, with generated-document versions from section 3.1. Add
 `documentation/identity.py`, `refresh.py`; change parts `document.py` and
 `documentation.py`, operations/work/specification `document.py`, server builders,
 tools, `static/documentation_conflicts.js`, `index.html`, and prompts. Source data
@@ -835,7 +818,7 @@ arbitrary row heights, nested tables or unrestricted BOM surgery.
 
 ### P4a - basic object controls
 
-Envelope 5 adds ordered object IDs per page, aspect-lock flag, normalized image
+A versioned additive scene transition adds ordered object IDs per page, aspect-lock flag, normalized image
 crop `{x,y,width,height}` in source-image coordinates and rotation limited to
 0/90/180/270 for images in this release. Old `contain`/`cover` objects retain their
 old rendering until explicitly edited; do not silently convert `cover` to a new
@@ -865,7 +848,7 @@ freeform diagram engine, new fonts or PPTX.
 
 ### P4b - page setup and complete fidelity gate
 
-Envelope 6 adds optional `pageSetup` with paper A4/Letter, orientation, margins in
+A versioned additive scene transition adds optional `pageSetup` with paper A4/Letter, orientation, margins in
 pt, and `layoutMode:'fixed'`. Absence uses the existing generated geometry (including
 960x540 manuals); migration must not turn those into Letter. Presets apply to an
 explicitly selected publication, not globally. Each document type advertises
@@ -915,7 +898,7 @@ budgets require a written finding, not an undocumented relaxation.
 Crash tests kill a child before replace, after replace/before receipt delivery,
 during refresh and during export. Test disk full/read-only directory/denied file
 replace, concurrent writers, interrupted first migration, unknown newer schema,
-restart and restoring `bak/0` into another temporary store. Failures preserve
+restart and restoring the versioned original-byte backup into another temporary store. Failures preserve
 the old committed state or the complete new state, never a hybrid. Retained
 receipts remain valid and evicted retries cannot mutate again. No overwrite of
 real files during recovery testing.

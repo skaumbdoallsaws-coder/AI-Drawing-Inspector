@@ -10,12 +10,22 @@ import copy
 import json
 import os
 import re
+import threading
+from functools import wraps
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
-SLOT_SCHEMA_VERSION = 1
+from ai_inspector.documentation.commands import (
+    DocumentEditError, transaction_defaults, validate_transaction_metadata, document_id,
+    request_hash, prior_receipt, check_preconditions, make_receipt, retain_receipt,
+)
+
+SLOT_SCHEMA_VERSION = 2
+# Storage metadata does not change the generated sheet's layout/source plan.
+SLOT_LAYOUT_VERSION = 1
+_SLOT_LOCK = threading.RLock()
 TEMPLATE_SCHEMA_VERSION = 1
 FEATURE_COUNT = 3
 MAX_ROWS = 14
@@ -120,11 +130,21 @@ def _clean(value: Any, limit: int, label: str) -> str:
     return text
 
 
-def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
+def _write_bytes(path: Path, payload: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".tmp-{uuid.uuid4().hex}{path.suffix}")
-    temporary.write_bytes((json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8"))
-    os.replace(temporary, path)
+    try:
+        with temporary.open("wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
+    _write_bytes(path, (json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8"))
 
 
 def _read_json(path: Path) -> Optional[Dict[str, Any]]:
@@ -158,10 +178,32 @@ def clean_row(row: Mapping[str, Any]) -> Dict[str, Any]:
     return result
 
 
+def _slot_mutation(method):
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        with _SLOT_LOCK:
+            if self._candidate is not None:
+                return method(self, *args, **kwargs)
+            return self.transaction(lambda store: method(store, *args, **kwargs))
+    return wrapped
+
+
+def _slot_semantics(data):
+    if isinstance(data, dict):
+        return {k: _slot_semantics(v) for k, v in data.items() if k not in {"at", "updatedAt"}}
+    if isinstance(data, list):
+        return [_slot_semantics(v) for v in data]
+    return data
+
+
 class SlotStore:
     """One sheet's stored values, row list, machine type and units: <root>/<assembly>/slots.json."""
 
+    transaction_lock = _SLOT_LOCK
+
     def __init__(self, root: str | Path, assembly_number: str):
+        self._candidate = None
+        self.last_receipt = None
         number = str(assembly_number or "").strip()
         if not _SAFE_RE.fullmatch(number):
             raise SpecificationSlotError("invalid specification-sheet assembly number")
@@ -171,10 +213,15 @@ class SlotStore:
         self.path.relative_to(base)
 
     def read(self) -> Dict[str, Any]:
+        if self._candidate is not None:
+            return copy.deepcopy(self._candidate)
         payload = _read_json(self.path) or {}
+        version = payload.get("schemaVersion", 1)
+        if version not in {1, SLOT_SCHEMA_VERSION}:
+            raise DocumentEditError("unsupported_document_schema", "This slot store needs a newer editor.")
         values = payload.get("values") if isinstance(payload.get("values"), dict) else {}
         rows = payload.get("rows") if isinstance(payload.get("rows"), list) else None
-        return {
+        result = {
             "schemaVersion": SLOT_SCHEMA_VERSION,
             "assemblyNumber": self.assembly_number,
             "values": {slot: dict(item) for slot, item in values.items() if isinstance(item, dict)},
@@ -183,12 +230,93 @@ class SlotStore:
             "units": payload.get("units") if payload.get("units") in UNITS else None,
             "updatedAt": payload.get("updatedAt"),
         }
+        for key in ("editRevision", "editEpoch", "fieldVersions", "receipts", "receiptOrder", "conflicts"):
+            if key in payload:
+                result[key] = copy.deepcopy(payload[key])
+        transaction_defaults(result)
+        validate_transaction_metadata(result)
+        return result
 
     def _save(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        data["updatedAt"] = now()
-        _write_json(self.path, data)
+        if self._candidate is None:
+            raise RuntimeError("Slot writes require a transaction")
+        self._candidate = copy.deepcopy(data)
         return self.read()
 
+    def transaction(self, change, *, expected_revision=None, request_id=None,
+                    expected_hashes=None, current_hashes=None, payload=None, actor="user"):
+        """Stage every nested row/value/settings change and replace slots once."""
+        with _SLOT_LOCK:
+            if self._candidate is not None:
+                return change(self)
+            before = self.read()
+            self.last_receipt = None
+            payload_hash = None
+            if request_id is not None:
+                payload_hash = request_hash(request_id, {"payload": payload, "actor": actor})
+                prior = prior_receipt(before, request_id, payload_hash)
+                if prior is not None:
+                    self.last_receipt = prior
+                    return {"storedSlots": prior["changedIds"], "retried": True}
+                check_preconditions(before, expected_revision, expected_hashes or {}, current_hashes or {})
+            self._candidate = copy.deepcopy(before)
+            try:
+                result = change(self)
+                candidate = self._candidate
+                changed = ["slot:" + key for key in set(before["values"]) | set(candidate["values"])
+                           if _slot_semantics(before["values"].get(key)) != _slot_semantics(candidate["values"].get(key))]
+                structural = any(before[key] != candidate[key] for key in ("rows", "type", "units"))
+                if structural:
+                    changed.append("@sheet")
+                changed.sort()
+                if payload_hash is not None:
+                    self.last_receipt = make_receipt(before, request_id=request_id, payload_hash=payload_hash,
+                        document=document_id("product_specification_sheet", self.assembly_number),
+                        expected_revision=expected_revision, changed=changed, undoable=False)
+                if not changed and payload_hash is None:
+                    return result
+                if changed:
+                    candidate["editRevision"] = before["editRevision"] + 1
+                    for key in set(changed) | {"@sheet"}:
+                        candidate["fieldVersions"][key] = before["fieldVersions"].get(key, 0) + 1
+                    candidate["updatedAt"] = now()
+                if self.last_receipt is not None:
+                    retain_receipt(candidate, self.last_receipt)
+                validate_transaction_metadata(candidate)
+                if self.path.is_file():
+                    original = self.path.read_bytes()
+                    if json.loads(original).get("schemaVersion", 1) == 1:
+                        backup = self.path.with_name("slots.v1.json")
+                        if backup.exists() and backup.read_bytes() != original:
+                            raise DocumentEditError("legacy_store_changed", "The slot rollback input changed.")
+                        if not backup.exists():
+                            # Preserve bytes, not a reserialized JSON copy.
+                            _write_bytes(backup, original)
+                _write_json(self.path, candidate)
+                # Preserve existing return shapes while returning the committed
+                # projection for methods that traditionally returned the store.
+                if isinstance(result, dict) and "schemaVersion" in result and "values" in result:
+                    result = copy.deepcopy(candidate)
+                return result
+            finally:
+                self._candidate = None
+
+    def apply_batch(self, items, source, *, expected_revision, request_id, expected_hashes,
+                    current_hashes, payload=None, actor="sage"):
+        items = list(items)
+        if not 1 <= len(items) <= 12:
+            raise DocumentEditError("invalid_document_operation", "Submit 1-12 slot values.")
+        if len({item.get("slot") for item in items}) != len(items):
+            raise DocumentEditError("invalid_document_operation", "Each slot may occur only once in a batch.")
+        if set(expected_hashes) != {"slot:" + str(item.get("slot")) for item in items}:
+            raise DocumentEditError("document_read_required", "Every slot requires its observed hash.")
+        self.transaction(lambda store: store.set_values(items, source), expected_revision=expected_revision,
+                         request_id=request_id, expected_hashes=expected_hashes, current_hashes=current_hashes,
+                         payload=payload if payload is not None else {"items": items, "source": source,
+                             "expectedRevision": expected_revision, "hashes": expected_hashes}, actor=actor)
+        return {"receipt": self.last_receipt, "changed": self.last_receipt["changedIds"]}
+
+    @_slot_mutation
     def set_values(self, items: Iterable[Mapping[str, Any]], source: str) -> Dict[str, Any]:
         """Store values, or clear them (an empty value goes back to the page's default)."""
         if source not in STORED_SOURCES:
@@ -209,6 +337,7 @@ class SlotStore:
             data["values"][slot] = entry
         return self._save(data)
 
+    @_slot_mutation
     def accept(self, slots: Iterable[str], by: str) -> List[str]:
         data = self.read()
         accepted = []
@@ -221,6 +350,7 @@ class SlotStore:
             self._save(data)
         return accepted
 
+    @_slot_mutation
     def set_rows(self, rows: Iterable[Mapping[str, Any]]) -> Dict[str, Any]:
         cleaned = [clean_row(row) for row in rows]
         keys = [row["key"] for row in cleaned]
@@ -236,6 +366,7 @@ class SlotStore:
                 data["values"].pop(slot)
         return self._save(data)
 
+    @_slot_mutation
     def name_new_row(self, key: str, label: str) -> str:
         """A row added with a placeholder name takes its key from the first real name typed into it; its values
         move with it. Returns the row's key."""
@@ -258,12 +389,14 @@ class SlotStore:
         self._save(data)
         return new_key
 
+    @_slot_mutation
     def reset_rows(self) -> Dict[str, Any]:
         """Back to the profile's or the template's rows; values for rows that remain are kept."""
         data = self.read()
         data["rows"] = None
         return self._save(data)
 
+    @_slot_mutation
     def set_units(self, units: str) -> Dict[str, Any]:
         if units not in UNITS:
             raise SpecificationSlotError("units must be imperial or metric")
@@ -271,6 +404,7 @@ class SlotStore:
         data["units"] = units
         return self._save(data)
 
+    @_slot_mutation
     def set_type(self, key: str, label: str, source: str) -> Dict[str, Any]:
         if not KEY_RE.fullmatch(str(key or "")):
             raise SpecificationSlotError("invalid machine type")

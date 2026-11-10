@@ -1,0 +1,166 @@
+{
+  "assemblyNumber": "MMLE-50D",
+  "commands": [
+    {
+      "actor": "user",
+      "commandId": "documentation-command-fixture-0",
+      "createdAt": "2026-01-01T00:00:00.000000Z",
+      "operation": "rotate",
+      "pageId": "page-cover",
+      "rotation": [
+        0,
+        15,
+        0
+      ],
+      "targetId": "page-cover",
+      "targetType": "figure"
+    },
+    {
+      "actor": "user",
+      "commandId": "documentation-command-fixture-1",
+      "createdAt": "2026-01-01T00:00:00.000000Z",
+      "operation": "rotate",
+      "pageId": "page-cover",
+      "rotation": [
+        0,
+        15,
+        0
+      ],
+      "targetId": "page-cover",
+      "targetType": "figure"
+    },
+    {
+      "actor": "user",
+      "commandId": "documentation-command-fixture-2",
+      "createdAt": "2026-01-01T00:00:00.000000Z",
+      "operation": "rotate",
+      "pageId": "page-cover",
+      "rotation": [
+        0,
+        15,
+        0
+      ],
+      "targetId": "page-cover",
+      "targetType": "figure"
+    },
+    {
+      "actor": "user",
+      "commandId": "documentation-command-fixture-3",
+      "createdAt": "2026-01-01T00:00:00.000000Z",
+      "operation": "update_text",
+      "pageId": "page-parts-index",
+      "targetId": "part.fixture-wheel.description",
+      "targetType": "page_element",
+      "text": "Polyurethane Tread"
+    },
+    {
+      "actor": "user",
+      "commandId": "documentation-command-fixture-4",
+      "createdAt": "2026-01-01T00:00:00.000000Z",
+      "operation": "update_text",
+      "pageId": "page-parts-index",
+      "targetId": "part.fixture-wheel.description",
+      "targetType": "page_element",
+      "text": "Polyurethane Tread 125"
+    }
+  ],
+  "createdAt": "2026-01-01T00:00:00.000000Z",
+  "historyCursor": 5,
+  "manualPlanRevision": "sanitized-plan-1",
+  "pageMasters": {
+    "cover": {
+      "masterId": "cover",
+      "name": "Branded Cover",
+      "pageTypes": [
+        "cover"
+      ],
+      "showFooter": false,
+      "showHeader": true
+    },
+    "reference": {
+      "masterId": "reference",
+      "name": "Reference Page",
+      "pageTypes": [
+        "document_information",
+        "table_of_contents",
+        "manual_section_parts_list",
+        "parts_index"
+      ],
+      "showFooter": true,
+      "showHeader": true
+    },
+    "technical": {
+      "masterId": "technical",
+      "name": "Technical Figure",
+      "pageTypes": [
+        "assembly_overview",
+        "manual_section"
+      ],
+      "showFooter": true,
+      "showHeader": true
+    }
+  },
+  "pages": {
+    "page-cover": {
+      "balloonOverrides": {},
+      "documentObjects": {},
+      "figureOverride": {
+        "rotation": [
+          0,
+          45,
+          0
+        ]
+      },
+      "leaderOverrides": {},
+      "manualGroupOverrides": {},
+      "occurrenceOverrides": {}
+    },
+    "page-parts-index": {
+      "balloonOverrides": {},
+      "documentObjects": {},
+      "figureOverride": null,
+      "leaderOverrides": {},
+      "manualGroupOverrides": {},
+      "occurrenceOverrides": {},
+      "pageElementOverrides": {
+        "part.fixture-wheel.description": {
+          "text": "Polyurethane Tread 125"
+        }
+      }
+    }
+  },
+  "schemaVersion": 2,
+  "sourceRevision": "sanitized-source-1",
+  "theme": {
+    "annotation": {
+      "balloonColor": "#148FD0",
+      "leaderColor": "#111820"
+    },
+    "colors": {
+      "accent": "#43B5EE",
+      "muted": "#596A76",
+      "page": "#FFFFFF",
+      "primary": "#071B2A",
+      "rule": "#ABBAC4",
+      "secondary": "#C7E1F2",
+      "text": "#18212A"
+    },
+    "companyName": "InspectorPro",
+    "logo": null,
+    "name": "InspectorPro Technical",
+    "table": {
+      "bodyFill": "#FFFFFF",
+      "headerFill": "#FFFFFF",
+      "ruleColor": "#6E787F"
+    },
+    "themeId": "inspectorpro-technical",
+    "typography": {
+      "bodyFont": "Arial",
+      "bodyWeight": 400,
+      "headingFont": "Arial",
+      "headingWeight": 700
+    },
+    "version": 1
+  },
+  "updatedAt": "2026-01-01T00:00:00.000000Z"
+}

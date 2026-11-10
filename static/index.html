@@ -14,7 +14,7 @@
     <script src="/static/documentation_conflicts.js?v=20261110-p2a-1"></script>
     <script src="/static/documentation_rich_text_core.js?v=20261110-p2a-2"></script>
     <script type="module" src="/static/documentation_rich_text.js?v=20261110-p2a-2"></script>
-    <link rel="stylesheet" href="/static/documentation_rich_text.css?v=20261110-p2a-2">
+    <link rel="stylesheet" href="/static/documentation_rich_text.css?v=20261110-p2b-2">
     <script src="/static/cad_viewport.js"></script>
     <script>
         // Theme bootstrap — set data-theme BEFORE the stylesheet is parsed
@@ -35634,6 +35634,18 @@
             _showPartsManualDocumentPreview(state.partsManualPayload);
         }
 
+        function _documentationExportMessage(value, fallback = 'The export was not created.') {
+            const payload = value?.payload || value || {};
+            const code = payload.error?.code || payload.code || (typeof payload.error === 'string' ? payload.error : '');
+            const message = payload.error?.message || payload.message || fallback;
+            const details = payload.details || payload;
+            const targets = [...new Set((details.targets || []).map(item => item.targetId).filter(Boolean))];
+            const points = [...new Set(details.codePoints || [])];
+            return (code ? code + ': ' : '') + message
+                + (targets.length ? ' Targets: ' + targets.join(', ') + '.' : '')
+                + (points.length ? ' Code points: ' + points.join(', ') + '.' : '');
+        }
+
         async function _documentationPublishPdf(format = 'pdf') {
             const assemblyNumber = assemblyContext?.assembly_number;
             if (!assemblyNumber) return;
@@ -35690,7 +35702,7 @@
                     );
                     const artifact = format === 'docx' ? exported.docx : exported.pdf;
                     if (!artifact?.url) {
-                        throw new Error(`The work-instruction ${format.toUpperCase()} was not created.`);
+                        throw new Error(_documentationExportMessage(artifact || exported));
                     }
                     _documentationSetStatus(
                         `Exported the ${artifact.pageCount}-page work-instruction review ${format.toUpperCase()}.`,
@@ -35702,7 +35714,7 @@
                         'noopener'
                     );
                 } catch (error) {
-                    _documentationSetStatus(error.message, 'error');
+                    _documentationSetStatus(_documentationExportMessage(error), 'error');
                 } finally {
                     _documentationSetBusy(false);
                     _documentationRenderPageRail();
@@ -35760,7 +35772,7 @@
                         ? exported.fillablePdf
                         : format === 'docx' ? exported.docx : exported.pdf;
                     if (!artifact?.url) {
-                        throw new Error(`The specification-sheet ${fillable ? 'fillable PDF' : format.toUpperCase()} was not created.`);
+                        throw new Error(_documentationExportMessage(artifact || exported));
                     }
                     _documentationSetStatus(
                         fillable
@@ -35774,7 +35786,7 @@
                         'noopener'
                     );
                 } catch (error) {
-                    _documentationSetStatus(error.message, 'error');
+                    _documentationSetStatus(_documentationExportMessage(error), 'error');
                 } finally {
                     _documentationSetBusy(false);
                     _documentationRenderPageRail();
@@ -35821,13 +35833,14 @@
                         { method: 'POST' }
                     );
                     const artifact = format === 'docx' ? exported.docx : exported.pdf;
+                    if (!artifact?.url) throw new Error(_documentationExportMessage(artifact || exported));
                     _documentationSetStatus(
                         `Exported ${artifact.pageCount}-page ${format.toUpperCase()} manual.`,
                         'success'
                     );
                     window.open(new URL(artifact.url, window.location.href).href, '_blank', 'noopener');
                 } catch (error) {
-                    _documentationSetStatus(error.message, 'error');
+                    _documentationSetStatus(_documentationExportMessage(error), 'error');
                 } finally {
                     _documentationSetBusy(false);
                     _documentationRenderPageRail();
@@ -35889,13 +35902,14 @@
                         }),
                     }
                 );
+                if (!published.artifact?.url) throw new Error(_documentationExportMessage(published.artifact || published));
                 _documentationSetStatus(
                     `Published ${published.artifact.pageCount}-page illustrated parts manual.`,
                     'success'
                 );
                 window.location.assign(new URL(published.artifact.url, window.location.href).href);
             } catch (error) {
-                _documentationSetStatus(error.message, 'error');
+                _documentationSetStatus(_documentationExportMessage(error), 'error');
             } finally {
                 _documentationSetBusy(false);
                 _documentationRenderPageRail();

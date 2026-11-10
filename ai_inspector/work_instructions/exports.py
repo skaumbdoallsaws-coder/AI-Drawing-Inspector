@@ -203,6 +203,9 @@ def store_review_docx(
                 f"{revision}/docx"
             ),
         }
+        from ai_inspector.documentation.rich_docx import artifact_metadata
+        from ai_inspector.operations_manual.exports import _publication_page_geometry
+        artifact.update(artifact_metadata(document, _publication_page_geometry(document)[:2], 1.56 * 72))
         _write_atomic(
             metadata_path,
             (

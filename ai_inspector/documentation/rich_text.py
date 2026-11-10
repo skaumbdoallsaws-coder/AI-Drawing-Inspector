@@ -282,9 +282,9 @@ def rich_targets(document):
 
 def refuse_export(document, *, format):
     # format is required: an exporter that forgets it must fail, not skip the refusal.
-    if format == "pdf":
+    if format in {"pdf", "docx"}:
         return
     found = rich_targets(document)
     if found:
-        raise DocumentEditError("unsupported_export_feature", "Rich text DOCX export is not supported until P2b-2.",
+        raise DocumentEditError("unsupported_export_feature", "Rich text is not supported by this export format.",
                                 targets=found, feature="rich_text", format=format)

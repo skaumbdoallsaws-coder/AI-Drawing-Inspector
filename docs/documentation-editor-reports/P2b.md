@@ -208,3 +208,195 @@ The final run renders the same rich box on the real MMLE scenes: spec sheet page
   - A soft hyphen draws a visible hyphen.
   - U+2028 is refused (no glyph).
 - P4: specification, operations and WI pages still drop shape and image objects; only text objects are drawn.
+
+
+## P2b-2
+
+### CHANGED
+
+- Added ai_inspector/documentation/rich_docx.py. It consumes content_model directly and writes one flowing single-cell table per authored text object, including old plain strings. Runs retain stored Unicode (including emoji and decomposed combining marks), direct font/size/bold/italic/underline/color, and exact external hyperlink targets. Headings use Heading 1-3 with direct formatting. Native list definitions provide three bullet levels, independent ordered counters, starts/restarts and unnumbered continuation paragraphs; all abstractNum elements precede num elements.
+- Updated specification_sheet/exports.py, operations_manual/exports.py and work_instructions/exports.py. Objects interleave with existing generated content by frame top, then left edge and target ID; operations/WI cover objects are included. Tables use the existing shading/border helpers, 3 pt plus outline padding, at-least frame height, and width capped to the section text width. Artifact metadata reports each cap in authoredText.widthCaps (pageId, targetId, requestedWidthPt, widthPt). Word's twip rounding is included: default specification width cap 537.1 pt; default 960 pt operations/WI cap 847.7 pt. DOCX caches containing objects use a new renderer version; documents without objects keep their previous metadata and XML paths.
+- Updated rich_text.refuse_export and server.py's companion handling: PDF routes now build real rich DOCX companions. Updated only the export-message handling in static/index.html so a refusal or missing artifact URL shows the server's code, message, targets and code points. The UI still obtains DOCX through the PDF route. No schema, Sage names, vendor files, external static JS, or PDF layout code changed; no static JS URL needs a bump.
+- Extended tests/test_documentation_rich_exports.py with real DOCX XML/relationships/numbering checks, formatting and whitespace vectors, table geometry, reading order, rotation/no-file refusal, real companion URLs, cache invalidation, legacy XML equality against 9b01855, and unchanged rich PDF bytes. Updated superseded DOCX-refusal expectations in tests/test_documentation_rich_text.py.
+- Added tests/documentation_rich_export_support.py and P2b in tests/smoke_documentation_editor.py. P2a's actual selection, paste and CDP IME helpers are shared. One Chromium authors both regions, checks the UI emoji refusal and no artifact writes, reopens, makes read-bound Sage edits, exports twice and compares real PDF/DOCX content and marks. tests/test_documentation_editor_smoke.py checks the narrow classification of the single expected proof refusal. Evidence goes to .runtime/de: p2b-comparison.json, the refusal/authoring screenshots, p2b-{2,3}-{spec,parts}.pdf, p2b-{2,3}-spec.docx, and page/region PNGs.
+
+Export-path audit:
+
+| Path | Authored text handling |
+| --- | --- |
+| Parts build_manual_pdf_bytes / store_manual_pdf | Existing native rich PDF path; legacy plain path unchanged. No parts DOCX exists or was added. |
+| Specification _build_specification_pdf (PDF and fillable PDF) | Existing native rich/plain PDF path, with explicit glyph, overflow and rotation refusals. |
+| Specification build_specification_docx_bytes / store_specification_docx | Native flowing authored text through the new shared writer. |
+| Operations build_prototype_pdf_bytes / store_prototype_pdf | Existing native rich/plain PDF path. |
+| Operations build_prototype_docx_bytes / store_prototype_docx | Native flowing authored text, including cover objects. |
+| WI store_review_pdf / store_review_docx | Delegates to the operations builders, including their authored text handling. |
+| Inspection build_inspection_sheet_pdf_bytes | Existing typed form exporter; inspection fields have no authored rich-text targets. No inspection DOCX exists. |
+
+No additional file exporter of document text was found in these document modules. Reads retain the canonical envelope alongside display projections; exporters consume the canonical composition. Review/customer/controlled markers and conflict gates remain unchanged.
+
+Neither baseline is expected to move. The P2b-1 supervisor gate established that the saved scenes have no text objects; this round did not read live stores. DOCX documents that do contain authored text intentionally gain previously omitted content. PDF output remains on the P2b-1 path.
+
+### TESTS
+
+Ran static checks only: AST parsing of all 11 changed/new Python files; syntax parsing of the changed inline export JavaScript; git diff --check; LF, whitespace, BOM and ASCII-addition checks. Compared PDF builder/delegate function sources and the entire rich_layout.py against 9b01855: unchanged. No pytest, Node tests, baseline checks, browser, PDF/DOCX generation or Word visual review ran; no runtime pass is claimed.
+
+### NOT RUN
+
+Claude runs these with the existing hidden Windows launcher and isolated inputs:
+
+~~~text
+python -m pytest -q tests/test_documentation_rich_exports.py tests/test_documentation_rich_text.py
+python -m pytest -q tests/test_documentation_transactions.py tests/test_documentation_provenance.py tests/test_documentation_change_undo.py tests/test_documentation_refresh.py tests/test_documentation_store_chokepoint.py tests/test_documentation_editor_smoke.py tests/test_documentation_conflicts_ui.py tests/test_codex_documentation_tools.py tests/test_codex_specification_sheet_tools.py tests/test_codex_readonly_pilot.py tests/test_codex_assisted_tools.py
+python -m pytest -q tests/test_parts_manual.py tests/test_specification_sheet_workflow.py tests/test_operations_manual_workspace.py tests/test_work_instruction_workflow.py
+node --test tests/documentation*.test.cjs
+python tools/documentation_baseline.py --check
+python tools/documentation_baseline.py --local --check
+python tests/smoke_documentation_editor.py --phase P1a
+python tests/smoke_documentation_editor.py --phase P1b
+python tests/smoke_documentation_editor.py --phase P1c
+python tests/smoke_documentation_editor.py --phase P2a
+python tests/smoke_documentation_editor.py --phase P2b
+python -c "import glob,sys,pytest; sys.exit(pytest.main(['-q']+sorted({p for pattern in ('tests/test_documentation*.py','tests/test_parts_manual*.py','tests/test_operations_manual*.py','tests/test_specification_sheet*.py','tests/test_work_instruction*.py','tests/test_inspection_sheet*.py') for p in glob.glob(pattern)})))"
+python -c "import glob,sys,pytest; sys.exit(pytest.main(['-q']+sorted({p for pattern in ('tests/test_codex*.py','tests/test_facility*.py','tests/test_authored*.py','tests/test_sage*.py','tests/test_industrial*.py') for p in glob.glob(pattern)})))"
+~~~
+
+Legacy oracles require b616417 and 9b01855 in the test checkout; they use git show without changing the index. Compare suite failures with the P2b-1 gate's base set. Inspect the saved PDF PNGs and open the DOCX files in Word.
+
+### DEVIATIONS
+
+- Flowing tables follow the supervisor decision; their cells grow and can repaginate, so DOCX has no overflow refusal. Nonzero rotation refuses with unsupported_export_rotation and target IDs.
+- Raw text is preserved except the specified mappings: CR becomes a space, tabs become w:tab, LF/hard breaks become w:br, and one final paragraph break is omitted. No NFC or font/glyph refusal is applied to DOCX. XML 1.0's unrepresentable control characters refuse explicitly with unsupported_export_character, targets and code points instead of causing a generic writer failure.
+- Links use explicit formatting and External relationships without a Hyperlink style, as directed for the default template. The proof adds browser-authored links and nested lists to the shared P2a vector so both exporters can be checked.
+
+### OPEN QUESTIONS
+
+No implementation decision is needed before review. Word layout/numbering, browser proof, compatibility equality and all runtime gates await Claude. The UI's PDF-first coupling still prevents a DOCX download when the PDF rejects an emoji, even though the direct DOCX writer preserves it. No commit or index/history mutation was made.
+
+### Integration decision input
+
+The completed P2b-1 supervisor proof showed native PDF fidelity against Chromium across 11 samples, with matching line breaks and heights within 0.13 pt. This round adds the native DOCX implementation and an executable cross-format browser proof, but only static checks have run; it does not yet establish a passing DOCX or end-to-end gate.
+
+Risks left: Word font fallback and flowing-table pagination need visual review; native numbering needs real Word confirmation; the UI still couples PDF and DOCX. P2b-1's recorded rotation, legacy plain-parts overflow, tab, soft-hyphen and U+2028 issues remain P4b work. Rich narrative ranges and table grids add identity, refresh and layout cases beyond this one-region proof.
+
+Estimated review rounds after a passing P2b gate:
+
+| Phase | Review rounds | Main work |
+| --- | --- | --- |
+| P3a | 3-4 | Schema/range ownership, narrative integration, shared export and browser checks |
+| P3b | 3-4 | Table grid/identities, native PDF/DOCX spans, browser and refresh checks |
+| P4a | 2-3 | Object ordering/crops, shared export, UI and undo |
+| P4b | 3-4 | Page presets, overflow/refusal matrix, export coupling and visual fidelity |
+| P5a | 3 | Scale, recovery/migration, accessibility and DPI |
+| P5b | 2 | Isolated Electron regression and witnessed live Sage/desktop proof |
+
+Total: 16-20 review rounds, contingent on the P2b gate. The integration decision remains with the supervisor.
+
+## P2b-2 supervisor gate (Claude, 2026-11-10)
+
+Result: PASSED after supervisor fixes; committed together with this section.
+
+Codex ran this round in 34 minutes (session 01a1c5c9, static checks only). I reviewed:
+- rich_docx.py line by line, including OOXML element order (rPr, pPr, tblPr, tcPr, lvl, numbering.xml);
+- the three DOCX writers' flush points;
+- the server's companion, the UI message helper and refuse_export;
+- documentation_rich_export_support.py, the P2b smoke and every test change.
+
+Correct as built:
+- Runs come only from content_model; stored text is written exactly (no NFC, emoji kept).
+- Each list instance gets its own abstractNum and w:num with startOverride; every abstractNum precedes every num.
+- Hyperlinks reuse one External relationship per href.
+- Cover objects are included, and reading order is enforced by frame top.
+- Rotation refuses DOCX too. XML-unrepresentable control characters refuse explicitly.
+- Every export path that emits document text is listed above; none drops rich content silently. (The legacy plain parts path
+  still drops overflow silently; that is a P4b item.)
+
+My first runs of Codex's code: the rich tests passed (335: rich exports, rich text, smoke classifier). Smoke P2b reached
+18/20 checks and stopped:
+- The P2a vector's HTML paste lost its bullet list. ProseMirror joins a pasted slice's open first block with the current paragraph, so the leading <ul> dissolved into plain text.
+- The parts export pressed a disabled Publish button. The isolated parts manual is not publication-ready: it has no CAD captures. My brief asked for that export without knowing this.
+
+### Supervisor findings and fixes (Claude)
+
+1. Lists showed no bullets or numbers on the canvas: a P2a-2 defect that my P2a gate missed, because no smoke authored a list.
+   - Cause: the app's global reset (* { margin: 0; padding: 0 }) removes the browser's 40 px list indent. The outside markers then fall past the text box's clip (overflow: hidden), on the page and in the editor.
+   - Fix: documentation_rich_text.css restores padding-inline-start: 40px for .documentation-object.text ul/ol (?v=20261110-p2b-2).
+   - The P2b-1 PDF layout (UA list defaults) was right; the canvas was wrong. No global rule touches h1-h3, a or p, so headings and links already matched.
+2. The PDF did not paint a white fill. The canvas paints every text box with its fill, white by default, over whatever lies behind it; the P2b smoke box covers part of the product figure. draw_pdf_object skipped white (copied from the legacy parts path), so the figure showed through the text.
+   - Fix: the shared path now paints the fill whenever set. Fill is always a validated six-digit hex.
+   - The legacy plain parts path still skips white (byte-identical by decision; P4b).
+   - New test: test_text_box_paints_its_fill_over_what_lies_behind_like_the_canvas.
+3. DOCX list markers were left-aligned in a fixed 20 pt hanging indent. "10." at 16 pt is 22 pt wide, so Word pushed the item text to its next default tab stop.
+   - Fix: markers are right-aligned one space-width before the text (lvlJc right, hanging = the font's space width), as the canvas and the PDF draw outside markers.
+   - Checked in Word with an ordered list starting at 9 at 16 pt (9, 10, 11 align), plus nested circle and square bullets.
+4. The smoke now measures the real canvas against the PDF layout. CANVAS_LINES_JS reads the static render's lines from the DOM (characters grouped by line top, in layout px) and compares them with prepare_pdf_objects for the same object. It checks:
+   - line texts;
+   - each line's left offset within 1 px (list indents);
+   - content height within 1 px;
+   - box size against the frame times the PDF page size within 0.6 px.
+   It runs for the spec region before exports 2 and 3, and for the parts region at both rounds. This replaces my P2b-1 assumption (a hand-built DOM with UA defaults) with a measurement in the real app; it would have caught finding 1.
+5. Smoke fixes:
+   - The HTML paste now starts with a paragraph (Enter, then <p>Lists</p><ul>...), so the list stays a list.
+   - The parts branch asserts that Publish is disabled for the fixture's reason (status not publication_ready, or pending captures) and records it as a known fixture limitation. The parts canvas and Sage edits are still proved; the parts rich PDF path is covered by tests/test_documentation_rich_exports.py and my P2b-1 real-scene check.
+6. Assembly-appearance store race (pre-existing, outside documentation): the second smoke run hit a 500 on PUT /api/assembly-appearance/MMLE-50D/geometry.
+   - Cause: os.replace raised PermissionError (WinError 5) while another request read geometry.json. The viewer reports geometry on every model load, and rapid reloads overlap.
+   - Fix: _atomic retries like the parts and scene stores (6 attempts, exponential backoff).
+   - New test: test_atomic_writes_retry_a_replace_that_windows_refuses.
+7. An independent text oracle. compare_docx and compare_pdf check the exports against content_model, which the writers
+   also consume, so a character lost by content_model would pass both. The smoke now also compares the DOCX table's run
+   text (w:t, w:tab) with plain_text(stored envelope), which walks the raw Tiptap JSON on its own path. Every character
+   except LF must survive in order (CR as a space): the decomposed e-acute, the tab, the spaces and the CJK did.
+   Together with compare_docx and compare_pdf, this ties both formats to the stored envelope. A one-character
+   negative control fails the check.
+
+### Visual review
+
+Smoke run 3 (34/34), exports 2 and 3 of the browser-authored spec region:
+- PDF: the white box hides the figure as on the canvas. "beta" is bold, then bold italic after Sage's edit; "gamma" is the blue underlined link, then #cc3300 underlined after Sage's recolor (an explicit color wins inside a link, as on the canvas). "  smile e-acute  [tab]end  CJK" keeps its spaces, the bullet sits at 40 pt and "3." at 80 pt.
+- DOCX rendered by Word 16 (Documents.Open read-only, ExportAsFixedFormat; scratch script docx_to_pdf.ps1):
+  - The same content as native runs, with Word's bullet and "3." numbering at the canvas indents.
+  - The box is a single-cell table after the figure/specification table (the box starts below the figure's top edge) and before the features.
+  - The row keeps the box's height.
+- The canvas: "Bullet" and "3. Third" now show their markers at the PDF's indents.
+- The refusal: the status bar shows "unsupported_export_glyph: ... Targets: document-object-p2a. Code points: U+1F642." The bar truncates the line on screen (P4b note).
+
+### Numbers
+
+- Rich tests: test_documentation_rich_exports.py 213 (including the fill test and the right-aligned numbering
+  expectations). Rich text and smoke classifier tests are included in the focused run.
+- Focused files: 888 passed. Assembly appearance: 8 passed, including the retry test.
+- Smokes in the gate chain: P2b 34/34, P2a 23/23, P1a 27/27, P1b 46/46, P1c 35/35. Smoke P2b with the text oracle:
+  36/36 (both docx_text_is_the_stored_text checks pass).
+- Both baseline checks: exit 0, unchanged.
+- Documentation suite: 945 passed, plus the 1 pre-existing failure
+  (test_source_ids_references_and_local_hashes_are_closed, which also fails in the real repo).
+- Node: documentation_conflicts 18/18, documentation_rich_text 20/20, parts borrow callouts 5/5.
+- Wide suite: 170 failed / 9 errors / 3851 passed, the base set; nothing new (the same 7 base failures pass).
+- Word 16 renders: p2b-2-spec.docx and p2b-3-spec.docx (one page each), and the numbering stress document
+  (9, 10 and 11 at 16 pt, nested circle and square bullets).
+
+### Integration decision (supervisor)
+
+PROCEED with the Tiptap editor (plan section 1: P2b holds the integration decision). The proof passed:
+- A region authored in a real Chromium can be exported, reopened, edited through Sage's service and exported again. PDF and DOCX keep every character and mark; only the edited runs change.
+- The PDF breaks lines exactly as the canvas does, measured in the real app.
+- The DOCX carries native runs, links, headings and numbering, and renders correctly in Word.
+- Nothing is silently dropped: an emoji refuses the PDF with the target and code point.
+
+Conditions:
+- The documentationRichText flag stays off by default until P5b's live desktop acceptance. P3a widens eligibility under the same flag.
+- Every new node type or style (P3a narrative styles, P3b tables) must be measured in the real app by the canvas-versus-PDF check before it ships. Finding 1 showed that the app's global CSS changes browser defaults.
+
+Re-estimate: P2 took four review rounds (P2a-1, P2a-2, P2b-1, P2b-2). Each was about 35 minutes of Codex plus 1.5 to 2 hours of my review, fixes and gates. I estimate 2 to 3 rounds per remaining phase, 13 to 16 rounds in all, with P3a, P3b and P4b at the upper end. Codex estimated 16 to 20.
+
+### Notes for P3a and later
+
+- P3a:
+  - Extend CANVAS_LINES_JS and canvas_matches_layout to every new node and mark.
+  - Pasting a list at the end of a non-empty paragraph merges its first item into that paragraph. This is standard ProseMirror behavior; decide whether to normalize it with a paste rule.
+- P4b:
+  - The DOCX buttons still ride the PDF route, so a PDF refusal (an emoji) also blocks the DOCX the direct writer could make. Decouple.
+  - The status bar truncates long refusals; show them in full (pane or dialog).
+  - The legacy plain parts path still uses insert_textbox: 1.374 pitch, white fill skipped, silent overflow drop.
+  - Opacity applies per fill and run in the PDF, but to the whole box on the canvas.
+  - Tabs: canvas tab-size 8, PDF 4 spaces, Word default 0.5 in stops.
+- P5a: only Word 16 rendered the DOCX here; check LibreOffice.

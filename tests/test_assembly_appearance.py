@@ -3,6 +3,8 @@ whole machine or its parts, stored per assembly, served resolved for the viewer,
 product picture stale when they change. No credentials or inference."""
 from __future__ import annotations
 
+import os
+
 from fastapi.testclient import TestClient
 import pytest
 
@@ -131,3 +133,23 @@ def test_the_capture_holds_its_camera_while_it_waits_and_long_machines_fill_the_
         "document"]["pages"][0]["renderRequest"]["image"]
     assert image["axisConstrainedOccupancyPolicy"] == "allow_when_uniform_scale_exceeds_axis_limit"
     assert image["axisConstrainedFillTolerance"] == 0.02 and image["allowAutomaticCameraSelection"] is True
+
+
+def test_atomic_writes_retry_a_replace_that_windows_refuses(tmp_path, monkeypatch):
+    # The viewer reports its geometry on every model load; an overlapping read makes Windows refuse os.replace
+    # (WinError 5). The P2b documentation smoke hit it as a 500 on PUT .../geometry.
+    import ai_inspector.assembly_knowledge.assembly_appearance as module
+    real, calls = os.replace, []
+
+    def refused_twice(source, target):
+        calls.append(target)
+        if len(calls) < 3:
+            raise PermissionError(5, "Access is denied")
+        return real(source, target)
+
+    monkeypatch.setattr(module.os, "replace", refused_twice)
+    monkeypatch.setattr(module.time, "sleep", lambda seconds: None)
+    target = tmp_path / "geometry" / "asset-x.json"
+    AssemblyAppearanceStore._atomic(target, b"{}", ".geometry-")
+    assert target.read_bytes() == b"{}" and len(calls) == 3
+    assert [path.name for path in target.parent.iterdir()] == ["asset-x.json"]  # no temporary file left behind

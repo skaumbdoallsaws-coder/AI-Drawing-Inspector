@@ -744,24 +744,36 @@ def build_specification_docx_bytes(
         if isinstance(block, Mapping)
     }
 
+    from ai_inspector.documentation.rich_docx import DocxObjects
+    authored = DocxObjects(output, document, (width_pt, height_pt), shade_cell=_docx_shade_cell,
+                           border_cell=_docx_set_cell_border, clear_borders=_docx_clear_table_borders)
+
+    def flush_objects(*keys, fallback):
+        tops = [_block_frame(descriptor, blocks[key], width_pt, height_pt)[1] for key in keys if key in blocks]
+        authored.flush(descriptor["pageId"], min(tops) if tops else fallback)
+
     def shown(block_id: str) -> bool:
         return not (blocks.get(block_id) or {}).get("open")
 
+    flush_objects("spec-kicker", fallback=70)
     if shown("spec-kicker"):
         kicker = output.add_paragraph(
             str((blocks.get("spec-kicker") or {}).get("text") or "PRODUCT SPECIFICATION")
         )
         kicker.paragraph_format.space_after = Pt(2)
         _docx_format_paragraph(kicker, color=accent, size=8.5, bold=True, font_name=heading_font)
+    flush_objects("spec-title", fallback=85)
     title = output.add_paragraph(str((blocks.get("spec-title") or {}).get("text") or product_name))
     title.style = styles["Title"]
     title.paragraph_format.space_before = Pt(0)
     title.paragraph_format.space_after = Pt(2)
+    flush_objects("spec-tagline", fallback=110)
     if shown("spec-tagline"):
         tagline = output.add_paragraph(str((blocks.get("spec-tagline") or {}).get("text") or ""))
         tagline.paragraph_format.space_after = Pt(8)
         _docx_format_paragraph(tagline, color=muted, size=8.5, font_name=body_font)
 
+    flush_objects("spec-figure", "specifications-heading", "specifications-table", fallback=176)
     main = output.add_table(rows=1, cols=2)
     main.autofit = False
     _docx_clear_table_borders(main)
@@ -840,6 +852,7 @@ def build_specification_docx_bytes(
         and not (feature_flags(blocks[f"spec-feature-{index}"]).get("title")
                  and feature_flags(blocks[f"spec-feature-{index}"]).get("text"))
     ]
+    flush_objects("features-heading", "spec-feature-1", "spec-feature-2", "spec-feature-3", fallback=550)
     if features and shown("features-heading"):
         features_heading = output.add_paragraph(
             str((blocks.get("features-heading") or {}).get("text") or "Key Features")
@@ -875,12 +888,14 @@ def build_specification_docx_bytes(
             detail.paragraph_format.space_after = Pt(0)
             _docx_format_paragraph(detail, color=text_color, size=7.2)
 
+    flush_objects("notes", "spec-notes", fallback=746)
     marked = _edited_slots(document, document.get("slots") or {})
     if marked:
         names = ", ".join(str(document["slots"][slot].get("name") or slot) for slot in marked)
         note = output.add_paragraph(names + ": " + _slot_notice(document, marked) + ". " + EDITED_LEGEND)
         _docx_format_paragraph(note, color="993900", size=6)
 
+    authored.flush(descriptor["pageId"])
     output.core_properties.title = str(
         document.get("title") or "Product Specification Sheet"
     )
@@ -1021,6 +1036,9 @@ def store_specification_docx(
         "rendererVersion": "specification-sheet-docx-v1",
         "url": f"/api/specification-sheet/{assembly_number}/documents/{revision}/docx",
     }
+    from ai_inspector.documentation.rich_docx import artifact_metadata
+    page_size = (document.get("publicationLayout") or {}).get("page") or {}
+    artifact.update(artifact_metadata(document, (float(page_size.get("width") or 612), float(page_size.get("height") or 792)), 1.04 * 72))
     _write_atomic(
         directory / "docx.json",
         (json.dumps(artifact, ensure_ascii=True, sort_keys=True, indent=2) + "\n").encode("ascii"),

@@ -494,7 +494,9 @@ def draw_pdf_object(fitz, page, plan):
     rect, style = fitz.Rect(plan.frame), plan.style
     opacity = float(style.get("opacity") if style.get("opacity") is not None else 1)
     fill = style.get("fill")
-    if fill and str(fill).upper() != "#FFFFFF":
+    if fill:
+        # The canvas paints every text box with its fill, white by default, over whatever lies behind it
+        # (a figure, a table, a page band); so does the PDF. Only the legacy plain parts path skips white.
         page.draw_rect(rect, color=None, fill=_hex_rgb(fill, "#FFFFFF"), fill_opacity=opacity)
     outline_width = float(style.get("lineWidth") or 0)
     if outline_width > 0 and plan.outline:

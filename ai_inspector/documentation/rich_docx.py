@@ -1,0 +1,278 @@
+"""Flowing native DOCX text objects. No PDF positions, font engine or text boxes."""
+from dataclasses import dataclass
+import math
+
+from .commands import DocumentEditError
+from .rich_layout import authored_objects, content_model, PADDING, LINE_HEIGHT, LIST_INDENT
+
+DOCX_RENDERER_VERSION = "authored-text-docx-1"
+
+
+def font_family(value):
+    name = str(value or "Arial").casefold()
+    return "Courier New" if "courier" in name else "Times New Roman" if "times" in name or "georgia" in name else "Arial"
+
+
+# Like the canvas's outside markers ("3. " ends where the item text starts), a marker is right-aligned one space
+# before the text, so a wide number ("10." at 16 pt) never pushes the text to Word's next tab stop.
+_SPACE_EM = {"Arial": 0.278, "Times New Roman": 0.25, "Courier New": 0.6}
+
+
+def marker_gap(paragraph):
+    return round(_SPACE_EM[font_family(paragraph.font_family)] * paragraph.font_size * 20)
+
+
+def _element(name, **attributes):
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    item = OxmlElement(name)
+    for key, value in attributes.items():
+        item.set(qn("w:" + key), str(value))
+    return item
+
+
+def _properties(run, paragraph):
+    """Direct formatting also applies to the paragraph mark, including empty p."""
+    props = _element("w:rPr")
+    family = font_family(paragraph.font_family)
+    props.append(_element("w:rFonts", ascii=family, hAnsi=family, cs=family))
+    for name, enabled in (("b", run.bold), ("bCs", run.bold), ("i", run.italic), ("iCs", run.italic)):
+        props.append(_element("w:" + name, val=int(enabled)))
+    props.append(_element("w:color", val=run.color.lstrip("#").upper()))
+    size = round(2 * paragraph.font_size)
+    props.append(_element("w:sz", val=size))
+    props.append(_element("w:szCs", val=size))
+    props.append(_element("w:u", val="single" if run.underline else "none"))
+    return props
+
+
+def tokens(paragraph):
+    """Raw text with only the documented canvas control-character mapping."""
+    result = []
+    for run in paragraph.runs:
+        if run.kind == "break":
+            result.append((run, "br", ""))
+            continue
+        pending = []
+        for char in run.text:
+            if char in {"\n", "\t"}:
+                if pending:
+                    result.append((run, "t", "".join(pending)))
+                    pending = []
+                result.append((run, "br" if char == "\n" else "tab", ""))
+            else:
+                pending.append(" " if char == "\r" else char)
+        if pending:
+            result.append((run, "t", "".join(pending)))
+    if result and result[-1][1] == "br":
+        result.pop()  # A final break does not create another canvas line.
+    return result
+
+
+class _Numbering:
+    def __init__(self, output):
+        self.output, self.instances = output, {}
+
+    def number(self, namespace, level, depth, gap):
+        from docx.oxml.ns import qn
+        key = (namespace, level.list_id)
+        if key in self.instances:
+            return self.instances[key]
+        root = self.output.part.numbering_part.element
+        abstract_id = max((int(n.get(qn("w:abstractNumId"))) for n in root.findall(qn("w:abstractNum"))), default=-1) + 1
+        num_id = max((int(n.get(qn("w:numId"))) for n in root.findall(qn("w:num"))), default=0) + 1
+        abstract = _element("w:abstractNum", abstractNumId=abstract_id)
+        abstract.append(_element("w:multiLevelType", val="multilevel"))
+        # Each list instance owns its counter; ancestor counters never leak into
+        # a nested decimal marker. Define just its own depth, using %N, not %1.%2.
+        ilvl = depth - 1
+        definition = _element("w:lvl", ilvl=ilvl)
+        definition.append(_element("w:start", val=level.start))
+        bullet = level.kind == "bulletList"
+        definition.append(_element("w:numFmt", val="bullet" if bullet else "decimal"))
+        definition.append(_element("w:suff", val="tab"))
+        symbols = (("Symbol", "\uf0b7"), ("Courier New", "o"), ("Wingdings", "\uf0a7"))
+        family, marker = symbols[ilvl] if bullet else ("Arial", f"%{depth}.")
+        definition.append(_element("w:lvlText", val=marker))
+        definition.append(_element("w:lvlJc", val="right"))
+        props = _element("w:pPr")
+        tabs = _element("w:tabs")
+        tabs.append(_element("w:tab", val="num", pos=round(LIST_INDENT * depth * 20)))
+        props.append(tabs)
+        props.append(_element("w:ind", left=round(LIST_INDENT * depth * 20), hanging=gap))
+        definition.append(props)
+        rpr = _element("w:rPr")
+        rpr.append(_element("w:rFonts", ascii=family, hAnsi=family, cs=family))
+        definition.append(rpr)
+        abstract.append(definition)
+        # Word requires all abstractNum elements before every num element.
+        first_num = root.find(qn("w:num"))
+        if first_num is None:
+            root.append(abstract)
+        else:
+            first_num.addprevious(abstract)
+        number = _element("w:num", numId=num_id)
+        number.append(_element("w:abstractNumId", val=abstract_id))
+        override = _element("w:lvlOverride", ilvl=ilvl)
+        override.append(_element("w:startOverride", val=level.start))
+        number.append(override)
+        # numIdMacAtCleanup, if present, is the final numbering child.
+        cleanup = root.find(qn("w:numIdMacAtCleanup"))
+        if cleanup is None:
+            root.append(number)
+        else:
+            cleanup.addprevious(number)
+        self.instances[key] = num_id
+        return num_id
+
+
+@dataclass(frozen=True)
+class ObjectContent:
+    target: dict
+    frame: tuple
+    style: dict
+    outline: bool
+    content: object
+
+
+def prepare_objects(document, page_size):
+    from ai_inspector.parts_manual.pdf import _document_object_style, _document_theme
+    result, rotated = {}, []
+    theme = _document_theme(document)
+    width, height = page_size
+    for page in document.get("pages", []):
+        objects = result.setdefault(page["pageId"], [])
+        for key, value, stored in authored_objects(page):
+            target = {"pageId": page["pageId"], "targetId": key}
+            frame = value.get("frame") or {}
+            x, y, w, h, rotation = (float(frame.get(name) or 0) for name in ("x", "y", "width", "height", "rotation"))
+            if not all(math.isfinite(n) for n in (x, y, w, h, rotation)) or w <= 0 or h <= 0:
+                raise DocumentEditError("invalid_export_layout", "Text object frame must be finite and have positive dimensions.", targets=[target])
+            if abs(rotation) > 1e-9:
+                rotated.append(target)
+                continue
+            style = _document_object_style(theme, value)
+            try:
+                model = content_model(stored, style)
+            except DocumentEditError as error:
+                raise DocumentEditError(error.code, str(error), **{**error.details, "targets": [target]}) from error
+            # Word has font fallback, but XML 1.0 cannot represent these controls.
+            invalid = sorted({ord(c) for p in model.paragraphs for r in p.runs for c in r.text
+                              if ord(c) < 32 and c not in "\t\n\r" or ord(c) in {0xfffe, 0xffff}})
+            if invalid:
+                raise DocumentEditError("unsupported_export_character", "DOCX XML cannot represent these control characters.",
+                                        targets=[target], codePoints=[f"U+{c:04X}" for c in invalid])
+            objects.append(ObjectContent(target, (x * width, y * height, w * width, h * height), style,
+                           "outlineColor" in (value.get("styleOverrides") or {}), model))
+        objects.sort(key=lambda item: (item.frame[1], item.frame[0], item.target["targetId"]))
+    if rotated:
+        raise DocumentEditError("unsupported_export_rotation", "Rotated authored text is not supported by the DOCX layout.", targets=rotated)
+    return result
+
+
+def artifact_metadata(document, page_size, horizontal_margins):
+    """Only object-bearing DOCX artifacts get the new cache key and width report."""
+    plans = prepare_objects(document, page_size)
+    objects = [item for values in plans.values() for item in values]
+    if not objects:
+        return {}
+    # Word stores page size and each margin in whole twips. Match the actual
+    # section width, including the half-twip rounding at the cap boundary.
+    available = (round(page_size[0] * 20) - 2 * round(horizontal_margins * 10)) / 20
+    return {"rendererVersion": DOCX_RENDERER_VERSION, "authoredText": {"placement": "flowing_single_cell_tables",
+        "widthCaps": [{**item.target, "requestedWidthPt": item.frame[2], "widthPt": available}
+                      for item in objects if item.frame[2] > available]}}
+
+
+class DocxObjects:
+    def __init__(self, output, document, page_size, *, shade_cell, border_cell, clear_borders):
+        self.output = output
+        self.pages = prepare_objects(document, page_size)
+        self.numbering = _Numbering(output)
+        self.shade_cell, self.border_cell, self.clear_borders = shade_cell, border_cell, clear_borders
+
+    def flush(self, page_id, before=float("inf")):
+        pending = self.pages[page_id]
+        while pending and pending[0].frame[1] < before:
+            self._write(pending.pop(0))
+
+    def _write(self, item):
+        from dataclasses import replace
+        from docx.oxml.ns import qn
+        from docx.opc.constants import RELATIONSHIP_TYPE as RT
+        from docx.shared import Pt
+        from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT, WD_CELL_VERTICAL_ALIGNMENT
+
+        section = self.output.sections[-1]
+        available = (section.page_width - section.left_margin - section.right_margin) / 12700
+        width = min(item.frame[2], available)
+        table = self.output.add_table(rows=1, cols=1)
+        table.autofit = False
+        table.alignment = WD_TABLE_ALIGNMENT.LEFT
+        table.columns[0].width = Pt(width)
+        table._tbl.tblPr.find(qn("w:tblW")).set(qn("w:w"), str(round(width * 20)))
+        table._tbl.tblPr.find(qn("w:tblW")).set(qn("w:type"), "dxa")
+        self.clear_borders(table)
+        borders = table._tbl.tblPr.find(qn("w:tblBorders"))
+        # The neighbouring border helper appends. This table also has a fixed
+        # layout, whose schema position follows tblBorders.
+        table._tbl.tblPr.remove(borders)
+        layout = table._tbl.tblPr.find(qn("w:tblLayout"))
+        layout.addprevious(borders)
+        table._tbl.tblPr.append(_element("w:tblCaption", val="Authored text: " + item.target["targetId"]))
+        row = table.rows[0]
+        row.height, row.height_rule = Pt(item.frame[3]), WD_ROW_HEIGHT_RULE.AT_LEAST
+        cell = row.cells[0]
+        cell.width = Pt(width)
+        outline = max(0, float(item.style.get("lineWidth") or 0)) if item.outline else 0
+        if outline:
+            for edge in ("top", "left", "bottom", "right"):
+                self.border_cell(cell, edge, item.style["outlineColor"], max(1, round(outline * 8)))
+        self.shade_cell(cell, str(item.style.get("fill") or "#FFFFFF").lstrip("#").upper())
+        margins = _element("w:tcMar")
+        for edge in ("top", "left", "bottom", "right"):
+            margins.append(_element("w:" + edge, w=round((PADDING + outline) * 20), type="dxa"))
+        cell._tc.get_or_add_tcPr().append(margins)
+        cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
+        for index, model in enumerate(item.content.paragraphs):
+            paragraph = cell.paragraphs[0] if index == 0 else cell.add_paragraph()
+            if model.heading_level:
+                paragraph.style = self.output.styles[f"Heading {model.heading_level}"]
+            fmt = paragraph.paragraph_format
+            fmt.space_before = fmt.space_after = Pt(0)
+            fmt.keep_with_next = fmt.keep_together = fmt.widow_control = False
+            props = paragraph._p.get_or_add_pPr()
+            spacing = props.find(qn("w:spacing"))
+            spacing.set(qn("w:line"), str(round(LINE_HEIGHT * model.font_size * 20)))
+            spacing.set(qn("w:lineRule"), "atLeast")
+            align = "both" if item.style.get("textAlign") == "justify" else model.align
+            props.append(_element("w:jc", val=align))
+            if model.list_path:
+                depth = len(model.list_path)
+                if model.marker is not None:
+                    number = self.numbering.number((item.target["pageId"], item.target["targetId"]), model.list_path[-1],
+                                                   depth, marker_gap(model))
+                    numpr = props.get_or_add_numPr()
+                    numpr.append(_element("w:ilvl", val=depth - 1))
+                    numpr.append(_element("w:numId", val=number))
+                # Continuations retain the text start but have no numbering.
+                indent = props.get_or_add_ind()
+                indent.set(qn("w:left"), str(round(LIST_INDENT * depth * 20)))
+                indent.set(qn("w:hanging"), str(marker_gap(model)) if model.marker is not None else "0")
+            base = replace(item.content.base_run, bold=item.content.base_run.bold or bool(model.heading_level))
+            props.append(_properties(base, model))
+            for run, kind, value in tokens(model):
+                element = _element("w:r")
+                element.append(_properties(run, model))
+                leaf = _element("w:" + kind)
+                if kind == "t":
+                    leaf.set(qn("xml:space"), "preserve")
+                    leaf.text = value  # No NFC or glyph filtering in DOCX.
+                element.append(leaf)
+                if run.href:
+                    link = _element("w:hyperlink")
+                    link.set(qn("r:id"), paragraph.part.relate_to(run.href, RT.HYPERLINK, is_external=True))
+                    link.append(element)
+                    paragraph._p.append(link)
+                else:
+                    paragraph._p.append(element)

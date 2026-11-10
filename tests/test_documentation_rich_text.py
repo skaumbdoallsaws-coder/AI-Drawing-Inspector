@@ -571,34 +571,16 @@ def test_sage_gateway_reads_rich_and_forwards_explicit_plain_replacement(scene):
 
 @pytest.mark.parametrize("mode", ["review", "draft", "customer", "controlled"])
 @pytest.mark.parametrize("kind", [KIND, "illustrated_parts_manual", "work_instructions", "product_specification_sheet"])
-def test_docx_export_refusal_all_documents_modes(scene, kind, mode):
+def test_rich_feature_guard_allows_supported_export_formats(scene, kind, mode):
     scene.edit()
     document = scene.snapshot()[1]
     document["documentType"] = kind
+    for format in ("pdf", "docx"):
+        check_export(document, mode, format=format)
     with pytest.raises(DocumentEditError) as caught:
-        check_export(document, mode, format="docx")
+        rich.refuse_export(document, format="unknown")
     assert caught.value.code == "unsupported_export_feature"
     assert caught.value.details["targets"] == [{"pageId": PAGE, "targetId": OBJECT}]
-
-
-@pytest.mark.parametrize("mode", ["review", "draft", "customer", "controlled"])
-def test_docx_entry_points_refuse_before_rendering(scene, tmp_path, mode):
-    from ai_inspector.operations_manual.exports import build_prototype_docx_bytes, store_prototype_docx
-    from ai_inspector.work_instructions.exports import store_review_docx
-    from ai_inspector.specification_sheet.exports import build_specification_docx_bytes, store_specification_docx
-    scene.edit()
-    document = scene.snapshot()[1]
-    document["exportMode"] = mode
-    for exporter in (build_prototype_docx_bytes, store_prototype_docx, store_review_docx, store_specification_docx):
-        with pytest.raises(DocumentEditError) as caught:
-            exporter(tmp_path, NUMBER, document)
-        assert caught.value.code == "unsupported_export_feature", exporter.__name__
-        assert caught.value.details["format"] == "docx"
-        assert caught.value.details["feature"] == "rich_text"
-    with pytest.raises(DocumentEditError) as caught:
-        build_specification_docx_bytes(document, render_root=tmp_path, assembly_number=NUMBER)
-    assert caught.value.code == "unsupported_export_feature"
-    assert caught.value.details["format"] == "docx"
 
 
 def test_vendored_bundle_checksum_and_exports():

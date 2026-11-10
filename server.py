@@ -17692,8 +17692,6 @@ def operations_manual_prototype_export(assembly_number: str, mode: str = "review
         "stage": "review_exported",
         "message": (
             "Generated the operations-manual PDF and editable DOCX for review."
-            if docx_artifact.get("status") != "unsupported" else
-            "Generated the PDF for review. Rich text DOCX export is not supported yet."
         ),
         "documentRevision": document["documentRevision"],
         "releaseGate": document["releaseGate"],
@@ -18207,8 +18205,6 @@ def work_instructions_review_export(assembly_number: str, mode: str = "review"):
         "stage": "prototype_review_exported",
         "message": (
             "Generated the assembly work-instruction PDF and editable DOCX for review."
-            if docx_artifact.get("status") != "unsupported" else
-            "Generated the PDF for review. Rich text DOCX export is not supported yet."
         ),
         "documentRevision": document["documentRevision"],
         "releaseGate": document["releaseGate"],
@@ -18746,15 +18742,7 @@ def documentation_confirmation_read(document_type: str, assembly_number: str):
 
 
 def _documentation_companion_docx(writer, root, assembly_number, document):
-    # PDF endpoints also offer a DOCX artifact. A rich PDF remains usable while
-    # native rich DOCX is deferred to P2b-2; no stale DOCX URL is returned.
-    from ai_inspector.documentation.rich_text import refuse_export
-    try:
-        refuse_export(document, format="docx")
-    except DocumentEditError as error:
-        if error.code != "unsupported_export_feature":
-            raise
-        return {"status": "unsupported", "error": error.code, "message": str(error), **error.details}
+    # The UI deliberately obtains its DOCX companion through the PDF route.
     return writer(root, assembly_number, document)
 
 
@@ -19307,8 +19295,6 @@ def specification_sheet_export(assembly_number: str, mode: str = "review"):
         "stage": "review_exported",
         "message": (
             "Generated the one-page product specification PDF and editable DOCX for review."
-            if docx_artifact.get("status") != "unsupported" else
-            "Generated the PDF for review. Rich text DOCX export is not supported yet."
         ),
         "documentRevision": document["documentRevision"],
         "releaseGate": document["releaseGate"],

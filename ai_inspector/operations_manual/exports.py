@@ -1133,17 +1133,30 @@ def build_prototype_docx_bytes(
         content_width_inches=content_width_inches,
     )
 
+    from ai_inspector.documentation.rich_docx import DocxObjects
+    from ai_inspector.specification_sheet.exports import _docx_set_cell_border, _docx_clear_table_borders
+    authored = DocxObjects(output, document, (page_width_pt, page_height_pt), shade_cell=_docx_cell_shading,
+                           border_cell=_docx_set_cell_border, clear_borders=_docx_clear_table_borders)
     pages = [row for row in document.get("pages") or [] if isinstance(row, Mapping)]
     for page_index, descriptor in enumerate(pages):
         if page_index:
             output.add_page_break()
         if descriptor.get("pageType") == "operations_cover":
+            cover_blocks = {block.get("blockId"): block for block in descriptor.get("layoutBlocks") or []}
+            cover_layout = ((document.get("publicationLayout") or {}).get("pageTypes") or {}).get("operations_cover") or {}
+
+            def cover_top(key, region, fallback):
+                block = cover_blocks.get(key)
+                return _block_frame(descriptor, block, document)["y"] if block else float((cover_layout.get(region) or {}).get("y", fallback))
+
+            authored.flush(descriptor["pageId"], cover_top("cover-kicker", "kicker", 80))
             paragraph = output.add_paragraph(
                 str(document.get("coverKicker") or "OPERATIONS AND MAINTENANCE MANUAL")
             )
             paragraph.style = styles["Heading 2"]
             for run in paragraph.runs:
                 run.font.color.rgb = RGBColor.from_string(accent)
+            authored.flush(descriptor["pageId"], cover_top("cover-product", "title", 110))
             title = output.add_paragraph(str(document.get("product", {}).get("name") or "Product"))
             title.style = styles["Title"]
             status_label = str(document.get("statusLabel") or "").strip()
@@ -1154,6 +1167,7 @@ def build_prototype_docx_bytes(
                     run.font.bold = True
                     run.font.size = Pt(10)
                     run.font.color.rgb = RGBColor.from_string(primary)
+            authored.flush(descriptor["pageId"], float(((descriptor.get("renderRequest") or {}).get("frame") or cover_layout.get("illustration") or {}).get("y", 184)))
             image_path = document_draft_render_path(root, assembly_number, document, descriptor)
             image_frame = (descriptor.get("renderRequest") or {}).get("frame") or {}
             image_width = min(
@@ -1162,10 +1176,12 @@ def build_prototype_docx_bytes(
             )
             output.add_picture(str(image_path), width=Inches(image_width))
             output.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            authored.flush(descriptor["pageId"])
             continue
         for block in descriptor.get("layoutBlocks") or []:
             if not isinstance(block, Mapping):
                 continue
+            authored.flush(descriptor["pageId"], _block_frame(descriptor, block, document)["y"])
             block = _edited_block(descriptor, block)
             block_type = str(block.get("blockType") or "")
             text = _block_text(descriptor, block)
@@ -1283,6 +1299,8 @@ def build_prototype_docx_bytes(
                 caption.runs[0].font.size = Pt(8)
                 caption.runs[0].font.italic = True
 
+        authored.flush(descriptor["pageId"])
+
     buffer = io.BytesIO()
     mark_docx(output, document)
     output.save(buffer)
@@ -1324,6 +1342,8 @@ def _store_export(
     }
     if kind == "docx":
         descriptor["rendererVersion"] = _DOCX_RENDERER_VERSION
+        from ai_inspector.documentation.rich_docx import artifact_metadata
+        descriptor.update(artifact_metadata(document, _publication_page_geometry(document)[:2], 1.56 * 72))
     elif kind == "pdf":
         from ai_inspector.documentation.rich_layout import PDF_RENDERER_VERSION, has_text_objects
         if has_text_objects(document):
@@ -1374,6 +1394,8 @@ def _cached_export(
     }
     if kind == "docx":
         expected["rendererVersion"] = _DOCX_RENDERER_VERSION
+        from ai_inspector.documentation.rich_docx import artifact_metadata
+        expected.update(artifact_metadata(document, _publication_page_geometry(document)[:2], 1.56 * 72))
     elif kind == "pdf":
         from ai_inspector.documentation.rich_layout import PDF_RENDERER_VERSION, has_text_objects
         if has_text_objects(document):

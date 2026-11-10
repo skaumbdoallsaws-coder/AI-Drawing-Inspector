@@ -32,6 +32,8 @@ from tools.documentation_baseline import local_inventory, safe_source, tracked_p
 ASSEMBLY = "MMLE-50D"
 DOC_TYPE = "illustrated_parts_manual"
 PHASES = ("P1a", "P1b", "P1c", "P2a", "P2b", "P3a", "P3b", "P4a", "P4b", "P5a", "all")
+RICH_PROOF_TEXT = "Alpha beta gamma"
+RICH_PROOF_PASTE = "\nline two\n\n  \U0001f642 e\u0301\tend  "
 ROOT_NAMES = {"PARTS_MANUAL_ROOT": "p", "OPERATIONS_MANUAL_ROOT": "o", "SPECIFICATION_SHEET_ROOT": "s",
               "WORK_INSTRUCTION_ROOT": "w", "INSPECTION_SHEET_ROOT": "i",
               "ASSEMBLY_APPEARANCE_ROOT": "a", "PART_APPEARANCE_ROOT": "b"}
@@ -48,6 +50,9 @@ KNOWN_FIXTURE_LIMITATIONS = [
     "Drawing-map, drawing-pdf, part-features and process-map preview GETs may return 404 in the sanitized MMLE copy.",
     "Reference-views GET may return 500 because this copy has no MMLE drawings.",
     "A page reload aborts GETs still in flight (bridge status poll, static assets, figure images): net::ERR_ABORTED.",
+    "The isolated parts manual has no CAD captures, so it is not publication-ready and its Publish button stays "
+    "disabled; P2b proves the parts region on the canvas and through Sage, and its PDF path in "
+    "tests/test_documentation_rich_exports.py.",
 ]
 # The smoke reloads the app between workspace opens, which aborts GETs still in flight: the bridge status poll,
 # static assets and saved figure images. Only those reads; an aborted write or any other route still fails.
@@ -72,9 +77,22 @@ def known_http_failure(failure):
 
 def classify_failures(report):
     """Keep all raw evidence, separating only the supervisor's known fixture gaps."""
-    known_http = [item for item in report["httpFailures"] if known_http_failure(item)]
-    unexpected_http = [item for item in report["httpFailures"] if not known_http_failure(item)]
-    known = [{"kind": "http", **item, "reason": known_http_failure(item)} for item in known_http]
+    known_http, unexpected_http, known = [], [], []
+    expected = list(report.get("expectedHttpFailures", [])) if report.get("phase") == "P2b" else []
+    for item in report["httpFailures"]:
+        reason = known_http_failure(item)
+        proof = next((row for row in expected if row.get("error") == "unsupported_export_glyph"
+                      and row.get("checked") is True and row.get("status") == item.get("status") == 422
+                      and row.get("method") == item.get("method") == "POST" and row.get("url") == item.get("url")
+                      and urlsplit(item["url"]).path == "/api/specification-sheet/MMLE-50D/pdf"), None)
+        if proof is not None:
+            expected.remove(proof)  # Exactly one observed, checked proof refusal.
+            reason = "Expected unsupported_export_glyph proof refusal"
+        if reason:
+            known_http.append(item)
+            known.append({"kind": "http", **item, "reason": reason})
+        else:
+            unexpected_http.append(item)
     unexpected_console = []
     for item in report["consoleErrors"]:
         message, url = item["message"], item["location"].get("url", "")
@@ -86,7 +104,7 @@ def classify_failures(report):
                           and any(urlsplit(failure["url"]).path.startswith("/api/reference-views/")
                                   for failure in known_http))
         if matched or reference_json:
-            known.append({"kind": "console", **item, "reason": "Console consequence of a known optional GET failure"})
+            known.append({"kind": "console", **item, "reason": "Console consequence of a classified HTTP failure"})
         else:
             unexpected_console.append(item)
     unexpected_network = []
@@ -179,7 +197,7 @@ def write_json(path, value):
 class IsolatedDocumentationServer:
     def __init__(self, output, phase=None):
         self.output = output
-        self.rich_text = phase == "P2a"
+        self.rich_text = phase in {"P2a", "P2b"}
         self.temporary = self.process = self.log = None
         self.original = {}
 
@@ -811,10 +829,52 @@ def run_p1c(page, request, server, output, report, record, begin_edit, tool, fre
     record("p1c_under_ten_minutes", time.monotonic() - started < 600, time.monotonic() - started)
 
 
-def run_p2a(page, request, server, output, report, record, begin_edit, tool, fresh_page):
-    """One real Chromium, shared scene writes, CDP IME, persisted rich rendering."""
-    from ai_inspector.documentation.rich_text import from_plain, plain_text, validate
+def rich_select_word(page, editor, word):
+    editor.evaluate("""(node, word) => {
+        const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+        const nodes = []; let text = '', current;
+        while ((current = walker.nextNode())) { nodes.push({node:current, start:text.length}); text += current.textContent; }
+        const start = text.indexOf(word), end = start + word.length;
+        if (start < 0) throw new Error('Proof word is missing: ' + word);
+        const first = nodes.find(item => start >= item.start && start < item.start + item.node.length);
+        const last = nodes.find(item => end > item.start && end <= item.start + item.node.length);
+        const range = document.createRange(); range.setStart(first.node, start - first.start); range.setEnd(last.node, end - last.start);
+        const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+        window.__p2aMountedElement = DocumentationRichText.active.element;
+        window.__p2aEditor = DocumentationRichText.active.editor;
+    }""", word)
 
+
+def rich_paste(editor, value, mime="text/plain"):
+    editor.evaluate("""(node, {value, mime}) => {
+        const data = new DataTransfer(); data.setData(mime, value);
+        node.dispatchEvent(new ClipboardEvent('paste', {clipboardData:data, bubbles:true, cancelable:true}));
+    }""", {"value": value, "mime": mime})
+
+
+def rich_compose(page, check_pending):
+    cdp = page.context.new_cdp_session(page)
+    try:
+        cdp.send("Input.imeSetComposition", {"text": "\u6f22", "selectionStart": 1, "selectionEnd": 1})
+        page.wait_for_function("() => DocumentationRichText.active?.composing", timeout=5000)
+        # Request save without moving native IME focus (a focus change may itself
+        # legitimately finish composition before the click event reaches Done).
+        page.evaluate('() => DocumentationRichText.active.commit()')
+        page.wait_for_timeout(250)
+        check_pending()
+        with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/commands"), timeout=120000) as composed:
+            cdp.send("Input.insertText", {"text": "\u6f22\u5b57"})
+        composed.value.finished()
+        if not composed.value.ok:
+            raise RuntimeError(composed.value.text()[:1000])
+        page.wait_for_function("() => DocumentationRichText.mountedCount === 0", timeout=120000)
+    finally:
+        cdp.detach()
+
+
+def rich_browser_helpers(page, request, server, output, report, begin_edit, fresh_page, phase):
+    """Shared real scene/browser controls for P2a and P2b; no editor mocks."""
+    from types import SimpleNamespace
     spec = "product_specification_sheet"
     routes = {spec: "specification-sheet", DOC_TYPE: "parts-manual"}
     object_id = "document-object-p2a"
@@ -898,7 +958,8 @@ def run_p2a(page, request, server, output, report, record, begin_edit, tool, fre
             switch(kind)
         refresh()
         navigate(page_id)
-        report["workspaceOpens"].append({"phase": "P2a", "documentType": kind, "pageId": page_id})
+        report["workspaceOpens"].append({"phase": phase, "documentType": kind, "pageId": page_id})
+        return page
 
     def box(key=object_id):
         return page.locator(f'#documentationPublicationSurface [data-documentation-object-id="{key}"]')
@@ -922,11 +983,39 @@ def run_p2a(page, request, server, output, report, record, begin_edit, tool, fre
         return saved.value.json()
 
     def screenshot(name):
-        filename = "p2a-" + name + ".png"
+        filename = phase.lower() + "-" + name + ".png"
         page.screenshot(path=str(output / filename), full_page=True)
         report.setdefault("visualArtifacts", {})[name] = {"path": (output / filename).relative_to(ROOT).as_posix()}
 
-    original = "Alpha beta gamma"
+    return SimpleNamespace(**locals())
+
+
+def run_p2a(page, request, server, output, report, record, begin_edit, tool, fresh_page):
+    """One real Chromium, shared scene writes, CDP IME, persisted rich rendering."""
+    from ai_inspector.documentation.rich_text import from_plain, plain_text, validate
+
+    h = rich_browser_helpers(page, request, server, output, report, begin_edit, fresh_page, "P2a")
+    spec, routes, object_id, posts = h.spec, h.routes, h.object_id, h.posts
+    base = h.base
+    scene = h.scene
+    field = h.field
+    create = h.create
+    idle = h.idle
+    commands = h.commands
+    saved_command = h.saved_command
+    switch = h.switch
+    navigate = h.navigate
+    refresh = h.refresh
+    box = h.box
+    mount = h.mount
+    finish = h.finish
+    screenshot = h.screenshot
+
+    def open_document(kind, page_id):
+        nonlocal page
+        page = h.open_document(kind, page_id)
+
+    original = RICH_PROOF_TEXT
     page_id = create(spec, object_id, original)
     open_document(spec, page_id)
     version = (ROOT / "static/vendor/tiptap/VERSIONS.md").read_text("utf-8")
@@ -949,14 +1038,7 @@ def run_p2a(page, request, server, output, report, record, begin_edit, tool, fre
            and field(scene())["owner"] == "scene")
     screenshot("mounted-ribbon")
 
-    # Set a real DOM range, then use a real pointer click on the ribbon.
-    editor.evaluate("""node => {
-        const text = node.querySelector('p').firstChild;
-        const range = document.createRange(); range.setStart(text, 6); range.setEnd(text, 10);
-        const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
-        window.__p2aMountedElement = DocumentationRichText.active.element;
-        window.__p2aEditor = DocumentationRichText.active.editor;
-    }""")
+    rich_select_word(page, editor, "beta")
     page.locator('.documentation-rich-controls [data-rich-action="bold"]').click()
     record("p2a_03_selection_ribbon", page.evaluate("""() => {
         const c = DocumentationRichText.active;
@@ -974,13 +1056,8 @@ def run_p2a(page, request, server, output, report, record, begin_edit, tool, fre
         && DocumentationRichText.active.editor.state.selection.to === 11"""))
     editor = page.locator('.documentation-rich-editor [contenteditable="true"]')
     editor.press("Control+End")
-    pasted = "\nline two\n\n  \U0001f642 e\u0301\tend  "
-    # Dispatch a clipboard event at the actual editor; the production paste handler
-    # supplies inline JSON to ProseMirror (no direct editor-content mutation).
-    editor.evaluate("""(node, text) => {
-        const data = new DataTransfer(); data.setData('text/plain', text);
-        node.dispatchEvent(new ClipboardEvent('paste', {clipboardData:data, bubbles:true, cancelable:true}));
-    }""", pasted)
+    pasted = RICH_PROOF_PASTE
+    rich_paste(editor, pasted)
     finish(blur=True)
     current = field(scene())
     record("p2a_04_multiline_unicode_blur_commit", current["isRichText"]
@@ -990,24 +1067,8 @@ def run_p2a(page, request, server, output, report, record, begin_edit, tool, fre
     editor = mount()
     editor.press("Control+End")
     before_ime = len(posts)
-    cdp = page.context.new_cdp_session(page)
-    try:
-        cdp.send("Input.imeSetComposition", {"text": "\u6f22", "selectionStart": 1, "selectionEnd": 1})
-        page.wait_for_function("() => DocumentationRichText.active?.composing", timeout=5000)
-        # Request save without moving native IME focus (a focus change may itself
-        # legitimately finish composition before the click event reaches Done).
-        page.evaluate('() => DocumentationRichText.active.commit()')
-        page.wait_for_timeout(250)
-        record("p2a_05_ime_no_mid_composition_commit", len(posts) == before_ime
-               and page.evaluate("() => DocumentationRichText.mountedCount") == 1)
-        with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/commands"), timeout=120000) as composed:
-            cdp.send("Input.insertText", {"text": "\u6f22\u5b57"})
-        composed.value.finished()
-        if not composed.value.ok:
-            raise RuntimeError(composed.value.text()[:1000])
-        page.wait_for_function("() => DocumentationRichText.mountedCount === 0", timeout=120000)
-    finally:
-        cdp.detach()
+    rich_compose(page, lambda: record("p2a_05_ime_no_mid_composition_commit", len(posts) == before_ime
+                 and page.evaluate("() => DocumentationRichText.mountedCount") == 1))
     record("p2a_05_ime_saved", field(scene())["text"] == original + pasted + "\u6f22\u5b57")
 
     unchanged = field(scene())["richText"]
@@ -1174,6 +1235,347 @@ def run_p2a(page, request, server, output, report, record, begin_edit, tool, fre
     report["p2aScenePosts"] = posts
 
 
+CANVAS_LINES_JS = """
+box => {
+  const rect = box.getBoundingClientRect();
+  const scale = rect.width / box.offsetWidth;
+  const style = getComputedStyle(box);
+  const insetLeft = parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft);
+  const insetTop = parseFloat(style.borderTopWidth) + parseFloat(style.paddingTop);
+  const lines = [];
+  let current = null;
+  const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    const text = walker.currentNode;
+    if (text.parentElement.closest('.documentation-resize-handle')) continue;
+    for (let i = 0; i < text.data.length; i++) {
+      const range = document.createRange();
+      range.setStart(text, i); range.setEnd(text, i + 1);
+      const r = [...range.getClientRects()].pop();
+      if (!r) continue;
+      const left = (r.left - rect.left) / scale - insetLeft, top = (r.top - rect.top) / scale - insetTop;
+      if (!current || top > current.top + 2) { current = { top, left, text: '' }; lines.push(current); }
+      current.left = Math.min(current.left, left);
+      current.text += text.data[i];
+    }
+  }
+  const blocks = [...box.children].filter(child => !child.classList.contains('documentation-resize-handle'));
+  const bottom = Math.max(...blocks.map(child => child.getBoundingClientRect().bottom));
+  return { scale, width: box.offsetWidth, height: box.offsetHeight, lines,
+           contentHeight: (bottom - rect.top) / scale - insetTop };
+}
+"""
+
+
+def docx_run_text(payload, target):
+    """The authored table's run text in document order: w:t, and w:tab as a tab (w:br and numbering excluded)."""
+    import zipfile
+    from io import BytesIO
+    from lxml import etree
+    ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    with zipfile.ZipFile(BytesIO(payload)) as package:
+        root = etree.fromstring(package.read("word/document.xml"))
+    table = next(t for t in root.xpath("//w:tbl", namespaces=ns)
+                 if t.xpath("string(./w:tblPr/w:tblCaption/@w:val)", namespaces=ns) == "Authored text: " + target)
+    return "".join("\t" if leaf.tag.endswith("}tab") else (leaf.text or "")
+                   for leaf in table.xpath(".//w:r/w:t | .//w:r/w:tab", namespaces=ns))
+
+
+def fitz_open(payload):
+    import fitz
+    return fitz.open(stream=payload, filetype="pdf")
+
+
+def run_p2b(page, request, server, output, report, record, begin_edit, tool, fresh_page):
+    """One Chromium: browser authors -> refusal -> Sage edits -> real UI exports."""
+    from copy import deepcopy
+    from ai_inspector.documentation.rich_text import validate, plain_text
+    from ai_inspector.documentation.rich_layout import authored_objects, content_model
+    from ai_inspector.parts_manual.pdf import _document_object_style, _document_theme
+    from tests.documentation_rich_export_support import compare_docx, compare_pdf
+
+    h = rich_browser_helpers(page, request, server, output, report, begin_edit, fresh_page, "P2b")
+    spec, key = h.spec, h.object_id
+    pages, stored = {}, {}
+    comparison = {"authoring": {}, "export1": {}, "export2": {}, "export3": {}, "changes": {}}
+    comparison_path = output / "p2b-comparison.json"
+
+    def checkpoint():
+        write_json(comparison_path, comparison)
+        report["p2bComparison"] = comparison_path.relative_to(ROOT).as_posix()
+
+    def open_document(kind):
+        nonlocal page
+        page = h.open_document(kind, pages[kind])
+        # A real export may open a PDF viewer; close the extra tab to keep the
+        # proof in one low-memory Chromium. The artifact is downloaded below.
+        page.on("popup", lambda popup: popup.close())
+
+    def author(kind):
+        pages[kind] = h.create(kind, key, RICH_PROOF_TEXT)
+        open_document(kind)
+        ready = page.evaluate("async () => await DocumentationRichText.ready")
+        record("p2b_01_" + kind + "_ready", ready["ok"], ready)
+        editor = h.mount()
+        rich_select_word(page, editor, "beta")
+        page.locator('.documentation-rich-controls [data-rich-action="bold"]').click()
+        editor.press("Control+End")
+        pasted = RICH_PROOF_PASTE
+        rich_paste(editor, pasted)
+        h.finish(blur=True)
+        record("p2b_01_" + kind + "_p2a_paste", h.field(h.scene(kind))["text"] == RICH_PROOF_TEXT + pasted)
+        editor = h.mount()
+        editor.press("Control+End")
+        before_ime = len(h.posts)
+        rich_compose(page, lambda: record("p2b_01_" + kind + "_ime_pending", len(h.posts) == before_ime
+                     and page.evaluate("() => DocumentationRichText.mountedCount") == 1))
+        h.idle()
+        record("p2b_01_" + kind + "_p2a_ime", h.field(h.scene(kind))["text"] == RICH_PROOF_TEXT + pasted + "\u6f22\u5b57")
+        # Add a link and native lists through the same editor's actual controls
+        # and HTML paste path, so the export proof also exercises relationships
+        # and numbering without replacing the browser-authored whitespace.
+        editor = h.mount()
+        rich_select_word(page, editor, "gamma")
+        page.get_by_role("textbox", name="HTTP or HTTPS link").fill("https://example.test/proof?a=1&b=two%20words#part")
+        page.locator('.documentation-rich-controls [data-rich-action="link"]').click()
+        editor.press("Control+End")
+        editor.press("Enter")
+        # ProseMirror joins a pasted slice's open first block with the current paragraph, which dissolved a leading
+        # <ul> into plain text (supervisor finding). A leading paragraph takes that join; the list stays a list.
+        rich_paste(editor, '<p>Lists</p><ul><li><p>Bullet</p><ol start="3"><li><p>Third</p></li></ol></li></ul>',
+                   "text/html")
+        h.finish()
+        field = h.field(h.scene(kind))
+        stored[kind] = deepcopy(field["richText"])
+        encoded = json.dumps(stored[kind])
+        record("p2b_01_" + kind + "_browser_authored", validate(stored[kind]) == stored[kind]
+               and "bulletList" in encoded and "orderedList" in encoded and '"link"' in encoded
+               and "\U0001f642" in field["text"] and "e\u0301" in field["text"] and "\t" in field["text"])
+        comparison["authoring"][kind] = {"pageId": pages[kind], "targetId": key, "richText": stored[kind]}
+        h.screenshot("authored-" + ("spec" if kind == spec else "parts"))
+        checkpoint()
+
+    def artifacts_on_disk():
+        return {p.relative_to(server.stores).as_posix(): sha(p) for extension in ("*.pdf", "*.docx")
+                for p in server.stores.rglob(extension)}
+
+    def press_export(kind, format="pdf"):
+        url = h.base(kind) + "/pdf"
+        with page.expect_response(lambda r: r.request.method == "POST" and r.url == url, timeout=600000) as response:
+            page.locator("#documentationExportDocxRibbon" if format == "docx" else "#documentationPublishRibbon").click()
+        response.value.finished()  # Never reload with a large POST body in flight.
+        h.idle()
+        return response.value, response.value.json()
+
+    def walk(value, mutate):
+        if isinstance(value, dict):
+            mutate(value)
+            for child in value.values():
+                walk(child, mutate)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child, mutate)
+
+    def sage_edit(kind, round_number):
+        current = h.field(h.scene(kind))["richText"]
+        candidate = deepcopy(current)
+        changed = []
+        if round_number == 2:
+            def mutate(node):
+                if node.get("type") == "text" and "\U0001f642" in node["text"]:
+                    node["text"] = node["text"].replace("\U0001f642", "smile")
+                    changed.append("emoji")
+        else:
+            def mutate(node):
+                if node.get("type") != "text":
+                    return
+                if node["text"] == "beta":
+                    node.setdefault("marks", []).append({"type": "italic"})
+                    changed.append("beta")
+                elif node["text"] == "gamma":
+                    node["marks"] = [m for m in node.get("marks", []) if m["type"] != "textStyle"] + [
+                        {"type": "textStyle", "attrs": {"color": "#cc3300"}}]
+                    changed.append("gamma")
+        walk(candidate, mutate)
+        candidate = validate(candidate)
+        assert changed == (["emoji"] if round_number == 2 else ["beta", "gamma"]), changed
+        # Verify the proposed edit has no unrelated node/ID/whitespace changes.
+        restored = deepcopy(candidate)
+        if round_number == 2:
+            walk(restored, lambda node: node.update(text=node["text"].replace("smile", "\U0001f642"))
+                 if node.get("type") == "text" else None)
+        else:
+            old_marks = {}
+            walk(current, lambda node: old_marks.update({node["text"]: node.get("marks", [])})
+                 if node.get("type") == "text" and node["text"] in {"beta", "gamma"} else None)
+            walk(restored, lambda node: node.update(marks=old_marks[node["text"]])
+                 if node.get("type") == "text" and node["text"] in old_marks else None)
+        assert validate(restored) == current
+        bound = tool("read_document_pages", {"documentType": kind, "targets": [{"pageId": pages[kind], "targetId": key}]})
+        assert bound.get("ok"), bound
+        observed = bound["data"]["targets"][0]
+        applied = tool("apply_document_edits", {"documentId": bound["data"]["documentId"],
+            "expectedRevision": observed["revision"], "requestId": f"p2b-{round_number}-{kind}", "operations": [{
+                "operation": "replace_rich_text", "targetId": observed["targetId"],
+                "expectedContentHash": observed["contentHash"], "richText": candidate}]})
+        assert applied.get("ok"), applied
+        fresh = h.field(h.scene(kind))["richText"]
+        record(f"p2b_0{round_number + 2}_sage_{kind}", fresh == candidate, {"changed": changed})
+        stored[kind] = fresh
+        return fresh
+
+    def download(artifact, filename):
+        assert artifact.get("url", "").startswith("/api/"), artifact
+        response = request.get(server.url + artifact["url"], timeout=120000)
+        assert response.ok, response.text()[:500]
+        payload = response.body()
+        (output / filename).write_bytes(payload)
+        report.setdefault("exportArtifacts", []).append({"file": filename, "sha256": hashlib.sha256(payload).hexdigest(),
+                                                         "bytes": len(payload)})
+        return payload
+
+    def canvas_lines():
+        # The static render as the user sees it: characters grouped into lines by their top edge, in layout px.
+        return h.box().evaluate(CANVAS_LINES_JS)
+
+    def canvas_matches_layout(kind, label, measured, page_size=None):
+        import fitz
+        import unicodedata
+        from ai_inspector.documentation.rich_layout import TAB_SPACES, prepare_pdf_objects
+        snapshot = h.scene(kind)["document"]
+        descriptor = next(p for p in snapshot["pages"] if p["pageId"] == pages[kind])
+        frame = next(row for row in authored_objects(descriptor) if row[0] == key)[1]["frame"]
+        if page_size is None:
+            page_size = (measured["width"] / frame["width"], measured["height"] / frame["height"])
+        plan = prepare_pdf_objects(fitz, snapshot, page_size)[pages[kind]][key]
+        inner = plan.layout.frame
+        pdf = [{"text": "".join(r.text for r in runs), "left": runs[0].x - inner[0]}
+               for runs in ([r for r in line.runs if not r.marker] for line in plan.layout.lines) if runs]
+        canvas = [{"text": unicodedata.normalize("NFC", row["text"]).replace("\t", " " * TAB_SPACES).replace("\r", " "),
+                   "left": row["left"]} for row in measured["lines"]]
+        pdf = [row for row in pdf if row["text"].strip()]
+        canvas = [row for row in canvas if row["text"].strip()]
+        box_size = [abs(measured["width"] - frame["width"] * page_size[0]), abs(measured["height"] - frame["height"] * page_size[1])]
+        detail = {"canvas": canvas, "pdf": pdf, "boxSizeError": box_size,
+                  "contentHeight": {"canvas": measured["contentHeight"], "pdf": plan.layout.measured_height}}
+        ok = (len(canvas) == len(pdf)
+              and all(a["text"].rstrip() == b["text"].rstrip() and abs(a["left"] - b["left"]) <= 1.0 for a, b in zip(canvas, pdf))
+              and abs(measured["contentHeight"] - plan.layout.measured_height) <= 1.0
+              and max(box_size) <= 0.6)
+        record(label, ok, None if ok else detail)
+        return detail
+
+    def parts_not_publishable(round_number):
+        open_document(DOC_TYPE)
+        assert h.field(h.scene(DOC_TYPE))["richText"] == stored[DOC_TYPE]
+        canvas = canvas_matches_layout(DOC_TYPE, f"p2b-{round_number}-parts_canvas_matches_pdf_layout", canvas_lines())
+        state = page.evaluate("""() => {
+            const doc = window.__compareDbg.state.partsManualDocumentation?.document || {};
+            const pending = (doc.pages || []).filter(p => p.renderRequest && p.renderRequest.image?.status !== 'ready');
+            return {disabled: document.querySelector('#documentationPublishRibbon').disabled,
+                    status: doc.status || null, pendingCaptures: pending.length};
+        }""")
+        record(f"p2b-{round_number}-parts_publish_needs_captures", state["disabled"]
+               and (state["status"] != "publication_ready" or state["pendingCaptures"] > 0), state)
+        comparison["export" + str(round_number)][DOC_TYPE] = {"richText": stored[DOC_TYPE], "canvas": canvas,
+            "skipped": "isolated parts manual is not publication-ready", **state}
+        checkpoint()
+
+    def export_and_compare(kind, round_number):
+        if kind != spec:
+            return parts_not_publishable(round_number)
+        open_document(kind)
+        current = h.scene(kind)
+        assert h.field(current)["richText"] == stored[kind]
+        measured = canvas_lines()
+        response, result = press_export(kind)
+        assert response.ok, result
+        prefix = f"p2b-{round_number}-spec"
+        pdf_bytes = download(result["pdf"], prefix + ".pdf")
+        snapshot = h.scene(kind)["document"]
+        descriptor = next(p for p in snapshot["pages"] if p["pageId"] == pages[kind])
+        _, obj, canonical = next(row for row in authored_objects(descriptor) if row[0] == key)
+        assert canonical == stored[kind]
+        model = content_model(canonical, _document_object_style(_document_theme(snapshot), obj))
+        try:
+            pdf_result = compare_pdf(pdf_bytes, snapshot, pages[kind], key, output / (prefix + ".png"))
+        except Exception as error:
+            record(prefix + "_pdf_matches", False, str(error))
+            raise
+        record(prefix + "_pdf_matches", True)
+        with fitz_open(pdf_bytes) as exported:
+            pdf_page = exported[next(i for i, p in enumerate(snapshot["pages"]) if p["pageId"] == pages[kind])]
+            pdf_size = (pdf_page.rect.width, pdf_page.rect.height)
+        row = {"richText": canonical, "pdf": pdf_result,
+               "canvas": canvas_matches_layout(kind, prefix + "_canvas_matches_pdf_layout", measured, pdf_size)}
+        response, result = press_export(kind, "docx")
+        assert response.ok, result
+        docx_bytes = download(result["docx"], prefix + ".docx")
+        try:
+            row["docx"] = compare_docx(docx_bytes, key, model)
+        except Exception as error:
+            record(prefix + "_docx_matches", False, str(error))
+            raise
+        record(prefix + "_docx_matches", True)
+        # Independent of content_model: the stored envelope's own plain text, every character but LF, in order.
+        expected = plain_text(canonical).replace("\r", " ").replace("\n", "")
+        actual = docx_run_text(docx_bytes, key)
+        record(prefix + "_docx_text_is_the_stored_text", actual == expected,
+               None if actual == expected else {"expected": expected, "actual": actual})
+        comparison["export" + str(round_number)][kind] = row
+        checkpoint()
+
+    def semantic_characters(snapshot, format):
+        if format == "docx":
+            return [char for paragraph in snapshot["paragraphs"] for char in paragraph]
+        return [{"text": char, **{key: run[key] for key in ("bold", "italic", "underline", "color", "href", "size")}}
+                for line in snapshot["lines"] for run in line if not run["marker"] for char in run["text"]]
+
+    for kind in (spec, DOC_TYPE):
+        author(kind)
+    open_document(spec)
+    before = artifacts_on_disk()
+    response, failure = press_export(spec)
+    correct = response.status == 422 and failure.get("error") == "unsupported_export_glyph"
+    details = failure.get("details") or {}
+    correct = correct and "U+1F642" in details.get("codePoints", []) and any(t["targetId"] == key for t in details.get("targets", []))
+    record("p2b_02_glyph_refusal", correct, failure)
+    if correct:
+        report.setdefault("expectedHttpFailures", []).append({"url": response.url, "status": 422, "method": "POST",
+                                                               "error": "unsupported_export_glyph", "checked": True})
+    status = page.locator("#documentationWorkspace .documentation-status-message")
+    page.wait_for_function("() => document.querySelector('#documentationWorkspace .documentation-status-message')?.textContent.includes('unsupported_export_glyph')")
+    record("p2b_02_refusal_in_page", all(text in status.inner_text() for text in ("unsupported_export_glyph", key, "U+1F642")))
+    record("p2b_02_no_artifact_written", artifacts_on_disk() == before)
+    h.screenshot("glyph-refusal")
+    comparison["export1"] = failure
+    checkpoint()
+    open_document(spec)
+    record("p2b_03_reopen_unchanged", h.field(h.scene())["richText"] == stored[spec]
+           and h.box().locator("strong").all_text_contents() == ["beta"]
+           and h.box().locator("a").get_attribute("href") == "https://example.test/proof?a=1&b=two%20words#part")
+    for kind in (spec, DOC_TYPE):
+        sage_edit(kind, 2)
+        export_and_compare(kind, 2)
+    for kind in (spec, DOC_TYPE):
+        open_document(kind)
+        record("p2b_06_reopen_" + kind, h.field(h.scene(kind))["richText"] == stored[kind])
+        sage_edit(kind, 3)
+        export_and_compare(kind, 3)
+        for format in ("pdf", "docx") if kind == spec else ():
+            old = semantic_characters(comparison["export2"][kind][format], format)
+            new = semantic_characters(comparison["export3"][kind][format], format)
+            text = "".join(c["text"] for c in old)
+            assert text == "".join(c["text"] for c in new)
+            allowed = {i for word in ("beta", "gamma") for i in range(text.index(word), text.index(word) + len(word))}
+            changed = {i for i, (a, b) in enumerate(zip(old, new)) if a != b}
+            record("p2b_06_only_requested_marks_" + kind + "_" + format, changed == allowed,
+                   {"changedCharacterOffsets": sorted(changed)})
+            comparison["changes"][kind + "_" + format] = {"changedCharacterOffsets": sorted(changed), "textUnchanged": True}
+        checkpoint()
+    report["p2bScenePosts"] = h.posts
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--phase", required=True, choices=PHASES)
@@ -1251,8 +1653,8 @@ def main():
         raise RuntimeError("Inline edit did not start after three double presses")
 
     try:
-        if args.phase not in {"P1a", "P1b", "P1c", "P2a"}:
-            raise RuntimeError("Only the P1a, P1b, P1c and P2a gates are implemented.")
+        if args.phase not in {"P1a", "P1b", "P1c", "P2a", "P2b"}:
+            raise RuntimeError("Only the P1a, P1b, P1c, P2a and P2b gates are implemented.")
         from playwright.sync_api import sync_playwright
         server.start()
         report["isolation"] = server.isolation
@@ -1341,7 +1743,9 @@ def main():
                 raise RuntimeError(f"Tool HTTP {response.status}: {response.text()[:800]}")
             return response.json()
 
-        if args.phase == "P2a":
+        if args.phase == "P2b":
+            run_p2b(page, request, server, output, report, record, begin_edit, tool, fresh_page)
+        elif args.phase == "P2a":
             run_p2a(page, request, server, output, report, record, begin_edit, tool, fresh_page)
         elif args.phase == "P1c":
             run_p1c(page, request, server, output, report, record, begin_edit, tool, fresh_page)

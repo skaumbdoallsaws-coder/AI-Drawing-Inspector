@@ -1,4 +1,4 @@
-/* Scoped editor UI only. No publication-page or flag-off style changes. */
+/* Scoped editor UI, plus the list indent that rich text lists need on the page (below). */
 .documentation-rich-mounted { overflow: visible !important; cursor: text !important; }
 .documentation-rich-mounted > .documentation-resize-handle { display: none; }
 .documentation-rich-editor { pointer-events: auto; height: 100%; }
@@ -13,6 +13,11 @@
 .documentation-rich-editor .tiptap h3,
 .documentation-rich-editor .tiptap ul,
 .documentation-rich-editor .tiptap ol { margin: 0; }
+/* Rich text lists on the page and in the editor. The app's global reset (* { padding: 0 }) removes the
+   browser's list indent, which pushed the outside markers past the text box's clip: lists showed no
+   bullets or numbers. Restore the browser default; the PDF and DOCX exports indent 40 px per level too. */
+.documentation-object.text ul,
+.documentation-object.text ol { padding-inline-start: 40px; }
 .documentation-rich-panel {
     pointer-events: auto; position: absolute; z-index: 30; bottom: 42px; left: 260px;
     max-width: min(680px, calc(100% - 280px)); padding: 9px 12px; border: 1px solid #4687ab;

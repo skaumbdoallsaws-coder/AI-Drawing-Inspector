@@ -22,6 +22,7 @@ from pathlib import Path
 import re
 import secrets
 import tempfile
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, Mapping, Optional
 
@@ -409,7 +410,16 @@ class AssemblyAppearanceStore:
         try:
             with os.fdopen(handle, "wb") as stream:
                 stream.write(payload)
-            os.replace(temporary, path)
+            # Windows refuses to replace a file another request is reading (WinError 5); the viewer reports its
+            # geometry on every model load, so overlapping reads happen. Retry like the parts and scene stores.
+            for attempt in range(6):
+                try:
+                    os.replace(temporary, path)
+                    break
+                except PermissionError:
+                    if attempt == 5:
+                        raise
+                    time.sleep(0.03 * (2 ** attempt))
         finally:
             if os.path.exists(temporary):
                 os.unlink(temporary)

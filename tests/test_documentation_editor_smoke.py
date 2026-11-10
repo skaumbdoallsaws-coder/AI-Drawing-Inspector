@@ -114,3 +114,20 @@ def test_only_reload_aborted_reads_are_known():
         report = empty_report()
         report["networkFailures"] = [{"url": url, "method": method, "error": error}]
         assert not classify_failures(report), url
+
+
+def test_p2b_only_the_checked_single_glyph_refusal_is_expected():
+    item = failure("/api/specification-sheet/MMLE-50D/pdf", 422, "POST")
+    report = empty_report()
+    report.update(phase="P2b", httpFailures=[item], consoleErrors=[console_resource(item)],
+                  expectedHttpFailures=[{**item, "error": "unsupported_export_glyph", "checked": True}])
+    assert classify_failures(report)
+    report["httpFailures"].append(deepcopy(item))
+    assert not classify_failures(report)
+    assert report["unexpectedHttpFailures"] == [item]
+    report["httpFailures"].pop()
+    report["phase"] = "P2a"
+    assert not classify_failures(report)
+    report["phase"] = "P2b"
+    report["expectedHttpFailures"][0]["error"] = "layout_overflow"
+    assert not classify_failures(report)

@@ -1,7 +1,7 @@
-"""P2b-1: real PDF extraction, export entry points, and unchanged legacy bytes.
+"""P2b: real PDF and DOCX parts, export entry points, and legacy equality.
 
-These tests use only temporary stores. The legacy oracle is the supervisor's
-committed P2a-2 exporter source, read with git show (no checkout/index changes).
+These tests use only temporary stores. Legacy oracles are the supervisor's
+committed P2a-2/P2b-1 exporters, read with git show (no checkout/index changes).
 """
 from __future__ import annotations
 
@@ -14,6 +14,8 @@ import os
 import subprocess
 import sys
 import types
+import io
+import zipfile
 
 import fitz
 from PIL import Image
@@ -32,6 +34,307 @@ from ai_inspector.specification_sheet import exports as spec
 from ai_inspector.operations_manual import exports as ops
 from ai_inspector.work_instructions import exports as wi
 from tests.test_documentation_refresh import mmle_client
+
+NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+      "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+      "rel": "http://schemas.openxmlformats.org/package/2006/relationships"}
+
+
+def docx_parts(payload):
+    from lxml import etree
+    from docx import Document
+    Document(io.BytesIO(payload))  # A real python-docx package, not a constructed XML fragment.
+    with zipfile.ZipFile(io.BytesIO(payload)) as package:
+        return {name: etree.fromstring(package.read(name)) for name in package.namelist()
+                if name.endswith((".xml", ".rels"))}
+
+
+def xp(node, query):
+    return node.xpath(query, namespaces=NS)
+
+
+def authored_tables(document):
+    return xp(document, '//w:tbl[w:tblPr/w:tblCaption[starts-with(@w:val,"Authored text: ")]]')
+
+
+def build_docx(builder, document, root, module=None):
+    if builder == "specification":
+        return (module or spec).build_specification_docx_bytes(document, render_root=root, assembly_number=NUMBER)
+    return (module or ops).build_prototype_docx_bytes(root, NUMBER, document)
+
+
+@pytest.mark.parametrize("builder", ("specification", "operations", "wi"))
+@pytest.mark.parametrize("mode", ("review", "draft", "customer", "controlled"))
+def test_native_docx_runs_links_and_base_font(builder, mode, tmp_path, image_path):
+    value = mixed()
+    document = attach(fixture_document(builder, mode), value, style={"fontFamily": "Georgia", "fontSize": 13})
+    document["pages"][0]["documentationObjects"][TARGET]["content"] = "DO NOT FLATTEN"
+    before = deepcopy(document)
+    package = docx_parts(build_docx(builder, document, tmp_path))
+    table = authored_tables(package["word/document.xml"])[0]
+    assert xml_text(table) == "Normal Bold Italic Both Under Red Link"
+    for label, b, i, u, color in (("Normal ", "0", "0", "none", "18212A"),
+        ("Bold ", "1", "0", "none", "18212A"), ("Italic ", "0", "1", "none", "18212A"),
+        ("Both ", "1", "1", "none", "18212A"), ("Under ", "0", "0", "single", "18212A"),
+        ("Red ", "0", "0", "none", "AB1234"), ("Link", "0", "0", "single", "0000EE")):
+        run = next(r for r in xp(table, './/w:r') if xml_text(r) == label)
+        assert xp(run, './w:rPr/w:b/@w:val') == [b]
+        assert xp(run, './w:rPr/w:i/@w:val') == [i]
+        assert xp(run, './w:rPr/w:u/@w:val') == [u]
+        assert xp(run, './w:rPr/w:color/@w:val') == [color]
+        assert xp(run, './w:rPr/w:sz/@w:val') == xp(run, './w:rPr/w:szCs/@w:val') == ["26"]
+        for attribute in ("ascii", "hAnsi", "cs"):
+            assert xp(run, './w:rPr/w:rFonts/@w:' + attribute) == ["Times New Roman"]
+        assert not xp(run, './w:rPr/w:rFonts/@w:eastAsia')
+    rid = xp(table, './/w:hyperlink/@r:id')[0]
+    relation = next(r for r in package["word/_rels/document.xml.rels"] if r.get("Id") == rid)
+    assert relation.get("Target") == "https://example.test/a?x=1&y=two%20words#part"
+    assert relation.get("TargetMode") == "External"
+    assert relation.get("Type").endswith("/hyperlink")
+    assert not xp(table, './/w:rStyle[@w:val="Hyperlink"]')
+    assert document == before
+
+
+def test_docx_headings_empty_paragraph_marks_spacing_and_unicode(tmp_path, image_path):
+    source = "  leading  e\u0301 \u4e2d\u6587 \U0001f642\tCR\r\nnext  "
+    value = rich(*[{"type": "heading", "attrs": {"level": n}, "content": [text("Heading" + str(n))]} for n in (1, 2, 3)],
+                 paragraph(), paragraph(text(source), {"type": "hardBreak"}),
+                 paragraph(text("two"), {"type": "hardBreak"}, {"type": "hardBreak"}))
+    document = attach(fixture_document("specification"), value, style={"fontFamily": "Courier", "fontSize": 16, "textAlign": "justify"})
+    package = docx_parts(build_docx("specification", document, tmp_path))
+    table = authored_tables(package["word/document.xml"])[0]
+    paragraphs = xp(table, './w:tr/w:tc/w:p')
+    assert [xp(p, './w:pPr/w:pStyle/@w:val') for p in paragraphs[:3]] == [["Heading1"], ["Heading2"], ["Heading3"]]
+    sizes = [64, 48, 37, 32, 32, 32]
+    for index, p in enumerate(paragraphs):
+        assert xp(p, './w:pPr/w:jc/@w:val') == ["both"]
+        assert xp(p, './w:pPr/w:spacing/@w:before') == xp(p, './w:pPr/w:spacing/@w:after') == ["0"]
+        assert xp(p, './w:pPr/w:spacing/@w:lineRule') == ["atLeast"]
+        size = (32, 24, 18.72, 16, 16, 16)[index]
+        assert xp(p, './w:pPr/w:spacing/@w:line') == [str(round(size * 24))]
+        assert xp(p, './w:pPr/w:rPr/w:sz/@w:val') == xp(p, './w:pPr/w:rPr/w:szCs/@w:val') == [str(sizes[index])]
+        assert xp(p, './w:pPr/w:rPr/w:rFonts/@w:ascii') == ["Courier New"]
+        if index < 3:
+            assert xp(p, './w:r/w:rPr/w:b/@w:val') == ["1"]
+            assert xp(p, './w:r/w:rPr/w:sz/@w:val') == [str(sizes[index])]
+            assert xp(p, './w:r/w:rPr/w:color/@w:val') == ["18212A"]
+    assert not xp(paragraphs[3], './w:r')
+    assert xml_text(paragraphs[4]) == "  leading  e\u0301 \u4e2d\u6587 \U0001f642\tCR \nnext  "
+    assert len(xp(paragraphs[4], './/w:tab')) == 1 and len(xp(paragraphs[4], './/w:br')) == 1
+    assert xml_text(paragraphs[5]) == "two\n"
+    assert all(t.get("{http://www.w3.org/XML/1998/namespace}space") == "preserve" for t in xp(table, './/w:t'))
+    assert plain_text(value).endswith("two\n\n")  # Export has not changed the stored value.
+
+
+def test_docx_native_numbering_order_starts_restarts_nesting_and_continuations(tmp_path):
+    item = lambda *blocks: {"type": "listItem", "content": list(blocks)}
+    bullet = lambda *items: {"type": "bulletList", "content": list(items)}
+    ordered = lambda start, *items: {"type": "orderedList", "attrs": {"start": start}, "content": list(items)}
+    value = rich(ordered(7, item(paragraph(text("seven")), paragraph(text("continuation")),
+                     ordered(3, item(paragraph(text("nested")), ordered(9, item(paragraph(text("deep"))))))),
+                     item(paragraph(text("eight")))),
+                 ordered(2, item(paragraph(text("restart")))),
+                 bullet(item(paragraph(text("disc")), bullet(item(paragraph(text("circle")), bullet(item(paragraph(text("square")))))))))
+    document = attach(fixture_document("operations"), value)
+    # The same model-local list IDs in a second field must not share Word counters.
+    second = deepcopy(document["pages"][0]["documentationComposition"]["documentObjects"][TARGET])
+    document["pages"][0]["documentationComposition"]["documentObjects"][TARGET + "-2"] = second
+    package = docx_parts(build_docx("operations", document, tmp_path))
+    tables = authored_tables(package["word/document.xml"])
+    paragraphs = {xml_text(p): p for p in xp(tables[0], './/w:p')}
+    numbering = package["word/numbering.xml"]
+    tags = [e.tag.rsplit("}", 1)[-1] for e in numbering]
+    assert max(i for i, tag in enumerate(tags) if tag == "abstractNum") < min(i for i, tag in enumerate(tags) if tag == "num")
+
+    def definition(label):
+        p = paragraphs[label]
+        number = xp(p, './w:pPr/w:numPr/w:numId/@w:val')[0]
+        level = xp(p, './w:pPr/w:numPr/w:ilvl/@w:val')[0]
+        n = xp(numbering, './w:num[@w:numId="' + number + '"]')[0]
+        aid = xp(n, './w:abstractNumId/@w:val')[0]
+        return number, level, n, xp(numbering, './w:abstractNum[@w:abstractNumId="' + aid + '"]/w:lvl')[0]
+
+    ids = []
+    for label, depth, start in (("seven", 1, 7), ("nested", 2, 3), ("deep", 3, 9), ("restart", 1, 2)):
+        number, level, n, definition_xml = definition(label)
+        ids.append(number)
+        assert level == str(depth - 1)
+        assert xp(n, './w:lvlOverride/w:startOverride/@w:val') == [str(start)]
+        assert xp(definition_xml, './w:lvlText/@w:val') == [f"%{depth}."]
+        assert xp(definition_xml, './w:numFmt/@w:val') == ["decimal"]
+        assert xp(paragraphs[label], './w:pPr/w:ind/@w:left') == [str(depth * 800)]
+        # Right-aligned one Arial space (0.278 em of the fixture's 12 pt) before the text, like the canvas markers.
+        assert xp(paragraphs[label], './w:pPr/w:ind/@w:hanging') == ["67"]
+        assert xp(definition_xml, './w:lvlJc/@w:val') == ["right"]
+    assert len(set(ids)) == 4
+    assert definition("eight")[0] == definition("seven")[0]
+    assert not xp(paragraphs["continuation"], './w:pPr/w:numPr')
+    assert xp(paragraphs["continuation"], './w:pPr/w:ind/@w:left') == ["800"]
+    for label, family, symbol in (("disc", "Symbol", "\uf0b7"), ("circle", "Courier New", "o"), ("square", "Wingdings", "\uf0a7")):
+        d = definition(label)[3]
+        assert xp(d, './w:numFmt/@w:val') == ["bullet"]
+        assert xp(d, './w:lvlText/@w:val') == [symbol]
+        assert xp(d, './w:rPr/w:rFonts/@w:ascii') == [family]
+    assert set(xp(tables[0], './/w:numId/@w:val')).isdisjoint(xp(tables[1], './/w:numId/@w:val'))
+    assert not any(marker in xml_text(tables[0]) for marker in ("7.", "3.", "9.", "\uf0b7"))
+
+
+@pytest.mark.parametrize("builder", ("specification", "operations", "wi"))
+def test_docx_table_geometry_width_cap_and_growing_cell(builder, tmp_path, image_path):
+    document = attach(fixture_document(builder), "Long content\n" * 40,
+                      style={"fill": "#eeccaa", "outlineColor": "#123456", "lineWidth": 2},
+                      frame={"x": .1, "y": .2, "width": 1, "height": .01})
+    writer = {"specification": spec.store_specification_docx, "operations": ops.store_prototype_docx, "wi": wi.store_review_docx}[builder]
+    result = writer(tmp_path / "docx", NUMBER, document)
+    payload = next((tmp_path / "docx").rglob("*.docx")).read_bytes()
+    package = docx_parts(payload)
+    table = authored_tables(package["word/document.xml"])[0]
+    width, height, margins = (612, 792, 1.04 * 72) if builder == "specification" else (960, 540, 1.56 * 72)
+    assert xp(table, './w:tblPr/w:tblW/@w:w') == [str(round((width - margins) * 20))]
+    assert xp(table, './w:tblGrid/w:gridCol/@w:w') == xp(table, './w:tr/w:tc/w:tcPr/w:tcW/@w:w')
+    assert xp(table, './w:tr/w:trPr/w:trHeight/@w:hRule') == ["atLeast"]
+    assert xp(table, './w:tr/w:trPr/w:trHeight/@w:val') == [str(round(height * .01 * 20))]
+    for side in ("top", "left", "bottom", "right"):
+        assert xp(table, './/w:tcMar/w:' + side + '/@w:w') == ["100"]
+        assert xp(table, './/w:tcBorders/w:' + side + '/@w:color') == ["123456"]
+        assert xp(table, './/w:tcBorders/w:' + side + '/@w:sz') == ["16"]
+    assert xp(table, './/w:tcPr/w:shd/@w:fill') == ["EECCAA"]
+    assert not xp(table, './/w:txbxContent | .//w:pict | .//w:drawing')
+    available = int(xp(table, "./w:tblPr/w:tblW/@w:w")[0]) / 20
+    assert result["authoredText"]["widthCaps"] == [{"pageId": PAGE, "targetId": TARGET,
+                                                   "requestedWidthPt": width, "widthPt": available}]
+    assert xml_text(table).count("Long content") == 40
+
+
+def test_docx_no_outline_padding_and_explicit_link_color(tmp_path):
+    value = rich(paragraph(text("Tinted", {"type": "link", "attrs": {"href": "https://example.test/a%2Fb?x=1&y=2"}},
+                                {"type": "textStyle", "attrs": {"color": "#aabbcc"}})))
+    package = docx_parts(build_docx("operations", attach(fixture_document("operations"), value), tmp_path))
+    table = authored_tables(package["word/document.xml"])[0]
+    assert xp(table, './w:tblPr/w:tblBorders/*/@w:val') == ["nil"] * 6
+    assert not xp(table, './/w:tcBorders')
+    assert xp(table, './/w:tcMar/*/@w:w') == ["60"] * 4
+    assert xp(table, './/w:shd/@w:fill') == ["FFFFFF"]
+    assert xp(table, './/w:hyperlink/w:r/w:rPr/w:color/@w:val') == ["AABBCC"]
+    assert xp(table, './/w:hyperlink/w:r/w:rPr/w:u/@w:val') == ["single"]
+
+
+def test_docx_cache_rebuilds_previously_dropped_plain_objects(tmp_path):
+    document = attach(fixture_document("operations"), "Previously missing")
+    result = ops.store_prototype_docx(tmp_path, NUMBER, document)
+    assert result["rendererVersion"] == "authored-text-docx-1"
+    metadata = next(tmp_path.rglob("review-docx.json"))
+    old = json.loads(metadata.read_text("ascii"))
+    old["rendererVersion"] = ops._DOCX_RENDERER_VERSION
+    old.pop("authoredText")
+    metadata.write_bytes(json.dumps(old).encode("ascii"))
+    assert not ops.store_prototype_docx(tmp_path, NUMBER, document)["cacheHit"]
+    assert ops.store_prototype_docx(tmp_path, NUMBER, document)["cacheHit"]
+
+
+def test_docx_invalid_xml_control_is_an_explicit_refusal(tmp_path):
+    document = attach(fixture_document("operations"), from_plain("bad\x00control"))
+    with pytest.raises(DocumentEditError) as caught:
+        ops.store_prototype_docx(tmp_path, NUMBER, document)
+    assert caught.value.code == "unsupported_export_character"
+    assert caught.value.details["codePoints"] == ["U+0000"]
+    assert caught.value.details["targets"] == [{"pageId": PAGE, "targetId": TARGET}]
+    assert not list(tmp_path.rglob("*.docx"))
+
+
+def add_ordered_objects(document, page, placements):
+    for key, top, left in placements:
+        obj = {"type": "text", "objectId": key, "content": key,
+               "frame": {"x": left, "y": top, "width": .3, "height": .05}}
+        page.setdefault("documentationComposition", {}).setdefault("documentObjects", {})[key] = obj
+
+
+@pytest.mark.parametrize("builder", ("operations", "wi"))
+def test_docx_objects_interleave_cover_body_and_end_before_page_break(builder, tmp_path, image_path, monkeypatch):
+    monkeypatch.setattr(ops, "document_draft_render_path", lambda *args: image_path)
+    document = fixture_document(builder)
+    cover = document["pages"][0]
+    cover.update(pageType="operations_cover", layoutBlocks=[
+        {"blockId": "cover-kicker", "frame": {"y": 80}}, {"blockId": "cover-product", "frame": {"y": 120}}])
+    document["product"]["name"] = "GENERATED TITLE"
+    document["coverKicker"] = "GENERATED KICKER"
+    add_ordered_objects(document, cover, [("cover-before", .01, .1), ("cover-between", .18, .1), ("cover-end", .95, .1)])
+    body = {"pageId": "body", "pageNumber": 2, "pageType": "operations_section", "layoutBlocks": [
+        {"blockId": "one", "blockType": "paragraph", "text": "GENERATED ONE", "frame": {"y": 100}},
+        {"blockId": "two", "blockType": "paragraph", "text": "GENERATED TWO", "frame": {"y": 300}}]}
+    add_ordered_objects(document, body, [("body-z", .3, .2), ("body-a", .3, .2), ("body-left", .3, .1), ("body-end", .99, .1)])
+    document["pages"].append(body)
+    document["pageCount"] = 2
+    xml = docx_parts(build_docx(builder, document, tmp_path))["word/document.xml"]
+    children = xp(xml, './w:body/*')
+    labels = [xml_text(c) for c in children]
+    selected = [s for s in labels if s.startswith(("cover-", "body-", "GENERATED"))]
+    assert selected == ["cover-before", "GENERATED KICKER", "cover-between", "GENERATED TITLE", "cover-end",
+                        "GENERATED ONE", "body-left", "body-a", "body-z", "GENERATED TWO", "body-end"]
+    break_index = next(i for i, c in enumerate(children) if xp(c, './/w:br[@w:type="page"]'))
+    assert labels.index("cover-end") < break_index < labels.index("GENERATED ONE")
+
+
+def test_docx_specification_section_flush_order(tmp_path, image_path):
+    document = fixture_document("specification")
+    blocks = document["pages"][0]["layoutBlocks"]
+    for block in blocks:
+        block["open"] = False
+        block["text"] = block["blockId"]
+    add_ordered_objects(document, document["pages"][0], [("before-kicker", .01, .1), ("before-title", .1, .1),
+        ("before-tagline", .13, .1), ("before-main", .2, .1), ("before-features", .6, .1), ("before-notes", .9, .1), ("after-notes", .99, .1)])
+    xml = docx_parts(build_docx("specification", document, tmp_path))["word/document.xml"]
+    labels = [xml_text(c) for c in xp(xml, './w:body/*')]
+    def index(prefix):
+        return next(i for i, label in enumerate(labels) if label.startswith(prefix))
+    assert index("before-kicker") < index("spec-kicker") < index("before-title") < index("spec-title")
+    assert index("spec-title") < index("before-tagline") < index("spec-tagline") < index("before-main")
+    assert index("before-main") < index("Specifications") < index("before-features") < index("features-heading")
+    assert index("features-heading") < index("before-notes") < index("after-notes")
+
+
+@pytest.mark.parametrize("builder", ("specification", "operations", "wi"))
+def test_docx_rotation_refuses_before_artifact_write(builder, tmp_path, image_path):
+    writer = {"specification": spec.store_specification_docx, "operations": ops.store_prototype_docx, "wi": wi.store_review_docx}[builder]
+    document = attach(fixture_document(builder), mixed(), frame={"x": .1, "y": .1, "width": .3, "height": .3, "rotation": 15})
+    with pytest.raises(DocumentEditError) as caught:
+        writer(tmp_path / "refused", NUMBER, document)
+    assert caught.value.code == "unsupported_export_rotation"
+    assert caught.value.details["targets"] == [{"pageId": PAGE, "targetId": TARGET}]
+    assert not list((tmp_path / "refused").rglob("*.docx"))
+
+
+@pytest.mark.parametrize("builder", ("specification", "operations", "wi"))
+@pytest.mark.parametrize("mode", ("review", "draft", "customer", "controlled"))
+def test_docx_legacy_xml_parts_equal_p2b1(builder, mode, tmp_path, image_path, monkeypatch):
+    from lxml import etree
+    document = fixture_document(builder, mode)
+    old = legacy_module(spec if builder == "specification" else ops, monkeypatch, "9b01855")
+    if builder == "specification":
+        old.draft_render_path = lambda *args: image_path
+    current = docx_parts(build_docx(builder, document, tmp_path))
+    previous = docx_parts(build_docx(builder, document, tmp_path, old))
+    assert current.keys() == previous.keys()
+    for name in current:
+        assert etree.tostring(current[name]) == etree.tostring(previous[name]), name
+
+
+@pytest.mark.parametrize("builder", ("parts", "specification", "fillable", "operations", "wi"))
+def test_rich_pdf_bytes_unchanged_since_p2b1(builder, tmp_path, image_path, monkeypatch):
+    document = attach(fixture_document(builder), mixed())
+    save = fitz.Document.tobytes
+    monkeypatch.setattr(fitz.Document, "tobytes", lambda self, *a, **kw: save(self, *a, **{**kw, "no_new_id": True}))
+    old = legacy_module(parts if builder == "parts" else spec if builder in {"specification", "fillable"} else ops, monkeypatch, "9b01855")
+    if builder in {"specification", "fillable"}:
+        old.draft_render_path = lambda *args: image_path
+    modules = (old if builder == "parts" else parts, old if builder in {"specification", "fillable"} else spec,
+               old if builder in {"operations", "wi"} else ops)
+    assert build(builder, document, tmp_path) == build(builder, document, tmp_path, modules=modules)
+
+
+def xml_text(node):
+    return "".join("\n" if e.tag == "{" + NS["w"] + "}br" else "\t" if e.tag == "{" + NS["w"] + "}tab" else e.text or ""
+                   for e in xp(node, './/w:t | .//w:br | .//w:tab'))
 
 ROOT = Path(__file__).resolve().parents[1]
 LEGACY_COMMIT = "b616417"
@@ -430,10 +733,10 @@ def test_parts_direct_helper_uses_composition_even_without_display_objects(tmp_p
         assert next(s for s in spans(pdf[0]) if "Bold" in s["text"])["flags"] & 16
 
 
-def legacy_module(current, monkeypatch):
+def legacy_module(current, monkeypatch, commit=LEGACY_COMMIT):
     relative = Path(current.__file__).resolve().relative_to(ROOT).as_posix()
     flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-    source = subprocess.run(["git", "show", f"{LEGACY_COMMIT}:{relative}"], cwd=ROOT,
+    source = subprocess.run(["git", "show", f"{commit}:{relative}"], cwd=ROOT,
                             capture_output=True, check=True, creationflags=flags).stdout
     name = current.__package__ + "._p2b_legacy_export"
     module = types.ModuleType(name)
@@ -505,22 +808,19 @@ def test_rich_export_keeps_conflict_and_citation_release_gates(builder, tmp_path
     ("wi", "work-instructions", "_work_instruction_build_document_with_scene", "store_work_instruction_review_pdf", "store_work_instruction_review_docx"),
 ])
 @pytest.mark.parametrize("mode", MODES)
-def test_combined_http_route_returns_pdf_and_explicit_docx_refusal(builder, route, loader, pdf_writer, docx_writer, mode,
-                                                                 mmle_client, monkeypatch):
+def test_combined_http_route_returns_real_docx_for_rich_document(builder, route, loader, pdf_writer, docx_writer, mode,
+                                                               mmle_client, monkeypatch, image_path):
     import server
     document = attach(fixture_document(builder, mode), mixed())
     monkeypatch.setattr(server, loader, lambda **kwargs: (document, {}))
-    calls = []
-    monkeypatch.setattr(server, pdf_writer, lambda *args: calls.append("pdf") or {"status": "ready", "url": "/proof.pdf"})
-    monkeypatch.setattr(server, docx_writer, lambda *args: pytest.fail("rich DOCX writer must not be called"))
+    # Keep the real builders/stores and download the route's actual companion.
     response = mmle_client.post(f"/api/{route}/MMLE-50D/pdf?mode={mode}")
     assert response.status_code == 200, response.text
     result = response.json()
-    assert result["success"] and result["pdf"]["url"] == "/proof.pdf" and calls == ["pdf"]
-    assert result["docx"]["error"] == "unsupported_export_feature"
-    assert result["docx"]["feature"] == "rich_text" and result["docx"]["format"] == "docx"
-    assert result["docx"]["targets"] == [{"pageId": PAGE, "targetId": TARGET}]
-    assert "url" not in result["docx"]
+    assert result["success"] and result["docx"]["status"] == "ready" and result["docx"]["url"]
+    download = mmle_client.get(result["docx"]["url"])
+    assert download.status_code == 200, download.text[:200] if not download.content.startswith(b"PK") else ""
+    assert authored_tables(docx_parts(download.content)["word/document.xml"])
 
 
 def test_layout_matches_the_canvas_box_css():
@@ -632,3 +932,16 @@ def test_line_breaks_follow_the_browser_for_ideographs_and_no_break_spaces():
     # Lines measure advances: one ideograph is exactly one em wide.
     exact = layout_text(from_plain("\u6f22" * 6), (0, 0, 6 * em, 300), {"fontSize": 12})
     assert rows(exact) == ["\u6f22" * 6] and not exact.overflow
+
+
+def test_text_box_paints_its_fill_over_what_lies_behind_like_the_canvas():
+    # The canvas paints every text box with its fill, white by default, over a figure, a table or a page band
+    # (_documentationResolvedObjectStyle + element.style.background). The PDF must hide the same things.
+    payload, plan = isolated_pdf(from_plain("Over a figure"))
+    with fitz.open(stream=payload, filetype="pdf") as pdf:
+        page = pdf[0]
+        fills = [d for d in page.get_drawings() if d["type"] == "f" and d.get("fill") is not None
+                 and all(abs(a - b) < 0.01 for a, b in zip(d["rect"], plan.frame))]
+        text = [span for span in page.get_texttrace() if span["type"] == 0]
+    assert len(fills) == 1 and all(abs(c - 1.0) < 1e-3 for c in fills[0]["fill"])
+    assert fills[0]["seqno"] < min(span["seqno"] for span in text)  # painted under the text

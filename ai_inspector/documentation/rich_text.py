@@ -269,13 +269,22 @@ def project_objects(document):
     return document
 
 
-def refuse_export(document):
+def rich_targets(document):
     found = {}
     for page in document.get("pages", []):
-        for objects in (page.get("documentationObjects", {}), (page.get("documentationComposition") or {}).get("documentObjects", {})):
+        composition = page.get("documentationComposition") or (page.get("renderRequest") or {}).get("composition") or {}
+        for objects in (page.get("documentationObjects", {}), composition.get("documentObjects", {})):
             for key, item in objects.items():
                 if item.get("type") == "text" and (is_rich(item.get("content")) or item.get("isRichText")):
                     found[(page["pageId"], key)] = {"pageId": page["pageId"], "targetId": key}
+    return list(found.values())
+
+
+def refuse_export(document, *, format):
+    # format is required: an exporter that forgets it must fail, not skip the refusal.
+    if format == "pdf":
+        return
+    found = rich_targets(document)
     if found:
-        raise DocumentEditError("unsupported_export_feature", "Rich text export is not supported until P2b.",
-                                targets=list(found.values()), feature="rich_text")
+        raise DocumentEditError("unsupported_export_feature", "Rich text DOCX export is not supported until P2b-2.",
+                                targets=found, feature="rich_text", format=format)

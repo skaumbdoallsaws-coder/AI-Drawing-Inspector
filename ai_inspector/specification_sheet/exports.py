@@ -300,6 +300,8 @@ def _build_specification_pdf(
     muted = _rgb(colors.get("muted"), "#596A76")
     rule = _rgb(colors.get("rule"), "#ABBAC4")
 
+    from ai_inspector.documentation.rich_layout import prepare_pdf_objects, draw_pdf_objects
+    text_plans = prepare_pdf_objects(fitz, document, (width, height))
     pdf = fitz.open()
     page = pdf.new_page(width=width, height=height)
     page.draw_rect(fitz.Rect(0, 0, width, height), fill=(1, 1, 1), color=None)
@@ -513,6 +515,7 @@ def _build_specification_pdf(
         color=(1, 1, 1),
         align=2,
     )
+    draw_pdf_objects(fitz, page, descriptor, text_plans)
     keywords = f"InspectorPro,{assembly_number},specification sheet"
     if fillable:
         keywords = (f"{FILLABLE_KEYWORD_PREFIX};assembly={assembly_number};"
@@ -532,6 +535,8 @@ def _build_specification_pdf(
         }
     )
     mark_pdf(pdf, document)
+    from ai_inspector.documentation.rich_layout import finish_pdf_fonts
+    finish_pdf_fonts(pdf, text_plans)
     payload = pdf.tobytes(garbage=4, deflate=True)
     pdf.close()
     return payload, fields
@@ -638,8 +643,8 @@ def build_specification_docx_bytes(
     render_root: str | Path,
     assembly_number: str,
 ) -> bytes:
-    document = export_document(document)
-    check_export(document, document.get("exportMode", "review"))
+    document = export_document(document, format="docx")
+    check_export(document, document.get("exportMode", "review"), format="docx")
     readiness = specification_export_readiness(document)
     if readiness["status"] != "READY":
         raise SpecificationSheetExportError(

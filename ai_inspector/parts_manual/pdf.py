@@ -935,12 +935,25 @@ def _draw_documentation_objects(
     document: Mapping[str, Any],
     root: str | Path,
     assembly_number: str,
+    rich_plans=None,
 ) -> None:
+    if rich_plans is None:
+        # Keep the direct helper safe as well as the full-document builder.
+        from ai_inspector.documentation.rich_text import rich_targets
+        single_page = {**document, "pages": [descriptor]}
+        if rich_targets(single_page):
+            from ai_inspector.documentation.rich_layout import prepare_pdf_objects
+            rich_plans = prepare_pdf_objects(fitz, single_page, (page.rect.width, page.rect.height), rich_only=True)[descriptor["pageId"]]
     objects = descriptor.get("documentationObjects")
     if not isinstance(objects, Mapping):
-        return
+        objects = {}
     theme = _document_theme(document)
-    for value in objects.values():
+    for object_id in dict.fromkeys([*objects, *(rich_plans or {})]):
+        if rich_plans and object_id in rich_plans:
+            from ai_inspector.documentation.rich_layout import draw_pdf_object
+            draw_pdf_object(fitz, page, rich_plans[object_id])
+            continue
+        value = objects[object_id]
         if not isinstance(value, Mapping):
             continue
         frame = value.get("frame")
@@ -1073,13 +1086,15 @@ def build_manual_pdf_bytes(
     check_export(document, document.get("exportMode", "review"))
     _validate_document(document)
     render_paths = _required_render_paths(root, assembly_number, document)
-    pdf = fitz.open()
     layout_contract = document.get("publicationLayout")
     if not isinstance(layout_contract, Mapping):
         layout_contract = publication_layout()
     page_size = layout_contract.get("page") or {}
     width = float(page_size.get("width") or PAGE_WIDTH_PT)
     height = float(page_size.get("height") or PAGE_HEIGHT_PT)
+    from ai_inspector.documentation.rich_layout import prepare_pdf_objects
+    rich_plans = prepare_pdf_objects(fitz, document, (width, height), rich_only=True)
+    pdf = fitz.open()
     pending_links: list[tuple[int, tuple[float, float, float, float], int]] = []
     pages = list(document.get("pages") or [])
     theme = _document_theme(document)
@@ -1360,6 +1375,7 @@ def build_manual_pdf_bytes(
             document,
             root,
             assembly_number,
+            rich_plans.get(descriptor["pageId"]),
         )
 
     for source_page, rectangle, target_page in pending_links:
@@ -1388,6 +1404,8 @@ def build_manual_pdf_bytes(
     )
     from ai_inspector.documentation.conflict_exports import mark_pdf
     mark_pdf(pdf, document)
+    from ai_inspector.documentation.rich_layout import finish_pdf_fonts
+    finish_pdf_fonts(pdf, rich_plans)
     payload = pdf.tobytes(garbage=4, deflate=True)
     pdf.close()
     return payload

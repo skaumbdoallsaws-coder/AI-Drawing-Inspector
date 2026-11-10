@@ -164,8 +164,8 @@ def store_review_docx(
     assembly_number: str,
     document: Mapping[str, Any],
 ) -> Dict[str, Any]:
-    document = export_document(document)
-    check_export(document, document.get("exportMode", "review"))
+    document = export_document(document, format="docx")
+    check_export(document, document.get("exportMode", "review"), format="docx")
     document = attach_draft_render_artifacts(root, assembly_number, document)
     readiness = review_export_readiness(document)
     if readiness["status"] != "READY":

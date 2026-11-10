@@ -329,10 +329,10 @@ def unconfirmed_targets(document):
             if row["provenance"]["evidenceStatus"] == "edited_unverified"]
 
 
-def export_document(document):
+def export_document(document, *, format="pdf"):
     """Old generated JSON gets the same pure provenance projection as live compilation."""
     from .rich_text import refuse_export
-    refuse_export(document)
+    refuse_export(document, format=format)
     kind = document.get("documentType")
     supported = VERSIONS.get(kind)
     if supported and document.get("schemaVersion", 1) > supported:
@@ -347,9 +347,9 @@ def export_document(document):
     return document
 
 
-def check_export(document, mode="review"):
+def check_export(document, mode="review", *, format="pdf"):
     from .rich_text import refuse_export
-    refuse_export(document)
+    refuse_export(document, format=format)
     if mode not in {"review", "draft", "customer", "controlled"}:
         raise DocumentEditError("invalid_document_operation", "Unknown document export mode.")
     from .refresh import open_conflicts
@@ -357,7 +357,7 @@ def check_export(document, mode="review"):
     if mode in {"customer", "controlled"} and conflicts:
         raise DocumentEditError("manual_edit_conflict", "Resolve open manual edit conflicts before export.",
                                 conflictIds=[c.get("conflictId") for c in conflicts])
-    pending = unconfirmed_targets(export_document(document))
+    pending = unconfirmed_targets(export_document(document, format=format))
     if mode in {"customer", "controlled"} and pending:
         raise DocumentEditError("unconfirmed_cited_values", "Confirm or undo the edited cited values before export.", targets=pending)
 

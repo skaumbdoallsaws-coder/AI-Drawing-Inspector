@@ -679,9 +679,11 @@ def build_prototype_pdf_bytes(
         )
     import fitz
 
-    pdf = fitz.open()
+    from ai_inspector.documentation.rich_layout import prepare_pdf_objects, draw_pdf_objects
     pages = [row for row in document.get("pages") or [] if isinstance(row, Mapping)]
     page_width, page_height, layout = _publication_page_geometry(document)
+    text_plans = prepare_pdf_objects(fitz, document, (page_width, page_height))
+    pdf = fitz.open()
     for descriptor in pages:
         page = pdf.new_page(width=page_width, height=page_height)
         if descriptor.get("pageType") == "operations_cover":
@@ -744,6 +746,7 @@ def build_prototype_pdf_bytes(
         for block in descriptor.get("layoutBlocks") or []:
             if isinstance(block, Mapping):
                 _draw_block(fitz, page, descriptor, block, document, root, assembly_number)
+        draw_pdf_objects(fitz, page, descriptor, text_plans)
     toc = [[1, str(document.get("title") or "Operations and Maintenance Manual"), 1]]
     seen_sections: set[str] = set()
     for descriptor in pages:
@@ -770,6 +773,8 @@ def build_prototype_pdf_bytes(
         "keywords": keywords,
     })
     mark_pdf(pdf, document)
+    from ai_inspector.documentation.rich_layout import finish_pdf_fonts
+    finish_pdf_fonts(pdf, text_plans)
     payload = pdf.tobytes(garbage=4, deflate=True)
     pdf.close()
     return payload
@@ -1076,8 +1081,8 @@ def build_prototype_docx_bytes(
     assembly_number: str,
     document: Mapping[str, Any],
 ) -> bytes:
-    document = export_document(document)
-    check_export(document, document.get("exportMode", "review"))
+    document = export_document(document, format="docx")
+    check_export(document, document.get("exportMode", "review"), format="docx")
     readiness = prototype_export_readiness(document)
     if readiness["status"] != "READY":
         raise OperationsManualExportError(
@@ -1319,6 +1324,10 @@ def _store_export(
     }
     if kind == "docx":
         descriptor["rendererVersion"] = _DOCX_RENDERER_VERSION
+    elif kind == "pdf":
+        from ai_inspector.documentation.rich_layout import PDF_RENDERER_VERSION, has_text_objects
+        if has_text_objects(document):
+            descriptor["rendererVersion"] = PDF_RENDERER_VERSION
     _write_atomic(
         metadata_path,
         (json.dumps(descriptor, ensure_ascii=True, sort_keys=True, indent=2) + "\n").encode("ascii"),
@@ -1365,6 +1374,10 @@ def _cached_export(
     }
     if kind == "docx":
         expected["rendererVersion"] = _DOCX_RENDERER_VERSION
+    elif kind == "pdf":
+        from ai_inspector.documentation.rich_layout import PDF_RENDERER_VERSION, has_text_objects
+        if has_text_objects(document):
+            expected["rendererVersion"] = PDF_RENDERER_VERSION
     if any(descriptor.get(key) != value for key, value in expected.items()):
         return None
     result = copy.deepcopy(descriptor)
@@ -1395,8 +1408,8 @@ def store_prototype_pdf(
 def store_prototype_docx(
     root: str | Path, assembly_number: str, document: Mapping[str, Any]
 ) -> Dict[str, Any]:
-    document = export_document(document)
-    check_export(document, document.get("exportMode", "review"))
+    document = export_document(document, format="docx")
+    check_export(document, document.get("exportMode", "review"), format="docx")
     with _EXPORT_LOCK:
         cached = _cached_export(root, assembly_number, document, kind="docx")
         if cached is not None:

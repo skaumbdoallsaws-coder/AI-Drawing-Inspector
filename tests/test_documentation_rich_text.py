@@ -492,17 +492,6 @@ def test_ui_route_and_sage_share_storage_and_read_contract(mmle_client, monkeypa
     current = next(item for item in reopened["richTextFields"] if item["targetId"] == OBJECT)
     assert current["text"] == "UI and Sage agree" and current["provenance"]["origin"] == "manual"
     assert current["provenance"]["evidenceStatus"] == "unbound" and not current["provenance"]["activeClaimIds"]
-    # All HTTP exports refuse before capture/readiness/release gates.
-    for mode in ("review", "customer", "controlled"):
-        # The parts route binds the export to the read's revisions (PartsManualPdfBody).
-        current_document = mmle_client.get(base).json()["document"]
-        body = ({key: current_document[key] for key in ("documentRevision", "manualPlanRevision", "sourceRevision")}
-                if kind == "illustrated_parts_manual" else None)
-        response = mmle_client.post(f"/api/{route}/MMLE-50D/pdf?mode={mode}", json=body)
-        assert response.json()["error"] == "unsupported_export_feature", response.text
-    if kind == "product_specification_sheet":
-        response = mmle_client.post(f"/api/{route}/MMLE-50D/fillable-pdf")
-        assert response.json()["error"] == "unsupported_export_feature", response.text
     monkeypatch.setenv(rich.FEATURE_FLAG, "off")
     disabled = command(reopened, operation="replace_rich_text", richText=value, expectedContentHash=current["contentHash"])
     assert disabled.json()["error"] == "documentation_rich_text_disabled", disabled.text
@@ -582,36 +571,34 @@ def test_sage_gateway_reads_rich_and_forwards_explicit_plain_replacement(scene):
 
 @pytest.mark.parametrize("mode", ["review", "draft", "customer", "controlled"])
 @pytest.mark.parametrize("kind", [KIND, "illustrated_parts_manual", "work_instructions", "product_specification_sheet"])
-def test_export_refusal_all_documents_modes(scene, kind, mode):
+def test_docx_export_refusal_all_documents_modes(scene, kind, mode):
     scene.edit()
     document = scene.snapshot()[1]
     document["documentType"] = kind
     with pytest.raises(DocumentEditError) as caught:
-        check_export(document, mode)
+        check_export(document, mode, format="docx")
     assert caught.value.code == "unsupported_export_feature"
     assert caught.value.details["targets"] == [{"pageId": PAGE, "targetId": OBJECT}]
 
 
 @pytest.mark.parametrize("mode", ["review", "draft", "customer", "controlled"])
-def test_all_exporter_entry_points_refuse_before_rendering(scene, tmp_path, mode):
-    from ai_inspector.parts_manual.pdf import build_manual_pdf_bytes, store_manual_pdf
-    from ai_inspector.operations_manual.exports import build_prototype_pdf_bytes, build_prototype_docx_bytes, store_prototype_pdf, store_prototype_docx
-    from ai_inspector.work_instructions.exports import store_review_pdf, store_review_docx
-    from ai_inspector.specification_sheet.exports import (build_specification_pdf_bytes, build_specification_fillable_pdf_bytes,
-        build_specification_docx_bytes, store_specification_pdf, store_specification_fillable_pdf, store_specification_docx)
+def test_docx_entry_points_refuse_before_rendering(scene, tmp_path, mode):
+    from ai_inspector.operations_manual.exports import build_prototype_docx_bytes, store_prototype_docx
+    from ai_inspector.work_instructions.exports import store_review_docx
+    from ai_inspector.specification_sheet.exports import build_specification_docx_bytes, store_specification_docx
     scene.edit()
     document = scene.snapshot()[1]
     document["exportMode"] = mode
-    for exporter in (build_manual_pdf_bytes, store_manual_pdf, build_prototype_pdf_bytes, build_prototype_docx_bytes, store_prototype_pdf, store_prototype_docx,
-                     store_review_pdf, store_review_docx, store_specification_pdf, store_specification_fillable_pdf, store_specification_docx):
+    for exporter in (build_prototype_docx_bytes, store_prototype_docx, store_review_docx, store_specification_docx):
         with pytest.raises(DocumentEditError) as caught:
             exporter(tmp_path, NUMBER, document)
         assert caught.value.code == "unsupported_export_feature", exporter.__name__
-    for exporter in (build_specification_pdf_bytes,
-                     build_specification_fillable_pdf_bytes, build_specification_docx_bytes):
-        with pytest.raises(DocumentEditError) as caught:
-            exporter(document, render_root=tmp_path, assembly_number=NUMBER)
-        assert caught.value.code == "unsupported_export_feature", exporter.__name__
+        assert caught.value.details["format"] == "docx"
+        assert caught.value.details["feature"] == "rich_text"
+    with pytest.raises(DocumentEditError) as caught:
+        build_specification_docx_bytes(document, render_root=tmp_path, assembly_number=NUMBER)
+    assert caught.value.code == "unsupported_export_feature"
+    assert caught.value.details["format"] == "docx"
 
 
 def test_vendored_bundle_checksum_and_exports():

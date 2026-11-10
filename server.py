@@ -17670,7 +17670,8 @@ def operations_manual_prototype_export(assembly_number: str, mode: str = "review
             str(catalog["assemblyNumber"]),
             document,
         )
-        docx_artifact = store_prototype_docx(
+        docx_artifact = _documentation_companion_docx(
+            store_prototype_docx,
             OPERATIONS_MANUAL_ROOT,
             str(catalog["assemblyNumber"]),
             document,
@@ -17691,6 +17692,8 @@ def operations_manual_prototype_export(assembly_number: str, mode: str = "review
         "stage": "review_exported",
         "message": (
             "Generated the operations-manual PDF and editable DOCX for review."
+            if docx_artifact.get("status") != "unsupported" else
+            "Generated the PDF for review. Rich text DOCX export is not supported yet."
         ),
         "documentRevision": document["documentRevision"],
         "releaseGate": document["releaseGate"],
@@ -18177,7 +18180,8 @@ def work_instructions_review_export(assembly_number: str, mode: str = "review"):
             str(catalog["assemblyNumber"]),
             document,
         )
-        docx_artifact = store_work_instruction_review_docx(
+        docx_artifact = _documentation_companion_docx(
+            store_work_instruction_review_docx,
             WORK_INSTRUCTION_ROOT,
             str(catalog["assemblyNumber"]),
             document,
@@ -18203,6 +18207,8 @@ def work_instructions_review_export(assembly_number: str, mode: str = "review"):
         "stage": "prototype_review_exported",
         "message": (
             "Generated the assembly work-instruction PDF and editable DOCX for review."
+            if docx_artifact.get("status") != "unsupported" else
+            "Generated the PDF for review. Rich text DOCX export is not supported yet."
         ),
         "documentRevision": document["documentRevision"],
         "releaseGate": document["releaseGate"],
@@ -18739,6 +18745,19 @@ def documentation_confirmation_read(document_type: str, assembly_number: str):
         return _documentation_value_error(error)
 
 
+def _documentation_companion_docx(writer, root, assembly_number, document):
+    # PDF endpoints also offer a DOCX artifact. A rich PDF remains usable while
+    # native rich DOCX is deferred to P2b-2; no stale DOCX URL is returned.
+    from ai_inspector.documentation.rich_text import refuse_export
+    try:
+        refuse_export(document, format="docx")
+    except DocumentEditError as error:
+        if error.code != "unsupported_export_feature":
+            raise
+        return {"status": "unsupported", "error": error.code, "message": str(error), **error.details}
+    return writer(root, assembly_number, document)
+
+
 def _documentation_value_error(error: DocumentEditError):
     return JSONResponse(status_code=422, content={"success": False, "ok": False,
         "error": error.code, "message": str(error), "details": error.details})
@@ -19265,7 +19284,8 @@ def specification_sheet_export(assembly_number: str, mode: str = "review"):
             str(catalog["assemblyNumber"]),
             document,
         )
-        docx_artifact = store_specification_docx(
+        docx_artifact = _documentation_companion_docx(
+            store_specification_docx,
             SPECIFICATION_SHEET_ROOT,
             str(catalog["assemblyNumber"]),
             document,
@@ -19287,6 +19307,8 @@ def specification_sheet_export(assembly_number: str, mode: str = "review"):
         "stage": "review_exported",
         "message": (
             "Generated the one-page product specification PDF and editable DOCX for review."
+            if docx_artifact.get("status") != "unsupported" else
+            "Generated the PDF for review. Rich text DOCX export is not supported yet."
         ),
         "documentRevision": document["documentRevision"],
         "releaseGate": document["releaseGate"],

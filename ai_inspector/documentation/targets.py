@@ -1,9 +1,4 @@
-"""Exact-value target reads for the in-place scene and slot stores.
-
-Legacy positional aliases are scoped to the generated source/plan binding and
-page. This does not claim to solve regeneration identity (P1c). A changed binding
-must be rejected before resolving an alias from a previous read.
-"""
+"""Exact-value reads with persistent compiler IDs and read-scoped legacy aliases."""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -11,6 +6,7 @@ import uuid
 from typing import Any, Mapping
 
 from .commands import DocumentEditError, binding, canonical_bytes, content_hash, digest, scene_field_key
+from .identity import alias_entry
 
 
 def target_id(state: Mapping[str, Any], page_id: str, alias: str) -> str:
@@ -26,8 +22,13 @@ def text_targets(state: Mapping[str, Any], document: Mapping[str, Any]) -> dict[
 
     def add(page, alias, value, attributes, *, kind="replace_text", target_type="page_element"):
         page_id = str(page["pageId"])
-        stable = target_id(state, page_id, alias)
+        entry = alias_entry(document, page_id, alias)
+        if entry and not entry.get("safe"):
+            return
+        stable = entry["targetId"] if entry else (alias if target_type == "document_object" else target_id(state, page_id, alias))
+        storage_id = stable if entry else alias
         override = ((state["scene"].get("pages") or {}).get("page-parts-index" if alias.startswith("part.") else page_id) or {}).get("pageElementOverrides", {}).get(alias, {})
+        override = page.get("identityOverrides", {}).get(stable, override)
         if kind == "replace_text" and "text" in override:
             value = override["text"]
         attributes = deepcopy(attributes)
@@ -40,10 +41,10 @@ def text_targets(state: Mapping[str, Any], document: Mapping[str, Any]) -> dict[
             attributes["activeSourceIds"] = list(meta.get("activeSourceIds") or [])
         text = "" if value is None else str(value)
         descriptor = {"targetId": stable, "alias": alias, "pageId": page_id,
-                      "targetType": target_type, "text": text, "operation": kind,
+                      "targetType": target_type, "storageId": storage_id, "text": text, "operation": kind,
                       "attributes": deepcopy(attributes), "override": deepcopy(override),
-                      "versionKey": alias if kind == "set_slot_value" else scene_field_key(page_id, target_type, alias),
-                      "versionPage": page_id if kind == "replace_text" and not alias.startswith("part.") else ""}
+                      "versionKey": alias if kind == "set_slot_value" else scene_field_key(page_id, target_type, storage_id),
+                      "versionPage": page_id if kind == "replace_text" and not storage_id.startswith(("part.", "gen-")) else ""}
         if stable in result:
             # Definition-keyed parts occur on multiple pages. Different effective
             # values are ambiguous, never selected by whichever page came last.
@@ -75,13 +76,13 @@ def text_targets(state: Mapping[str, Any], document: Mapping[str, Any]) -> dict[
             # A sibling's text is not a dependency. Retain the target's complete
             # row/item payload, type and evidence without unrelated row values.
             attributes = {key: deepcopy(value) for key, value in block.items()
-                          if key not in {"rows", "items", "text", "lines", "caption"}}
+                          if key not in {"rows", "items", "text", "lines", "caption", "frame", "blockId", "rowHeights", "continued"}}
             if kind in {"table", "key_value_table"}:
                 for row_index, row in enumerate(block.get("rows") or []):
                     for column, value in enumerate(row.get("cells") or []):
                         add(page, f"{alias}.r{row_index}.c{column}", value,
                             {**attributes, "row": {k: v for k, v in row.items() if k != "cells"},
-                             "column": column})
+                             "column": (block.get("columnIds") or [])[column] if column < len(block.get("columnIds") or []) else column})
             elif kind in {"list", "figure_legend"}:
                 for index, item in enumerate(block.get("items") or []):
                     add(page, f"{alias}.i{index}", item.get("text"),
@@ -112,8 +113,15 @@ def text_targets(state: Mapping[str, Any], document: Mapping[str, Any]) -> dict[
 def hash_values(targets: Mapping[str, dict]) -> dict[str, dict]:
     # Page placement is not identity; a shared part target hashes the same value
     # from any page. Its definition, field attributes and source remain included.
-    return {key: {field: value for field, value in target.items()
-                  if field not in {"pageId", "pageIds", "alias", "targetId"}}
+    def semantic(value):
+        if isinstance(value, list):
+            return [semantic(item) for item in value]
+        if isinstance(value, dict):
+            return {key: semantic(item) for key, item in value.items() if key not in {
+                "pageId", "pageIds", "alias", "displayName", "frame", "itemNumber",
+                "displayText", "lines", "height", "continued", "rowContinuation"}}
+        return value
+    return {key: semantic({field: value for field, value in target.items() if field != "targetId"})
             for key, target in targets.items()}
 
 
@@ -137,9 +145,13 @@ def read_targets(state: dict, targets: Mapping[str, dict], requested: list[dict]
         output.append({"targetId": stable, "legacyTargetId": target["alias"], "pageId": item.get("pageId") or target["pageId"],
                        "text": target["text"], "isExcerpt": False, "fullLength": len(target["text"]),
                        "contentHash": content_hash(state, stable, values[stable]), "hashVersion": 1,
+                       "aliasRevision": state.get("aliasRevision"),
                        "provenance": deepcopy(target["attributes"].get("provenance", target["attributes"])),
                        "capabilities": [] if target["operation"] == "read_only" else [target["operation"]], "binding": binding(state)})
-    result = {**binding(state), "sceneRevision": state.get("sceneRevision"), "targets": output}
+    result = {**binding(state), "sceneRevision": state.get("sceneRevision"), "targets": output,
+              "aliasRevision": state.get("aliasRevision"),
+              "aliasMap": {item["pageId"]: {row["legacyTargetId"]: row["targetId"] for row in output
+                           if row["pageId"] == item["pageId"]} for item in output}}
     if limit is not None and len(canonical_bytes({"ok": True, "data": result})) > limit:
         raise DocumentEditError("read_result_too_large", "Retry fewer targets; a legacy field may exceed the limit.",
                                 targets=[{"targetId": item["targetId"], "bytes": len(canonical_bytes(item))}
@@ -162,7 +174,7 @@ class ReadBindings:
     def record(self, document_type: str, read: dict) -> None:
         for item in read["targets"]:
             captured = {**deepcopy(item), "binding": {
-                **binding(read), "sceneRevision": read.get("sceneRevision"), "structureHash": read.get("structureHash")}}
+                **binding(read), "sceneRevision": read.get("sceneRevision"), "structureHash": read.get("structureHash"), "aliasRevision": read.get("aliasRevision")}}
             for key, old in list(self.targets.items()):
                 if key[0] == document_type and old["targetId"] == item["targetId"]:
                     self.targets[key] = captured
@@ -182,7 +194,8 @@ class ReadBindings:
                                         operationIndex=index, targetId=item["targetId"])
             captured.append(read["binding"])
             operations.append({"operation": "replace_text", "targetId": read["targetId"], "text": item["text"],
-                               "expectedContentHash": item.get("expectedContentHash", read["contentHash"])})
+                               "expectedContentHash": item.get("expectedContentHash", read["contentHash"]),
+                               **({"legacyAlias": item["targetId"]} if item["targetId"] != read["targetId"] else {})})
         if not captured:
             raise DocumentEditError("invalid_document_operation", "Submit at least one edit.")
         first = captured[0]
@@ -204,7 +217,7 @@ class ReadBindings:
         captured, operations = [], []
         for index, operation in enumerate(arguments["operations"]):
             matches = [read for (kind, _page, _alias), read in self.targets.items()
-                       if kind == document_type and read["targetId"] == operation["targetId"]]
+                       if kind == document_type and operation["targetId"] in {read["targetId"], read.get("legacyTargetId")}]
             if not matches:
                 raise DocumentEditError("document_read_required", "Read the complete target before editing.",
                                         operationIndex=index, targetId=operation["targetId"])
@@ -213,7 +226,8 @@ class ReadBindings:
                 raise DocumentEditError("full_read_required", "Read this target in full before replacement.",
                                         operationIndex=index, targetId=operation["targetId"])
             captured.append(read["binding"])
-            operations.append(deepcopy(operation))
+            operations.append({**deepcopy(operation), "targetId": read["targetId"],
+                **({"legacyAlias": operation["targetId"]} if operation["targetId"] != read["targetId"] else {})})
         first = min(captured, key=lambda item: item["revision"])
         for observed in captured:
             if any(first[key] != observed[key] for key in ("documentId", "sourceRevision", "manualPlanRevision")):
@@ -262,4 +276,5 @@ def summarize_page(page: dict, summary: dict, state: dict, targets: dict) -> tup
         captured.append(item)
     if extra:
         summary["textTargets"] = extra
-    return {**summary, **binding(state)}, captured
+    return {**summary, **binding(state), "aliasRevision": state.get("aliasRevision"),
+            "aliasMap": {item["legacyTargetId"]: item["targetId"] for item in captured}}, captured

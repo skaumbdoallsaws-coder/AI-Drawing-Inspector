@@ -105,6 +105,9 @@ def prototype_export_readiness(document: Mapping[str, Any]) -> Dict[str, Any]:
 
 
 def _page_override(page: Mapping[str, Any], block_id: str) -> Mapping[str, Any]:
+    stable = page.get("identityOverrides", {}).get(block_id)
+    if isinstance(stable, Mapping):
+        return stable
     composition = page.get("documentationComposition")
     if not isinstance(composition, Mapping):
         return {}
@@ -159,7 +162,9 @@ def _edited_block(page: Mapping[str, Any], block: Mapping[str, Any]) -> Mapping[
                 continue
             cells = list(row.get("cells") or [])
             for column in range(len(cells)):
-                override = _page_override(page, f"{block_id}.r{row_index}.c{column}")
+                override = _page_override(page, (row.get("cellIds") or [])[column]) if column < len(row.get("cellIds") or []) else {}
+                if not override:
+                    override = _page_override(page, f"{block_id}.r{row_index}.c{column}")
                 if "text" in override:
                     cells[column] = str(override.get("text") or "")
             rows.append({**row, "cells": cells})
@@ -167,7 +172,8 @@ def _edited_block(page: Mapping[str, Any], block: Mapping[str, Any]) -> Mapping[
     if block_type in {"list", "figure_legend"}:
         items = []
         for item_index, item in enumerate(block.get("items") or []):
-            override = _page_override(page, f"{block_id}.i{item_index}") if isinstance(item, Mapping) else {}
+            override = (_page_override(page, item.get("itemId", "")) or
+                        _page_override(page, f"{block_id}.i{item_index}")) if isinstance(item, Mapping) else {}
             items.append({**item, "text": str(override.get("text") or "")} if "text" in override else item)
         return {**block, "items": items}
     if block_type == "cad_figure":

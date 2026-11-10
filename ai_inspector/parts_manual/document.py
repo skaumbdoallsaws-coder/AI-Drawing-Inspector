@@ -20,7 +20,7 @@ from .version import (
 )
 
 
-PARTS_MANUAL_DOCUMENT_SCHEMA_VERSION = 5
+PARTS_MANUAL_DOCUMENT_SCHEMA_VERSION = 6
 MANUAL_SECTION_BOM_ROWS_PER_PAGE = 20
 # The PDF draws index rows 22 pt apart from y 106 inside the index content area (y 66-564).
 PARTS_INDEX_ROWS_PER_PAGE = 20
@@ -368,6 +368,40 @@ def _layout_mode(row_count: int) -> str:
     return "illustration_with_parts_list"
 
 
+def _apply_scene(document, scene):
+    """Apply parts-owned page composition after stable addresses are projected."""
+    composition_pages = (scene or {}).get("pages", {})
+    for page in document["pages"]:
+        page_override = composition_pages.get(str(page.get("pageId") or ""))
+        composition = copy.deepcopy(
+            page_override if isinstance(page_override, Mapping) else {}
+        )
+        page["documentationComposition"] = composition
+        page["documentationObjects"] = copy.deepcopy(
+            composition.get("documentObjects")
+            if isinstance(composition.get("documentObjects"), Mapping)
+            else {}
+        )
+        page_type = str(page.get("pageType") or "")
+        page["pageMasterId"] = next(
+            (
+                str(master_id)
+                for master_id, master in document["pageMasters"].items()
+                if isinstance(master, Mapping)
+                and page_type in {str(value) for value in master.get("pageTypes") or []}
+            ),
+            "technical",
+        )
+        render_request = page.get("renderRequest")
+        if isinstance(render_request, dict):
+            render_request["composition"] = copy.deepcopy(composition)
+            render_request["figureRevision"] = figure_revision(
+                document["product"]["assemblyNumber"],
+                document["sourceRevision"],
+                render_request,
+            )
+
+
 def build_manual_document(
     plan: Mapping[str, Any],
     catalog: Iterable[Mapping[str, Any]],
@@ -566,6 +600,7 @@ def build_manual_document(
 
     contents: List[Dict[str, Any]] = [
         {
+            "sourceKey": "complete-assembly",
             "sectionNumber": 1,
             "figureNumber": "1-1",
             "title": complete_assembly_title,
@@ -590,6 +625,7 @@ def build_manual_document(
         )
     contents.append(
         {
+            "sourceKey": "parts-index",
             "sectionNumber": len(section_records) + 2,
             "figureNumber": None,
             "title": "Part Number Index",
@@ -645,6 +681,7 @@ def build_manual_document(
                         "revision": revision,
                         "date": release_date,
                         "description": "Initial illustrated parts manual release",
+                        "sourceKey": "initial-release",
                     }
                 ]
                 if revision
@@ -753,8 +790,12 @@ def build_manual_document(
                     "partNumber": display_part_number,
                     "description": str(row.get("description") or ""),
                     "references": [],
+                    "sourceDefinitionIds": [],
                 },
             )
+            definition_id = str(row.get("definitionId") or "")
+            if definition_id and definition_id not in index_row["sourceDefinitionIds"]:
+                index_row["sourceDefinitionIds"].append(definition_id)
             index_row["references"].append(
                 {
                     "figureNumber": str(record["figureNumber"]),
@@ -809,35 +850,6 @@ def build_manual_document(
         image["targetAspectRatio"] = inset_width / inset_height
         image["publicationRect"] = copy.deepcopy(dict(illustration))
 
-    for page in pages:
-        page_override = composition_pages.get(str(page.get("pageId") or ""))
-        composition = copy.deepcopy(
-            page_override if isinstance(page_override, Mapping) else {}
-        )
-        page["documentationComposition"] = composition
-        page["documentationObjects"] = copy.deepcopy(
-            composition.get("documentObjects")
-            if isinstance(composition.get("documentObjects"), Mapping)
-            else {}
-        )
-        page_type = str(page.get("pageType") or "")
-        page["pageMasterId"] = next(
-            (
-                str(master_id)
-                for master_id, master in page_masters.items()
-                if isinstance(master, Mapping)
-                and page_type in {str(value) for value in master.get("pageTypes") or []}
-            ),
-            "technical",
-        )
-        render_request = page.get("renderRequest")
-        if isinstance(render_request, dict):
-            render_request["composition"] = copy.deepcopy(composition)
-            render_request["figureRevision"] = figure_revision(
-                assembly_number,
-                str(plan.get("sourceRevision") or ""),
-                render_request,
-            )
 
     document: Dict[str, Any] = {
         "schemaVersion": PARTS_MANUAL_DOCUMENT_SCHEMA_VERSION,
@@ -874,6 +886,11 @@ def build_manual_document(
         row.get(column) or ("Not specified" if field == "partNumber" else ""))
         for record in section_records for row in record["bom"] if row.get("definitionId")
         for field, column in PART_TEXT_FIELDS.items()}
+    from ai_inspector.documentation.identity import bind_document, sync_identity_overrides
+
+    document, documentation_scene = bind_document(document, documentation_scene)
+    _apply_scene(document, documentation_scene)
+    sync_identity_overrides(document)
     document = project_document(document, documentation_scene, generated_parts=generated_parts)
     document["documentRevision"] = _stable_revision(document)
     return document

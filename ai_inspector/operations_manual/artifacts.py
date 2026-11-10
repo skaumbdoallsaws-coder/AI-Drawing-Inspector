@@ -109,7 +109,7 @@ def store_draft_render_artifact(
     figure_revision: str | None = None,
 ) -> Dict[str, Any]:
     document_revision = str(document.get("documentRevision") or "")
-    if document.get("documentType") == "work_instructions" and document.get("schemaVersion") not in {1, 2}:
+    if document.get("documentType") == "work_instructions" and document.get("schemaVersion") not in {1, 2, 3}:
         raise OperationsManualArtifactError("unsupported work-instruction document schema")
     if source_revision != str(document.get("sourceRevision") or ""):
         raise OperationsManualArtifactError("draft capture source revision is stale")
@@ -127,7 +127,7 @@ def store_draft_render_artifact(
         raise OperationsManualArtifactError("draft page has no CAD figure request")
     capture_revision = document_revision
     current_figure_revision = None
-    if document.get("documentType") == "work_instructions" and document.get("schemaVersion") == 2:
+    if document.get("documentType") == "work_instructions" and document.get("schemaVersion") in {2, 3}:
         from ai_inspector.work_instructions.document import page_figure_revision
 
         current_figure_revision = page_figure_revision(document, page)

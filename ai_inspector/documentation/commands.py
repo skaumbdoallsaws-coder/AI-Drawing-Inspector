@@ -44,7 +44,7 @@ def content_hash(state: Mapping[str, Any], target_id: str, value: Any) -> str:
 
 
 def scene_field_key(page_id: str, target_type: str, alias: str) -> str:
-    return alias if alias.startswith("part.") else page_id + "/" + target_type + "/" + alias
+    return alias if alias.startswith(("part.", "gen-", "slot:")) else page_id + "/" + target_type + "/" + alias
 
 
 def transaction_defaults(state: dict) -> dict:
@@ -86,7 +86,7 @@ def prior_receipt(state: dict, request_id: str, payload_hash: str) -> dict | Non
         return None
     if previous["payloadHash"] != payload_hash:
         raise DocumentEditError("request_id_reused", "This request ID was used for a different payload.")
-    return deepcopy(previous["receipt"])
+    return deepcopy(previous.get("legacyReceipt", previous["receipt"]))
 
 
 def check_preconditions(state: dict, expected_revision: int, expected: dict, current: dict) -> None:

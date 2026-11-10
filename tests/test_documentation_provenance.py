@@ -125,7 +125,7 @@ def test_cited_cell_edit_invalidates_support(operations):
     assert meta["marker"] == EDITED_MARKER
     assert meta["originalEvidence"]["claimIds"] == ["CLM-SPEC-001"]
     assert meta["originalEvidence"]["sourceIds"] == before["sourceIds"]
-    assert meta["generatedValue"][CELL] == "1,100 lb" and meta["generatedHash"]
+    assert meta["generatedValue"][row["cellIds"][1]] == "1,100 lb" and meta["generatedHash"]
     assert meta["changeId"] and meta["actor"] == "user"
     assert row["claimIds"] == [] and row["sourceIds"] == []
     assert meta["activeClaimIds"] == [] and meta["activeSourceIds"] == []
@@ -135,7 +135,7 @@ def test_cited_cell_edit_invalidates_support(operations):
 
 def test_plan_row_bindings_survive_compilation_and_pagination(operations):
     document = operations.state()["document"]  # The real ignored MMLE profile and registered claims.
-    assert document["schemaVersion"] == 2
+    assert document["schemaVersion"] == 3
     block = capacity(document)
     assert block["evidenceBindingVersion"] == 1
     assert all(len(row["cells"]) == 2 for row in block["rows"])
@@ -189,7 +189,7 @@ def test_old_compiled_block_uses_conservative_fallback(tmp_path):
     projected = project_document(json.loads(raw))
     assert path.read_bytes() == raw and old["schemaVersion"] == 1
     block = projected["pages"][0]["layoutBlocks"][0]
-    assert projected["schemaVersion"] == 2 and "evidenceBindingVersion" not in block
+    assert projected["schemaVersion"] == 3 and "evidenceBindingVersion" not in block
     assert block["provenance"]["evidenceStatus"] == "edited_unverified"
     assert block["activeEvidenceClaimIds"] == []
     assert block["originalEvidence"]["claimIds"] == ["capacity", "travel"]
@@ -203,29 +203,33 @@ def test_old_compiled_block_uses_conservative_fallback(tmp_path):
 
 
 def test_legacy_override_marked_edited(tmp_path):
+    from ai_inspector.documentation.identity import bind_document, compile_identities
+
+    old = old_document()
+    for row, key in zip(old["pages"][0]["layoutBlocks"][0]["rows"], ("capacity", "travel")):
+        row["sourceKey"] = key
+    compile_identities(old)  # Reproducible baseline at the scene's exact binding.
     repo = DocumentationSceneRepository(tmp_path, KIND)
-    initial = repo.read("legacy", "source", "plan")
-    saved = repo.apply_command("legacy", "source", "plan", base_revision=initial["revision"],
-        command={"operation": "update_text", "pageId": "page-old", "targetType": "page_element",
-                 "targetId": "old.r0.c1", "text": "1,000 lb"},
-        page_targets={"page-old": {"page_element": ["old.r0.c1"]}})
+    legacy = repo.new_scene("legacy", "source", "plan")
+    legacy["schemaVersion"] = 3
+    legacy["commands"] = [{"commandId": "legacy-cell", "actor": "user", "operation": "update_text",
+        "pageId": "page-old", "targetType": "page_element", "targetId": "old.r0.c1", "text": "1,000 lb"}]
+    legacy["historyCursor"] = 1
     path = tmp_path / "legacy/documentation-scene.json"
-    legacy = json.loads(path.read_text(encoding="ascii"))
-    legacy.pop("fieldMeta")  # P1a scene-3 shape, before provenance keys existed.
+    path.parent.mkdir()
     path.write_text(json.dumps(legacy), encoding="ascii")
     before = disk(tmp_path)
-    loaded = repo.read("legacy", "source", "plan")
-    old = old_document()
-    old["pages"][0]["documentationComposition"] = loaded["scene"]["pages"]["page-old"]
-    projected = project_document(old, loaded["scene"])
+    loaded = repo.read("legacy", "source", "plan", identity_document=old)
+    current, scene = bind_document(old, loaded["scene"])
+    projected = project_document(current, scene)
     assert projected["provenanceTargets"][0]["provenance"]["evidenceStatus"] == "edited_unverified"
     assert disk(tmp_path) == before
     command = prepare_text_command(projected, {"operation": "update_text", "pageId": "page-old",
         "targetType": "page_element", "targetId": "old.r0.c1", "text": "900 lb"})
     adopted = repo.apply_command("legacy", "source", "plan", base_revision=loaded["revision"], command=command,
-                                page_targets={"page-old": {"page_element": ["old.r0.c1"]}})
-    assert adopted["scene"]["schemaVersion"] == 3 and adopted["scene"]["fieldMeta"]
-    assert saved["scene"]["schemaVersion"] == 3
+                                page_targets={"page-old": {"page_element": ["old.r0.c1"]}}, identity_document=old)
+    assert adopted["scene"]["schemaVersion"] == 4 and adopted["scene"]["fieldMeta"]
+    assert path.with_name("documentation-scene.v3.json").read_bytes() == before["legacy/documentation-scene.json"]
 
 
 def test_paragraph_and_list_item_binding_scope():
@@ -292,7 +296,7 @@ def test_pdf_docx_and_sage_show_edited(operations):
 def test_slot_overrides_keep_existing_findings(operations):
     client = operations.client
     baseline = client.get("/api/specification-sheet/MMLE-50D/documentation-scene").json()["document"]
-    assert baseline["schemaVersion"] == 2
+    assert baseline["schemaVersion"] == 3
     changed = client.post("/api/specification-sheet/MMLE-50D/values", json={"values": [
         {"slot": "spec.rated_capacity.value", "value": "1,000 lb"}]}).json()["document"]
     slot = changed["slots"]["spec.rated_capacity.value"]
@@ -301,7 +305,7 @@ def test_slot_overrides_keep_existing_findings(operations):
     assert slot["activeClaimIds"] == [] and slot["provenance"]["evidenceStatus"] == "edited_unverified"
     assert "overrides_evidence" in {finding["topic"] for finding in changed["releaseGate"]["findings"]}
     stored = SlotStore(server.SPECIFICATION_SHEET_ROOT, "MMLE-50D").read()
-    assert stored["schemaVersion"] == 2 and stored["fieldMeta"]["slot:spec.rated_capacity.value"]
+    assert stored["schemaVersion"] == 3 and stored["fieldMeta"]["slot:spec.rated_capacity.value"]
     refused = client.post("/api/specification-sheet/MMLE-50D/pdf?mode=customer")
     assert refused.status_code == 422 and refused.json()["error"] == "unconfirmed_cited_values"
     assert refused.json()["details"]["targets"] == unconfirmed_targets(changed)
@@ -328,7 +332,11 @@ def test_unconfirmed_customer_export_blocked(operations):
 def test_user_confirmation_removes_active_citation(operations):
     operations.edit()
     read, body = operations.read_confirmation()
-    assert set(read["targets"][0]["values"]) == {"spec-table-1.r0.c0", CELL}
+    # P1c-1: values are keyed by the cells' stable IDs (the read's alias map), still in column order: the
+    # confirmation dialog shows them as listed (label, then value).
+    aliases = operations.state()["document"]["aliasMap"][PAGE]
+    assert list(read["targets"][0]["values"]) == [aliases["spec-table-1.r0.c0"]["targetId"], aliases[CELL]["targetId"]]
+    assert list(read["targets"][0]["values"].values()) == ["Rated capacity", "1,000 lb"]
     response = operations.confirm(read, body)
     assert response.status_code == 200, response.text
     receipt = response.json()["receipt"]
@@ -478,7 +486,7 @@ def test_legacy_slot_metadata_is_read_only_and_adopted_on_first_edit(operations)
         {"slot": "spec.rated_capacity.value", "value": "900 lb"}]})
     assert changed.status_code == 200, changed.text
     adopted = store.read()
-    assert adopted["schemaVersion"] == 2 and adopted["fieldMeta"]["slot:spec.rated_capacity.value"]
+    assert adopted["schemaVersion"] == 3 and adopted["fieldMeta"]["slot:spec.rated_capacity.value"]
 
 
 def test_old_parts_document_projects_schema_five_without_writing(tmp_path):
@@ -489,7 +497,7 @@ def test_old_parts_document_projects_schema_five_without_writing(tmp_path):
     path.write_text(json.dumps(old), encoding="utf-8")
     before = path.read_bytes()
     current = project_document(json.loads(before))
-    assert current["schemaVersion"] == 5 and current["fieldMeta"]
+    assert current["schemaVersion"] == 6 and current["fieldMeta"]
     assert all(meta["origin"] == "generated" and meta["evidenceStatus"] == "unbound"
                for meta in current["fieldMeta"].values())
     assert path.read_bytes() == before

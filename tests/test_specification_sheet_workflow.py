@@ -3,6 +3,8 @@ from __future__ import annotations
 from io import BytesIO
 from pathlib import Path
 
+import pytest
+
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
@@ -310,3 +312,71 @@ def test_viewport_edits_reach_the_pdf_and_docx(tmp_path: Path, monkeypatch) -> N
     )
     assert "MMLE-50D Shop Lift" in editable_text
     assert "Raises loads to bench height." in editable_text
+
+
+@pytest.mark.parametrize("writer", ["workspace", "sage_batch"])
+def test_slot_value_after_viewport_text_has_one_composition_and_pdf_value(tmp_path, monkeypatch, writer):
+    monkeypatch.setattr(server, "SPECIFICATION_SHEET_ROOT", tmp_path / "sheets")
+    monkeypatch.setattr(server, "_DOCUMENTATION_READ_BINDINGS", {})
+    client = TestClient(server.app, base_url="http://127.0.0.1:8023")
+    base_url = "/api/specification-sheet/MMLE-50D"
+    generated = client.post(base_url + "/generate?rebaseline=true")
+    assert generated.status_code == 200, generated.text
+    current = generated.json()
+    document = current["document"]
+    page_id = document["pages"][0]["pageId"]
+    edited = client.post(base_url + "/documentation-scene/commands", json={
+        "baseRevision": current["revision"], "sourceRevision": document["sourceRevision"],
+        "manualPlanRevision": document["manualPlanRevision"], "pageId": page_id,
+        "targetType": "page_element", "operation": "update_text", "targetId": "spec-title", "text": "Viewport title"})
+    assert edited.status_code == 200, edited.text
+
+    def assert_title(document, title):
+        page = document["pages"][0]
+        block = next(block for block in page["layoutBlocks"] if block["blockId"] == "spec-title")
+        assert block["text"] == title and document["slots"]["title"]["value"] == title
+        for composition in (page["documentationComposition"], page["renderRequest"]["composition"]):
+            for alias in ("spec-title", "slot:title"):
+                assert "text" not in composition.get("pageElementOverrides", {}).get(alias, {})
+        assert "text" not in page["identityOverrides"].get("slot:title", {})
+
+    assert_title(edited.json()["document"], "Viewport title")
+    if writer == "workspace":
+        changed = client.post(base_url + "/values", json={"values": [{"slot": "title", "value": "Slot title"}]})
+        assert changed.status_code == 200, changed.text
+    else:
+        from ai_inspector.documentation.targets import ReadBindings, read_targets
+        host = server._DocumentationAgentHost()
+        kind = "product_specification_sheet"
+        snapshot = host.document_snapshot("MMLE-50D", kind)
+        read = read_targets(snapshot["state"], snapshot["targets"],
+                            [{"targetId": "slot:title"}, {"targetId": "slot:feature.2.text"}])
+        reader = ReadBindings("round-three-slot-batch")
+        reader.record(kind, read)
+        observed = reader.bind_operations(kind, {
+            "documentId": read["documentId"], "expectedRevision": read["revision"],
+            "requestId": "round-three-slot-batch", "operations": [
+                {"operation": "set_slot_value", "targetId": row["targetId"],
+                 "value": "Slot title" if row["targetId"] == "slot:title" else "Batch feature text",
+                 "expectedContentHash": row["contentHash"]} for row in read["targets"]]})
+        result = host.apply_document_edits("MMLE-50D", kind, observed)
+        assert len(result["receipt"]["changedIds"]) == 2
+    reopened = client.get(base_url + "/documentation-scene")
+    assert reopened.status_code == 200, reopened.text
+    document = reopened.json()["document"]
+    assert_title(document, "Slot title")
+    if writer == "sage_batch":
+        assert document["slots"]["feature.2.text"]["value"] == "Batch feature text"
+    snapshot = server._DocumentationAgentHost().document_snapshot("MMLE-50D", "product_specification_sheet")
+    assert snapshot["targets"]["slot:title"]["text"] == "Slot title"
+    captured = client.post(base_url + f"/document/{page_id}/render", data={
+        "documentRevision": document["documentRevision"], "manualPlanRevision": document["manualPlanRevision"],
+        "sourceRevision": document["sourceRevision"], "renderPipelineVersion": str(document["renderPipelineVersion"]),
+        "balloons": "[]"}, files={"file": ("product.png", _product_capture(), "image/png")})
+    assert captured.status_code == 200, captured.text
+    exported = client.post(base_url + "/pdf")
+    assert exported.status_code == 200, exported.text
+    import fitz
+    with fitz.open(stream=client.get(exported.json()["pdf"]["url"]).content, filetype="pdf") as pdf:
+        text = pdf[0].get_text()
+    assert "Slot title" in text and "Viewport title" not in text

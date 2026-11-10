@@ -6,12 +6,16 @@ from typing import Mapping
 import uuid
 
 from .commands import DocumentEditError, content_hash, digest, document_id, scene_field_key
+from .identity import stable_target, alias_entry, VERSIONS
 
 EDITED_MARKER = "Edited - source does not verify this value"
 EDITED_LEGEND = "Edited values retain their original sources for reference; those sources do not verify the edited values."
 
 
 def scope_id(document, page_id, alias):
+    stable = stable_target(document, page_id, alias)
+    if stable != alias or alias.startswith("gen-"):
+        return stable
     number = (document.get("product") or {}).get("assemblyNumber") or document.get("assemblyNumber") or ""
     identity = document_id(document["documentType"], number)
     return str(uuid.uuid5(uuid.UUID(identity), ":".join((str(document.get("sourceRevision") or ""),
@@ -20,6 +24,8 @@ def scope_id(document, page_id, alias):
 
 def _leaves(commands):
     for command in commands:
+        if command.get("identityOrphan"):
+            continue
         if command.get("operation") == "batch":
             yield from _leaves(command.get("commands") or [])
         else:
@@ -37,7 +43,8 @@ def replay_field_meta(commands):
         if command.get("operation") in {"reset_page", "reset"}:
             result = {key: value for key, value in result.items() if not (
                 value.get("pageId") == page_id and (command["operation"] == "reset_page"
-                or alias in value.get("aliases", [])))}
+                or alias in value.get("aliases", []))) and not
+                set(value.get("aliases", [])) & set(command.get("identityResetTargets", []))}
         for key, value in (command.get("fieldMeta") or {}).items():
             result[key] = deepcopy(value)
     return result
@@ -47,7 +54,8 @@ def _text_history(scene, page_id, aliases):
     history = []
     from .changes import effective_commands
     for command in _leaves(effective_commands((scene.get("commands") or [])[:int(scene.get("historyCursor") or 0)])):
-        if command.get("pageId") != page_id:
+        if command.get("pageId") != page_id and not (str(command.get("targetId", "")).startswith("gen-")
+                and command.get("targetId") in aliases):
             continue
         operation, target = command.get("operation"), command.get("targetId")
         if operation == "reset_page":
@@ -66,6 +74,7 @@ def _source_ids(document, claims, supplied=()):
 
 def _value(page, alias, generated):
     override = (page.get("documentationComposition") or {}).get("pageElementOverrides", {}).get(alias, {})
+    override = page.get("identityOverrides", {}).get(alias, override)
     return override.get("text", generated)
 
 
@@ -75,15 +84,16 @@ def _scopes(document, scene):
             bid, kind = block.get("blockId"), block.get("blockType")
             if not bid or kind == "contents_list":
                 continue
+            target = lambda alias: stable_target(document, page["pageId"], alias)
             rows = block.get("rows") if kind in {"table", "key_value_table"} else None
             items = block.get("items") if kind in {"list", "figure_legend"} else None
             children = rows if rows is not None else items
             bound_indices = {i for i, child in enumerate(children or []) if
                 block.get("evidenceBindingVersion") == 1 and "claimIds" in child}
             unknown = set(range(len(children or []))) - bound_indices
-            unknown_fields = {f"{bid}.r{i}.c{ci}": value for i in sorted(unknown)
+            unknown_fields = {target(f"{bid}.r{i}.c{ci}"): value for i in sorted(unknown)
                 for ci, value in enumerate(children[i].get("cells") or [])} if rows is not None else {
-                f"{bid}.i{i}": children[i].get("text", "") for i in sorted(unknown)}
+                target(f"{bid}.i{i}"): children[i].get("text", "") for i in sorted(unknown)}
             fallback = (scene.get("fieldMeta") or {}).get(scope_id(document, page["pageId"], bid), {})
             whole_block = bool(unknown and (fallback.get("origin") == "manual" or any(
                 _value(page, key, value) != value for key, value in unknown_fields.items()) or any(
@@ -96,12 +106,12 @@ def _scopes(document, scene):
                 alias = f"{bid}.r{index}" if bound and rows is not None else f"{bid}.i{index}" if bound else bid
                 if rows is not None:
                     chosen = [(index, owner)] if bound else list(enumerate(rows))
-                    fields = [(f"{bid}.r{ri}.c{ci}", cell) for ri, row in chosen for ci, cell in enumerate(row.get("cells") or [])]
+                    fields = [(target(f"{bid}.r{ri}.c{ci}"), cell) for ri, row in chosen for ci, cell in enumerate(row.get("cells") or [])]
                 elif items is not None:
                     chosen = [(index, owner)] if bound else list(enumerate(items))
-                    fields = [(f"{bid}.i{ii}", item.get("text", "")) for ii, item in chosen]
+                    fields = [(target(f"{bid}.i{ii}"), item.get("text", "")) for ii, item in chosen]
                 else:
-                    fields = [(bid, block.get("caption", "") if kind == "cad_figure" else
+                    fields = [(target(bid), block.get("caption", "") if kind == "cad_figure" else
                                block.get("text", "\n".join(block.get("lines") or [])))]
                 original = owner.get("originalEvidence") or {}
                 claims = original.get("claimIds", owner.get("claimIds", []) if bound else block.get("evidenceClaimIds", []))
@@ -113,8 +123,8 @@ def _scopes(document, scene):
 def project_document(document, scene=None, *, generated_parts=None):
     """Pure read projection, including legacy positional overrides with no row guesses."""
     result = deepcopy(document)
-    supported = {"operations_and_maintenance_manual": 2, "work_instructions": 2,
-                 "illustrated_parts_manual": 5}.get(result.get("documentType"))
+    supported = {"operations_and_maintenance_manual": 3, "work_instructions": 3,
+                 "illustrated_parts_manual": 6}.get(result.get("documentType"))
     if supported and result.get("schemaVersion", 1) > supported:
         raise DocumentEditError("unsupported_document_schema", "This document needs a newer editor.")
     if supported:
@@ -144,11 +154,12 @@ def project_document(document, scene=None, *, generated_parts=None):
         display_name = str((owner.get("cells") or [""])[0]) if bound and "rows" in block else ""
         if not display_name:
             display_name = str(owner.get("label") or page.get("title") or alias)
-        meta.update({"targetId": sid, "pageId": page["pageId"], "alias": alias, "displayName": display_name,
+        meta.update({"targetId": sid, "pageId": page["pageId"], "alias": sid, "displayName": display_name,
                      "aliases": list(generated), "claimIds": claims, "sourceIds": sources,
                      "sourceRevision": result.get("sourceRevision"),
                      "originalEvidence": {"claimIds": claims, "sourceIds": sources}})
-        if meta.get("confirmation") and meta["confirmation"].get("valueHash") != digest(effective):
+        confirmed_values = {meta.get("confirmationAliases", {}).get(k, k): v for k, v in effective.items()}
+        if meta.get("confirmation") and meta["confirmation"].get("valueHash") != digest(confirmed_values):
             meta.pop("confirmation", None)
             meta.update(origin="manual", evidenceStatus="edited_unverified" if claims or sources else "unbound")
         active = meta["evidenceStatus"] == "source_backed"
@@ -198,7 +209,7 @@ def project_document(document, scene=None, *, generated_parts=None):
     covered = {(target["pageId"], alias) for target in targets for alias in target["values"]}
     original = text_targets({**identity, "scene": {"pages": {}}}, result)
     for key, target in text_targets(identity, result).items():
-        alias = target["alias"]
+        alias = target.get("storageId", target["alias"])
         if (target["pageId"], alias) in covered:
             continue
         page_id = "page-parts-index" if alias.startswith("part.") else target["pageId"]
@@ -243,6 +254,12 @@ def prepare_text_command(document, command):
     result = deepcopy(command)
     # Provenance is computed by the host, never accepted from a caller payload.
     result.pop("fieldMeta", None)
+    if result.get("targetType") == "page_element":
+        entry = alias_entry(document, result.get("pageId"), result.get("targetId"))
+        if entry and not entry.get("safe"):
+            raise DocumentEditError("ambiguous_legacy_target", "This source has no unique editable identity.")
+        result["targetId"] = stable_target(document, result.get("pageId"), result.get("targetId"))
+    command = result
     if command.get("operation") != "update_text":
         return result
     changes = {}
@@ -275,6 +292,7 @@ def confirmation_targets(state, document):
 
 def confirmation_command(target, *, by):
     meta = deepcopy(target["provenance"])
+    meta.pop("confirmationAliases", None)
     meta.update(origin="manual", evidenceStatus="entered_by_user", activeClaimIds=[], activeSourceIds=[], marker="")
     meta["confirmation"] = {"by": by, "valueHash": digest(target["values"])}
     # Reuse the existing text-history shape with the exact current value. The
@@ -293,8 +311,7 @@ def unconfirmed_targets(document):
 def export_document(document):
     """Old generated JSON gets the same pure provenance projection as live compilation."""
     kind = document.get("documentType")
-    supported = {"operations_and_maintenance_manual": 2, "work_instructions": 2,
-                 "illustrated_parts_manual": 5, "product_specification_sheet": 2}.get(kind)
+    supported = VERSIONS.get(kind)
     if supported and document.get("schemaVersion", 1) > supported:
         raise DocumentEditError("unsupported_document_schema", "This document needs a newer editor.")
     if "fieldMeta" in document and document.get("schemaVersion") == supported:
@@ -322,15 +339,18 @@ def strip_projection(document):
     if isinstance(document, dict):
         return {key: strip_projection(value) for key, value in document.items()
                 if key not in {"fieldMeta", "provenanceTargets", "provenance", "originalEvidence",
-                               "activeEvidenceClaimIds", "activeSourceIds", "sourceSupport", "sourceSupportSummary"}}
+                               "activeEvidenceClaimIds", "activeSourceIds", "sourceSupport", "sourceSupportSummary",
+                               "identityVersion", "aliasMap", "aliasRevision", "identities", "identityOrphans",
+                               "identityOverrides", "stableId", "rowId", "cellIds", "columnIds", "itemId",
+                               "identityStatus", "identityScope", "identitySourceKey", "identityCellFields", "sourceKey", "columnKeys", "bomColumnIds", "legacyDocumentationSceneRevision", "identityBaselineAvailable"}}
     return document
 
 
 def project_slots(document, stored):
     result = deepcopy(document)
-    if result.get("schemaVersion", 1) > 2:
+    if result.get("schemaVersion", 1) > 3:
         raise DocumentEditError("unsupported_document_schema", "This sheet needs a newer editor.")
-    result["schemaVersion"] = 2
+    result["schemaVersion"] = 3
     meta_by_id = {}
     for slot, item in result.get("slots", {}).items():
         sid = "slot:" + slot

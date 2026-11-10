@@ -30,7 +30,7 @@ from ai_inspector.parts_manual.documentation import (
 )
 
 
-WORK_INSTRUCTION_SCHEMA_VERSION = 2
+WORK_INSTRUCTION_SCHEMA_VERSION = 3
 WORK_INSTRUCTION_PLAN_SCHEMA_VERSION = 2
 WORK_INSTRUCTION_RENDER_PIPELINE_VERSION = 2
 _MAX_CALLOUT_ITEMS = 7
@@ -901,10 +901,10 @@ def _stage_page(
                     "fontSize": 10,
                     "rowHeights": [36, 36, 36, 36],
                     "items": [
-                        {"itemNumber": 1, "label": "", "text": "Stage completion records"},
-                        {"itemNumber": 2, "label": "", "text": "Integrated build inspection record"},
-                        {"itemNumber": 3, "label": "", "text": "Functional test record"},
-                        {"itemNumber": 4, "label": "", "text": "Open findings and engineering dispositions"},
+                        {"sourceKey": "decl-906eca78b7fb4b04", "itemNumber": 1, "label": "", "text": "Stage completion records"},
+                        {"sourceKey": "decl-640c384cafdf402c", "itemNumber": 2, "label": "", "text": "Integrated build inspection record"},
+                        {"sourceKey": "decl-ae5f4051140d41b0", "itemNumber": 3, "label": "", "text": "Functional test record"},
+                        {"sourceKey": "decl-1b8fafff0ddc4ab7", "itemNumber": 4, "label": "", "text": "Open findings and engineering dispositions"},
                     ],
                     "frame": {"x": 34, "y": 148, "width": 520, "height": 170},
                 },
@@ -985,6 +985,7 @@ def _stage_page(
                 ],
                 "items": [
                     {
+                        "sourceKey": row.get("stepId") or row.get("operationId"),
                         "itemNumber": index,
                         "label": "",
                         "text": _operator_language(row.get("action") or ""),
@@ -1262,6 +1263,7 @@ def _benchmark_operation_page(
         marker_text = f"[{marker}] " if marker else ""
         part_items.append(
             {
+                "sourceKey": row.get("definitionId") or row.get("partNumber"),
                 "itemNumber": len(part_items) + 1,
                 "label": "",
                 "text": (
@@ -1424,7 +1426,9 @@ def _benchmark_operation_page(
             "fontSize": 7.2,
             "rowHeights": [29.0] * len(operation.get("actions") or []),
             "items": [
-                {"itemNumber": index, "label": "", "text": str(action)}
+                {"sourceKey": action.get("actionId") if isinstance(action, Mapping) else None,
+                 "itemNumber": index, "label": "",
+                 "text": str(action.get("text") or "") if isinstance(action, Mapping) else str(action)}
                 for index, action in enumerate(operation.get("actions") or [], start=1)
             ],
             "frame": {"x": 580, "y": 126, "width": 346, "height": 116},
@@ -1588,6 +1592,8 @@ def legacy_document_revision(document: Mapping[str, Any]) -> str:
     metadata was not part of the generated document and is removed first.
     """
     legacy = strip_projection(copy.deepcopy(dict(document)))
+    if document.get("legacyDocumentationSceneRevision"):
+        legacy["documentationSceneRevision"] = document["legacyDocumentationSceneRevision"]
     legacy.pop("documentRevision", None)
     legacy["schemaVersion"] = 1
     for page in legacy.get("pages") or []:
@@ -1608,7 +1614,7 @@ def legacy_document_revision(document: Mapping[str, Any]) -> str:
 
 def with_figure_revisions(document: Mapping[str, Any]) -> Dict[str, Any]:
     """Pure schema-1 read migration; a generated schema-2 write uses the new hash."""
-    if document.get("schemaVersion") not in {1, WORK_INSTRUCTION_SCHEMA_VERSION}:
+    if document.get("schemaVersion") not in {1, 2, WORK_INSTRUCTION_SCHEMA_VERSION}:
         raise WorkInstructionError("unsupported work-instruction document schema")
     result = copy.deepcopy(dict(document))
     result["schemaVersion"] = WORK_INSTRUCTION_SCHEMA_VERSION
@@ -1802,6 +1808,7 @@ def build_work_instruction_document(
                     "columns": 2,
                     "items": [
                         {
+                            "sourceKey": stage["stageId"],
                             "itemNumber": int(stage["sequenceNumber"]),
                             "label": str(stage["title"]),
                             "text": str(stage["result"]),
@@ -1842,7 +1849,7 @@ def build_work_instruction_document(
                     "fontSize": 7.2,
                     "rowHeights": [30.0, 30.0],
                     "items": [
-                        {
+                        {"sourceKey": "decl-10535999924641cb",
                             "itemNumber": 1,
                             "label": "Stage 03",
                             "text": (
@@ -1851,7 +1858,7 @@ def build_work_instruction_document(
                                 "and records."
                             ),
                         },
-                        {
+                        {"sourceKey": "decl-62b7bb29954842f7",
                             "itemNumber": 2,
                             "label": "Stages 01-02 and 04-14",
                             "text": (
@@ -1883,12 +1890,12 @@ def build_work_instruction_document(
                     "fontSize": 7.0,
                     "rowHeights": [21.0, 21.0, 21.0],
                     "items": [
-                        {"itemNumber": 1, "label": "Torque", "text": "Actual MMLE requirements"},
-                        {"itemNumber": 2, "label": "Hydraulics", "text": "Settings and limits"},
-                        {"itemNumber": 3, "label": "Electrical", "text": "Routing and acceptance"},
-                        {"itemNumber": 4, "label": "Test", "text": "Production acceptance limits"},
-                        {"itemNumber": 5, "label": "Safety", "text": "Approved controls"},
-                        {"itemNumber": 6, "label": "Approval", "text": "Manufacturing approval"},
+                        {"sourceKey": "decl-0f3aa40cff324486", "itemNumber": 1, "label": "Torque", "text": "Actual MMLE requirements"},
+                        {"sourceKey": "decl-ee3c81c289824b9c", "itemNumber": 2, "label": "Hydraulics", "text": "Settings and limits"},
+                        {"sourceKey": "decl-c11e4f2d7ea744b1", "itemNumber": 3, "label": "Electrical", "text": "Routing and acceptance"},
+                        {"sourceKey": "decl-c5d6136a01364f23", "itemNumber": 4, "label": "Test", "text": "Production acceptance limits"},
+                        {"sourceKey": "decl-a19b47d3f24145aa", "itemNumber": 5, "label": "Safety", "text": "Approved controls"},
+                        {"sourceKey": "decl-82b606a7e2c04d04", "itemNumber": 6, "label": "Approval", "text": "Manufacturing approval"},
                     ],
                     "frame": {"x": 496, "y": 426, "width": 408, "height": 64},
                 },
@@ -1931,7 +1938,7 @@ def build_work_instruction_document(
             )
     for page in pages:
         page["pageCount"] = len(pages)
-    theme, page_masters = _apply_scene(pages, documentation_scene)
+    theme, page_masters = _apply_scene([], documentation_scene)
     citations = _source_citations(resolved_package.get("documents") or {})
     release_findings = [
         {
@@ -2085,6 +2092,11 @@ def build_work_instruction_document(
             "findings": release_findings,
         },
     }
+    from ai_inspector.documentation.identity import bind_document, sync_identity_overrides
+
+    document, documentation_scene = bind_document(document, documentation_scene)
+    _apply_scene(document["pages"], documentation_scene)
+    sync_identity_overrides(document)
     document = project_document(document, documentation_scene)
     document = with_figure_revisions(document)
     revision_payload = copy.deepcopy(document)

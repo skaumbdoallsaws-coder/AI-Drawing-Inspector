@@ -34,7 +34,7 @@ from ai_inspector.documentation.commands import (
 
 from ai_inspector.documentation.provenance import replay_field_meta
 
-DOCUMENTATION_SCENE_SCHEMA_VERSION = 3
+DOCUMENTATION_SCENE_SCHEMA_VERSION = 4
 DOCUMENTATION_TARGET_TYPES = frozenset(
     {
         "manual_group",
@@ -257,7 +257,7 @@ def documentation_scene_revision(value: Any) -> str:
     # metadata. An untouched v2 document keeps its exact export identity.
     projection = {key: copy.deepcopy(value[key]) for key in (
         "schemaVersion", "assemblyNumber", "sourceRevision", "manualPlanRevision",
-        "createdAt", "updatedAt", "pages", "theme", "pageMasters", "commands", "historyCursor"
+        "createdAt", "updatedAt", "pages", "theme", "pageMasters", "commands", "historyCursor", "aliasRevision"
     ) if key in value}
     projection["schemaVersion"] = 2
     return hashlib.sha256(canonical_documentation_bytes(projection)).hexdigest()
@@ -1036,6 +1036,11 @@ def _scene_records(scene):
     records, prefix = [], []
     for index, command in enumerate(scene["commands"][:scene["historyCursor"]]):
         item = command.get("change")
+        if command.get("identityOrphan"):
+            records.append({**copy.deepcopy(item or {}), "changeId": (item or {}).get("changeId") or legacy_id(command, index),
+                            "migrationBlocked": True, "changes": [], "versionKeys": []})
+            prefix.append(command)
+            continue
         if item is None:
             # Old logs have no snapshots. Derive them purely in memory; never
             # enrich the saved command on read (its historical hash stays valid).
@@ -1063,6 +1068,8 @@ def _scene_records(scene):
 
 def _leaf_commands(commands):
     for command in commands:
+        if command.get("identityOrphan"):
+            continue
         if command.get("operation") == "batch":
             children = command.get("commands")
             if (not isinstance(children, list) or not 1 <= len(children) <= 12
@@ -1084,6 +1091,7 @@ def _advance_edit_versions(scene, commands):
             scene["editEpoch"] += 1
             continue
         operation, page = command.get("operation"), str(command.get("pageId") or "")
+        keys.update(command.get("identityResetTargets", []))
         if operation in {"set_theme", "apply_template"}:
             scene["editEpoch"] += 1
         elif operation in {"reset_page", "add_object", "remove_object"}:
@@ -1115,6 +1123,9 @@ def replay_documentation_commands(commands: Iterable[Mapping[str, Any]]) -> Dict
             continue
         page = _page_override(pages, page_id)
         if operation == "reset_page":
+            for other in pages.values():
+                for key in command.get("identityResetTargets", []):
+                    other.get("pageElementOverrides", {}).pop(key, None)
             pages.pop(page_id, None)
             _page_override(pages, page_id)
             continue
@@ -1261,7 +1272,7 @@ def _arrange_transforms(value: Any) -> list[Dict[str, Any]]:
 
 def _upgrade_documentation_scene(scene: Dict[str, Any]) -> Dict[str, Any]:
     schema_version = scene.get("schemaVersion")
-    if schema_version not in {1, 2, DOCUMENTATION_SCENE_SCHEMA_VERSION}:
+    if schema_version not in {1, 2, 3, DOCUMENTATION_SCENE_SCHEMA_VERSION}:
         raise DocumentationSceneError("unsupported documentation scene schema")
     commands = scene.get("commands")
     if not isinstance(commands, list):
@@ -1529,6 +1540,17 @@ class DocumentationSceneRepository:
         return directory / "documentation-scene.json"
 
     def _save(self, assembly_number, scene):
+        # Authored object IDs are allocated by add_object once and never recycled.
+        live = {key for page in scene["pages"].values() for key in page.get("documentObjects", {})}
+        identities = scene.setdefault("identities", {})
+        for command in _leaf_commands(scene["commands"]):
+            if command.get("targetType") == "page_element" and str(command.get("targetId", "")).startswith(("gen-", "slot:")):
+                key = command["targetId"]
+                identities.setdefault(key, {"id": key, "state": "active"}).setdefault("storagePage", command["pageId"])
+            if command.get("targetType") == "document_object":
+                key = command["targetId"]
+                identities[key] = {"id": key, "ownership": "authored",
+                                   "state": "active" if key in live else "tombstone"}
         validate_documentation_scene(scene)
         payload = canonical_documentation_bytes(scene)
         if len(payload) > 16 * 1024 * 1024:
@@ -1537,10 +1559,10 @@ class DocumentationSceneRepository:
         if path.is_file():
             original = path.read_bytes()
             old_version = json.loads(original).get("schemaVersion")
-            if old_version not in {1, 2, DOCUMENTATION_SCENE_SCHEMA_VERSION}:
+            if old_version not in {1, 2, 3, DOCUMENTATION_SCENE_SCHEMA_VERSION}:
                 raise DocumentEditError("unsupported_document_schema", "This scene needs a newer editor.")
-            if old_version in {1, 2}:
-                backup = path.with_name("documentation-scene.v2.json")
+            if old_version in {1, 2, 3}:
+                backup = path.with_name("documentation-scene.v3.json" if old_version == 3 else "documentation-scene.v2.json")
                 if backup.exists():
                     if backup.read_bytes() != original:
                         raise DocumentEditError("legacy_store_changed", "The original scene differs from its rollback copy.")
@@ -1573,6 +1595,8 @@ class DocumentationSceneRepository:
         assembly_number: str,
         source_revision: str,
         manual_plan_revision: str,
+        *,
+        identity_document: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
         path = self._scene_path(assembly_number)
         if path.is_file():
@@ -1589,6 +1613,18 @@ class DocumentationSceneRepository:
                 manual_plan_revision,
             )
         scene = _upgrade_documentation_scene(scene)
+        identity_base_revision = documentation_scene_revision(scene)
+        scene.setdefault("legacySceneRevision", identity_base_revision)
+        from ai_inspector.documentation.identity import catalog_from, migrate_scene, track_authored_identities
+
+        catalog = catalog_from(identity_document) if identity_document is not None else None
+        if catalog is not None and (catalog["documentType"] != self.document_type
+                or catalog["assemblyNumber"].strip().casefold() != str(assembly_number).strip().casefold()
+                or catalog["sourceRevision"] != str(source_revision)
+                or catalog["manualPlanRevision"] != str(manual_plan_revision)):
+            raise DocumentEditError("stale_revision", "The compiler catalogue does not match this read binding.")
+        scene = _upgrade_documentation_scene(migrate_scene(scene, catalog))
+        track_authored_identities(scene)
         validate_documentation_scene(scene)
         source_current = str(scene.get("sourceRevision")) == str(source_revision)
         plan_current = str(scene.get("manualPlanRevision")) == str(manual_plan_revision)
@@ -1598,6 +1634,7 @@ class DocumentationSceneRepository:
         return {
             "scene": copy.deepcopy(scene),
             "revision": documentation_scene_revision(scene),
+            "identityBaseRevision": identity_base_revision,
             "persisted": path.is_file(),
             "sourceCurrent": source_current,
             "manualPlanCurrent": plan_current,
@@ -1614,6 +1651,7 @@ class DocumentationSceneRepository:
         manual_plan_revision: str,
         *,
         preserve_theme: bool = True,
+        identity_document: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Replace stale page overrides while retaining reusable brand settings."""
         with _WRITE_LOCK:
@@ -1621,6 +1659,7 @@ class DocumentationSceneRepository:
                 assembly_number,
                 source_revision,
                 manual_plan_revision,
+                identity_document=identity_document,
             )
             previous = loaded["scene"]
             scene = self.new_scene(
@@ -1645,7 +1684,7 @@ class DocumentationSceneRepository:
             validate_documentation_scene(scene)
             self._save(assembly_number, scene)
             # The same projection as read() (history choices, change list), so a write never returns another shape.
-            return {**self.read(assembly_number, source_revision, manual_plan_revision),
+            return {**self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document),
                     "rebaselined": True, "previousRevision": documentation_scene_revision(previous)}
 
     def rebind_manual_plan(
@@ -1654,6 +1693,8 @@ class DocumentationSceneRepository:
         source_revision: str,
         previous_manual_plan_revision: str,
         manual_plan_revision: str,
+        *,
+        identity_document: Optional[Mapping[str, Any]] = None,
     ) -> bool:
         """Carry the page edits over a manual-plan change the app made itself
         (parts moved between sections). Only a scene bound to the plan the
@@ -1668,6 +1709,7 @@ class DocumentationSceneRepository:
                 assembly_number,
                 source_revision,
                 previous_manual_plan_revision,
+                identity_document=identity_document,
             )
             if not loaded["sourceCurrent"] or not loaded["manualPlanCurrent"]:
                 return False
@@ -1730,12 +1772,14 @@ class DocumentationSceneRepository:
         base_revision: str,
         command: Mapping[str, Any],
         page_targets: Mapping[str, Mapping[str, Iterable[str]]],
+        identity_document: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
         with _WRITE_LOCK:
             loaded = self.read(
                 assembly_number,
                 source_revision,
                 manual_plan_revision,
+                identity_document=identity_document,
             )
             scene = loaded["scene"]
             self._assert_revision(scene, base_revision)
@@ -1743,6 +1787,9 @@ class DocumentationSceneRepository:
 
             if any(meta.get("confirmation") for meta in (command.get("fieldMeta") or {}).values()):
                 raise DocumentationSceneError("Use the human confirmation endpoint.")
+            from ai_inspector.documentation.identity import normalize_command
+
+            command, page_targets = normalize_command(scene, command, page_targets)
             candidate = apply_documentation_command_candidate(scene, command, page_targets)
             before = scene
             scene, persisted_command = candidate["scene"], candidate["command"]
@@ -1755,13 +1802,13 @@ class DocumentationSceneRepository:
             _advance_edit_versions(scene, [persisted_command])
             self._save(assembly_number, scene)
             # The same projection as read() (history choices, change list), so a write never returns another shape.
-            return {**self.read(assembly_number, source_revision, manual_plan_revision),
+            return {**self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document),
                     "command": copy.deepcopy(persisted_command)}
 
     def apply_batch(self, assembly_number, source_revision, manual_plan_revision, *,
                     base_revision, expected_revision, request_id, commands, page_targets,
                     expected_hashes, current_hashes, hashes_revision, actor="sage", payload=None,
-                    allow_confirmation=False):
+                    allow_confirmation=False, identity_document=None):
         """One history entry and one replace. The host compiles/hash-checks under
         transaction_lock and supplies hashes_revision to reject an unlocked race.
         """
@@ -1776,7 +1823,7 @@ class DocumentationSceneRepository:
             "commands": commands, "expectedRevision": expected_revision, "hashes": expected_hashes,
             "sourceRevision": source_revision, "manualPlanRevision": manual_plan_revision, "actor": actor})
         with _WRITE_LOCK:
-            loaded = self.read(assembly_number, source_revision, manual_plan_revision)
+            loaded = self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document)
             scene = loaded["scene"]
             self._assert_binding(scene, source_revision, manual_plan_revision)
             previous = prior_receipt(scene, request_id, payload_hash)
@@ -1796,7 +1843,10 @@ class DocumentationSceneRepository:
             changed = []
             for index, (target, command) in enumerate(zip(expected_hashes, commands)):
                 try:
-                    item = apply_documentation_command_candidate(candidate, {**command, "actor": actor}, page_targets)
+                    from ai_inspector.documentation.identity import normalize_command
+
+                    command, command_targets = normalize_command(candidate, command, page_targets)
+                    item = apply_documentation_command_candidate(candidate, {**command, "actor": actor}, command_targets)
                 except DocumentationSceneError as error:
                     raise DocumentEditError("invalid_document_operation", str(error), operationIndex=index, targetId=target) from error
                 # A text replacement that leaves the effective projection equal
@@ -1812,7 +1862,7 @@ class DocumentationSceneRepository:
             if not changed:
                 retain_receipt(candidate, receipt)
                 self._save(assembly_number, candidate)
-                return {**self.read(assembly_number, source_revision, manual_plan_revision), "receipt": receipt, "changed": []}
+                return {**self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document), "receipt": receipt, "changed": []}
             for command in persisted:
                 for meta in (command.get("fieldMeta") or {}).values():
                     meta["changeId"] = receipt["changeId"]
@@ -1829,22 +1879,22 @@ class DocumentationSceneRepository:
             _advance_edit_versions(candidate, persisted)
             retain_receipt(candidate, receipt)
             self._save(assembly_number, candidate)
-            return {**self.read(assembly_number, source_revision, manual_plan_revision),
+            return {**self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document),
                     "receipt": receipt, "changed": changed}
 
-    def inspect_change(self, assembly_number, source_revision, manual_plan_revision, change_id):
+    def inspect_change(self, assembly_number, source_revision, manual_plan_revision, change_id, *, identity_document=None):
         with _WRITE_LOCK:
-            loaded = self.read(assembly_number, source_revision, manual_plan_revision)
+            loaded = self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document)
             self._assert_binding(loaded["scene"], source_revision, manual_plan_revision)
             return inspect_change(_scene_records(loaded["scene"]), change_id,
                                   document_id(self.document_type, assembly_number))
 
     def undo_change(self, assembly_number, source_revision, manual_plan_revision, *,
-                    change_id, expected_revision, request_id, actor="sage"):
+                    change_id, expected_revision, request_id, actor="sage", identity_document=None):
         payload_hash = request_hash(request_id, {"changeId": change_id, "expectedRevision": expected_revision,
             "actor": actor, "sourceRevision": source_revision, "manualPlanRevision": manual_plan_revision})
         with _WRITE_LOCK:
-            loaded = self.read(assembly_number, source_revision, manual_plan_revision)
+            loaded = self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document)
             scene = loaded["scene"]
             self._assert_binding(scene, source_revision, manual_plan_revision)
             previous = prior_receipt(scene, request_id, payload_hash)
@@ -1870,13 +1920,13 @@ class DocumentationSceneRepository:
             candidate = _upgrade_documentation_scene(candidate)
             validate_documentation_scene(candidate)
             self._save(assembly_number, candidate)
-            return {**self.read(assembly_number, source_revision, manual_plan_revision), "receipt": receipt}
+            return {**self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document), "receipt": receipt}
 
-    def move_history(self, assembly_number, source_revision, manual_plan_revision, *, base_revision, direction):
+    def move_history(self, assembly_number, source_revision, manual_plan_revision, *, base_revision, direction, identity_document=None):
         if direction not in {"undo", "redo"}:
             raise DocumentationSceneError("unsupported documentation history operation")
         with _WRITE_LOCK:
-            loaded = self.read(assembly_number, source_revision, manual_plan_revision)
+            loaded = self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document)
             scene = loaded["scene"]
             self._assert_revision(scene, base_revision)
             self._assert_binding(scene, source_revision, manual_plan_revision)
@@ -1910,10 +1960,10 @@ class DocumentationSceneRepository:
                 candidate["updatedAt"] = _utc_now()
                 retain_receipt(candidate, receipt)
                 self._save(assembly_number, candidate)
-                return {**self.read(assembly_number, source_revision, manual_plan_revision), "receipt": receipt}
+                return {**self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document), "receipt": receipt}
             return self.undo_change(assembly_number, source_revision, manual_plan_revision,
                 change_id=choices[-1], expected_revision=scene["editRevision"],
-                request_id="history-" + secrets.token_hex(16), actor="user")
+                request_id="history-" + secrets.token_hex(16), actor="user", identity_document=identity_document)
 
 
 def apply_documentation_command_candidate(
@@ -1973,8 +2023,8 @@ def apply_documentation_command_candidate(
             str(value)
             for value in page_targets[page_id].get("document_object") or []
         }
-        if target_id in existing:
-            raise DocumentationSceneError("documentation object already exists")
+        if target_id in existing or target_id in scene.get("identities", {}):
+            raise DocumentationSceneError("documentation object identity already exists; use undo to restore it")
     else:
         if target_type == "selection":
             raise DocumentationSceneError(
@@ -2186,6 +2236,8 @@ def apply_documentation_command_candidate(
         persisted_command["calloutItems"] = copy.deepcopy(callout_items)
     elif operation == "restore_callouts":
         persisted_command["calloutItems"] = None
+    if command.get("identityResetTargets"):
+        persisted_command["identityResetTargets"] = list(command["identityResetTargets"])
     if command.get("fieldMeta"):
         persisted_command["fieldMeta"] = copy.deepcopy(command["fieldMeta"])
         for meta in persisted_command["fieldMeta"].values():

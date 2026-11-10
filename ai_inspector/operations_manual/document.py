@@ -33,7 +33,7 @@ from .nomenclature import (
 )
 
 
-OPERATIONS_MANUAL_DOCUMENT_SCHEMA_VERSION = 2
+OPERATIONS_MANUAL_DOCUMENT_SCHEMA_VERSION = 3
 OPERATIONS_MANUAL_RENDER_PIPELINE_VERSION = 4
 
 _APPROVED_FACT_STATUSES = {
@@ -421,6 +421,7 @@ def _group_callout_items(
 def _figure_legend_items(items: Iterable[Mapping[str, Any]]) -> list[Dict[str, Any]]:
     return [
         {
+            "sourceKey": row.get("definitionId") or row.get("sectionId") or sorted(row.get("occurrenceIds") or []),
             "itemNumber": int(row.get("itemNumber") or 0),
             "label": str(row.get("description") or row.get("name") or "Component"),
             "text": str(row.get("function") or ""),
@@ -955,6 +956,7 @@ def _draft_sections(snapshot: Mapping[str, Any]) -> list[Dict[str, Any]]:
                     "evidenceClaimIds": claim_ids[3:],
                     "payload": {
                         "columns": ["Characteristic", "Value", "Evidence status"],
+                        "columnKeys": ["characteristic", "value", "evidence"],
                         "rows": _specification_rows(snapshot),
                     },
                 },
@@ -1007,6 +1009,7 @@ def _draft_sections(snapshot: Mapping[str, Any]) -> list[Dict[str, Any]]:
                     "evidenceClaimIds": claim_ids,
                     "payload": {
                         "columns": ["Source ID", "Registered source", "Class"],
+                        "columnKeys": ["source", "name", "class"],
                         "rows": _source_rows(snapshot, claim_ids),
                     },
                 },
@@ -1092,15 +1095,16 @@ def _front_matter_pages(product_name: str, document_number: str, findings: list[
                     "blockId": "control-table",
                     "blockType": "key_value_table",
                     "columns": ["Field", "Value"],
+                    "columnKeys": ["field", "value"],
                     "rows": [
-                        {"cells": ["Document title", f"{product_name} Operations and Maintenance Manual"]},
-                        {"cells": ["Document number", document_number]},
-                        {"cells": ["Product document revision", "Not specified"]},
-                        {"cells": ["Configuration effectivity", "Not specified"]},
-                        {"cells": ["Status", "DRAFT"]},
-                        {"cells": ["PDF / DOCX", "Available for document review"]},
-                        {"cells": ["Approval", "Final approval pending"]},
-                        {"cells": ["Revision history", "Initial review issue; product document revision not specified"]},
+                        {"sourceKey": "decl-9a603ee24b654a03", "cells": ["Document title", f"{product_name} Operations and Maintenance Manual"]},
+                        {"sourceKey": "decl-33c000fa8e944bd4", "cells": ["Document number", document_number]},
+                        {"sourceKey": "decl-a474723e8d9c4261", "cells": ["Product document revision", "Not specified"]},
+                        {"sourceKey": "decl-3c3da7c74eef4c40", "cells": ["Configuration effectivity", "Not specified"]},
+                        {"sourceKey": "decl-440808ba94294b28", "cells": ["Status", "DRAFT"]},
+                        {"sourceKey": "decl-d06c2cd71cb84163", "cells": ["PDF / DOCX", "Available for document review"]},
+                        {"sourceKey": "decl-86b389a2634a405a", "cells": ["Approval", "Final approval pending"]},
+                        {"sourceKey": "decl-a4f813410e73455f", "cells": ["Revision history", "Initial review issue; product document revision not specified"]},
                     ],
                     "frame": copy.deepcopy(control_layout["table"]),
                     "evidenceClaimIds": ["CLM-REVISION-001"],
@@ -1387,10 +1391,10 @@ def build_operations_manual_document(
     for page in flow_pages:
         section_first_pages.setdefault(str(page.get("sectionId") or ""), int(page["pageNumber"]))
     contents = [
-        {"title": "Document Control", "pageNumber": 2},
-        {"title": "Table of Contents", "pageNumber": 3},
+        {"sourceKey": "document-control", "title": "Document Control", "pageNumber": 2},
+        {"sourceKey": "contents", "title": "Table of Contents", "pageNumber": 3},
         *[
-            {"title": str(section.get("title") or ""), "pageNumber": section_first_pages[str(section.get("sectionId") or "")]}
+            {"sourceKey": section["sectionId"], "title": str(section.get("title") or ""), "pageNumber": section_first_pages[str(section.get("sectionId") or "")]}
             for section in sections
         ],
     ]
@@ -1411,6 +1415,7 @@ def build_operations_manual_document(
             "blockType": "contents_list",
             "entries": [
                 {
+                    "sourceKey": row["sourceKey"],
                     "title": row["title"],
                     "pageNumber": int(row["pageNumber"]),
                     "level": 0,
@@ -1423,7 +1428,7 @@ def build_operations_manual_document(
     ]
     for page in pages:
         page["pageCount"] = len(pages)
-    theme, page_masters = _apply_scene(pages, documentation_scene)
+    theme, page_masters = _apply_scene([], documentation_scene)
     evidence_citations = _evidence_citation_receipt(snapshot, pages)
     cited_claim_ids = {
         claim_id
@@ -1486,6 +1491,11 @@ def build_operations_manual_document(
         },
         "releaseGate": release_gate,
     }
+    from ai_inspector.documentation.identity import bind_document, sync_identity_overrides
+
+    document, documentation_scene = bind_document(document, documentation_scene)
+    _apply_scene(document["pages"], documentation_scene)
+    sync_identity_overrides(document)
     document = project_document(document, documentation_scene)
     document["documentRevision"] = _stable_revision(document)
     return document

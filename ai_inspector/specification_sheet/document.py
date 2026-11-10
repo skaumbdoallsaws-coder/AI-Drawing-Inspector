@@ -29,7 +29,7 @@ from ai_inspector.parts_manual.documentation import (
 )
 
 
-SPECIFICATION_SHEET_DOCUMENT_SCHEMA_VERSION = 2
+SPECIFICATION_SHEET_DOCUMENT_SCHEMA_VERSION = 3
 SPECIFICATION_SHEET_RENDER_PIPELINE_VERSION = 1
 SPECIFICATION_SHEET_PAGE_WIDTH_PT = 612.0
 SPECIFICATION_SHEET_PAGE_HEIGHT_PT = 792.0
@@ -270,12 +270,22 @@ def _legacy_text_values(page: Dict[str, Any], stored: Mapping[str, Any]) -> Dict
     """Scene text overrides become workspace values (unless a value is already stored), and are taken out of the
     page's composition so nothing applies them twice."""
     values: Dict[str, Dict[str, Any]] = {}
+    block_slots = dict(_BLOCK_SLOTS)
+    for block in page.get("layoutBlocks", []):
+        block_id = block["blockId"]
+        slot = block.get("slot") or ((block.get("slots") or {}).get("text") if isinstance(block.get("slots"), dict) else None)
+        if slot:
+            block_slots[block_id] = slot
+        for row_index, row in enumerate(block.get("rows", [])):
+            for column, slot in enumerate(row.get("slots", [])):
+                block_slots[f"{block_id}.r{row_index}.c{column}"] = slot
     for composition in (page["documentationComposition"], page["renderRequest"].get("composition") or {}):
         overrides = composition.get("pageElementOverrides")
         if not isinstance(overrides, dict):
             continue
-        for block_id, slot in _BLOCK_SLOTS.items():
-            override = overrides.get(block_id)
+        migrated_slots = {key: key[5:] for key in overrides if key.startswith("slot:")}
+        for block_id, slot in {**block_slots, **migrated_slots}.items():
+            override = overrides.get("slot:" + slot, overrides.get(block_id))
             if not isinstance(override, dict) or "text" not in override:
                 continue
             text = str(override.pop("text") or "").strip()
@@ -461,7 +471,19 @@ def build_specification_sheet_document(
     documentation_scene: Optional[Mapping[str, Any]] = None,
     documentation_scene_revision: Optional[str] = None,
     appearance_revision: Optional[str] = None,
+    identity_document: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
+    # Project addresses before the owner converts scene text to native slots.
+    # The scene-free compilation also supplies row/slot aliases for old table edits.
+    identity_baseline = identity_document
+    if documentation_scene is not None:
+        from ai_inspector.documentation.identity import bind_document
+
+        if identity_baseline is None:
+            identity_baseline = build_specification_sheet_document(
+                assembly_data, catalog, evidence_root=evidence_root, profile_root=profile_root,
+                slot_root=slot_root, cad=cad, library=library, appearance_revision=appearance_revision)
+        _, documentation_scene = bind_document(identity_baseline, documentation_scene)
     assembly_number = str(catalog.get("assemblyNumber") or "").strip()
     profile = _read_profile(profile_root, assembly_number, required=False)
     snapshot = OperationsManualEvidenceRepository(evidence_root).snapshot() if profile else None
@@ -538,6 +560,8 @@ def build_specification_sheet_document(
         "renderPipelineVersion": SPECIFICATION_SHEET_RENDER_PIPELINE_VERSION,
         "renderRequest": page["renderRequest"],
     })
+    if identity_baseline is not None:
+        page["layoutBlocks"] = identity_baseline["pages"][0]["layoutBlocks"]
     theme, page_masters = _apply_scene(page, documentation_scene)
     legacy = _legacy_text_values(page, stored.get("values") or {})
     data = _slot_page_data(identity_name=identity_name, profile=profile, snapshot=snapshot, stored=stored,
@@ -662,6 +686,7 @@ def build_specification_sheet_document(
         }
     document: Dict[str, Any] = {
         "schemaVersion": SPECIFICATION_SHEET_DOCUMENT_SCHEMA_VERSION,
+        "identityBaselineAvailable": not bool(stored.get("values") or stored.get("rows") is not None or stored.get("journal")),
         "renderPipelineVersion": SPECIFICATION_SHEET_RENDER_PIPELINE_VERSION,
         "documentType": "product_specification_sheet",
         "status": "review_ready",
@@ -709,6 +734,10 @@ def build_specification_sheet_document(
     }
     from ai_inspector.documentation.provenance import project_slots
 
+    from ai_inspector.documentation.identity import bind_document, sync_identity_overrides
+
+    document, documentation_scene = bind_document(document, documentation_scene)
+    sync_identity_overrides(document)
     document = project_slots(document, stored)
     document["documentRevision"] = _stable_revision(document)
     return document

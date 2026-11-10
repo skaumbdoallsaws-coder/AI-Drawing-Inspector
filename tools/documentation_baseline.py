@@ -205,8 +205,9 @@ def docx_fingerprint(payload):
     return {"textSha256": fingerprint(text), "characters": len(text), "paragraphs": len(texts)}
 
 
-def scene_edit(repository, binding, state, targets, page_id, target_id, text):
+def scene_edit(repository, binding, state, targets, page_id, target_id, text, *, identity_document):
     return repository.apply_command(*binding, base_revision=state["revision"], page_targets=targets,
+                                    identity_document=identity_document,
                                     command={"operation": "update_text", "targetType": "page_element",
                                              "pageId": page_id, "targetId": target_id,
                                              "text": text, "actor": "user"})
@@ -238,22 +239,24 @@ def parts_baseline(store, fixtures):
                                      documentation_scene_revision=current["revision"])
 
     before = build(state)
+    state = scenes.read(*binding, identity_document=before)
+    before = build(state)
     definition = next(row["definitionId"] for row in rows if row["partNumber"] == "WB-100")
     target = part_text_target_id(definition, "description")
     targets = {"page-cover": {"page_element": ["header_title"]},
                PART_TEXT_PAGE_ID: {"page_element": [target]}}
-    state = scene_edit(scenes, binding, state, targets, "page-cover", "header_title", "BASELINE PARTS MANUAL")
+    state = scene_edit(scenes, binding, state, targets, "page-cover", "header_title", "BASELINE PARTS MANUAL", identity_document=before)
     first = state
-    state = scene_edit(scenes, binding, state, targets, PART_TEXT_PAGE_ID, target, "Baseline steel workbench")
+    state = scene_edit(scenes, binding, state, targets, PART_TEXT_PAGE_ID, target, "Baseline steel workbench", identity_document=before)
     edited = build(state)
     disk = file_hashes(store)
-    reopened = DocumentationSceneRepository(store).read(*binding)
+    reopened = DocumentationSceneRepository(store).read(*binding, identity_document=before)
     reopened_doc = build(reopened)
     assert edited_without_command(state) == reopened and semantic(edited) == semantic(reopened_doc)
     assert disk == file_hashes(store), "read rewrote the saved store"
-    undone = scenes.move_history(*binding, base_revision=state["revision"], direction="undo")
+    undone = scenes.move_history(*binding, base_revision=state["revision"], direction="undo", identity_document=before)
     assert undone["scene"]["pages"] == first["scene"]["pages"]
-    redone = scenes.move_history(*binding, base_revision=undone["revision"], direction="redo")
+    redone = scenes.move_history(*binding, base_revision=undone["revision"], direction="redo", identity_document=before)
     assert redone["scene"]["pages"] == state["scene"]["pages"]
     assert any(row.get("description") == "Baseline steel workbench"
                for page in edited["pages"] for row in page.get("bom", []))
@@ -267,7 +270,7 @@ def parts_baseline(store, fixtures):
             store_render_artifact(store, assembly, document, page["pageId"], fixtures["_png"](), balloons=balloons)
         attached = attach_render_artifacts(store, assembly, document)
         exports[label] = pdf_fingerprint(build_manual_pdf_bytes(store, assembly, attached))
-    reset = scenes.rebaseline(*binding)
+    reset = scenes.rebaseline(*binding, identity_document=before)
     return {"before": fingerprint(semantic(before)), "edited": fingerprint(semantic(edited)),
             "reopened": fingerprint(semantic(reopened_doc)), "reopenUnchanged": True,
             "readDidNotWrite": True, "pdf": exports, "docx": "unsupported",
@@ -340,21 +343,26 @@ def table_baseline(store):
     from ai_inspector.operations_manual.exports import _edited_block
 
     binding = ("table-fixture", "a" * 64, "b" * 64)
-    repo = DocumentationSceneRepository(store)
-    before = repo.read(*binding)
+    repo = DocumentationSceneRepository(store, "operations_and_maintenance_manual")
     block = {"blockId": "baseline-table", "blockType": "table", "columns": ["Name", "Value"],
              "rows": [{"cells": ["Capacity", "1,100 lb"], "claimIds": ["fixture-claim"],
                        "sourceIds": ["fixture-source"]}]}
+    from ai_inspector.documentation.identity import compile_identities, project_scene
+
+    generated = compile_identities({"schemaVersion": 2, "documentType": "operations_and_maintenance_manual",
+        "product": {"assemblyNumber": binding[0]}, "sourceRevision": binding[1], "manualPlanRevision": binding[2],
+        "pages": [{"pageId": "page-table", "layoutBlocks": [block]}]})
+    before = repo.read(*binding, identity_document=generated)
     target = "baseline-table.r0.c1"
     edited = scene_edit(repo, binding, before, {"page-table": {"page_element": [target]}},
-                        "page-table", target, "1,000 lb")
-    page = {"documentationComposition": edited["scene"]["pages"]["page-table"]}
+                        "page-table", target, "1,000 lb", identity_document=generated)
+    page = {"documentationComposition": project_scene(generated, edited["scene"])["pages"]["page-table"]}
     shown = _edited_block(page, block)
     assert shown["rows"][0]["cells"][1] == "1,000 lb"
     disk = file_hashes(store)
-    reopened = DocumentationSceneRepository(store).read(*binding)
+    reopened = DocumentationSceneRepository(store, "operations_and_maintenance_manual").read(*binding, identity_document=generated)
     assert reopened == edited_without_command(edited) and disk == file_hashes(store)
-    undone = repo.move_history(*binding, base_revision=edited["revision"], direction="undo")
+    undone = repo.move_history(*binding, base_revision=edited["revision"], direction="undo", identity_document=generated)
     assert undone["scene"]["pages"] == before["scene"]["pages"]
     return {"editedBlock": fingerprint(semantic(shown)), "scene": fingerprint(semantic(edited["scene"])),
             "reopenUnchanged": True, "readDidNotWrite": True, "oneUndoRestoresCell": True,

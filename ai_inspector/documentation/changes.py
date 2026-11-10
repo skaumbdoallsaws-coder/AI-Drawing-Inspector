@@ -88,12 +88,15 @@ def inspect_change(records, change_id, document):
             summaries[side].append(value)
     return {"documentId": document,
             **{key: found.get(key) for key in ("changeId", "actor", "createdAt", "inverseOf")},
-            "fields": [item["path"] for item in fields], **summaries, "undoable": True,
+            "fields": [item["path"] for item in fields], **summaries, "undoable": not found.get("migrationBlocked", False),
             "fieldCount": len(found["changes"]), "summaryTruncated": len(fields) != len(found["changes"]),
             "changeHash": digest(found)}
 
 
 def inverse(state, chosen, *, change_id, actor, created_at):
+    if chosen.get("migrationBlocked"):
+        raise DocumentEditError("undo_conflict", "This legacy change has unplaced content; its identity is not proven.",
+                                changeId=chosen["changeId"])
     conflicts = ["/".join(item["path"]) for item in chosen["changes"]
                  if image(state, item["path"]) != item["after"]]
     if conflicts:

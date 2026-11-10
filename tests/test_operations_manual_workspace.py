@@ -743,9 +743,9 @@ def test_scene_edits_are_revisioned_presentation_overrides(tmp_path: Path) -> No
     baseline = build_operations_manual_document(profile, catalog, evidence_root=EVIDENCE_ROOT)
     page = next(row for row in baseline["pages"] if row["pageNumber"] == 4)
     block = next(row for row in page["layoutBlocks"] if row["blockType"] == "paragraph")
-    repository = DocumentationSceneRepository(tmp_path / "scenes")
+    repository = DocumentationSceneRepository(tmp_path / "scenes", "operations_and_maintenance_manual")
     loaded = repository.read(
-        "MMLE-50D", catalog["sourceRevision"], baseline["manualPlanRevision"]
+        "MMLE-50D", catalog["sourceRevision"], baseline["manualPlanRevision"], identity_document=baseline
     )
     targets = server._operations_manual_editable_page_targets(baseline)
     changed = repository.apply_command(
@@ -762,6 +762,7 @@ def test_scene_edits_are_revisioned_presentation_overrides(tmp_path: Path) -> No
             "actor": "user",
         },
         page_targets=targets,
+        identity_document=baseline,
     )
     rebuilt = build_operations_manual_document(
         profile,
@@ -793,22 +794,24 @@ def test_table_cells_list_items_and_captions_are_edited_on_the_page_and_exported
     item_id = f"{listed['blockId']}.i0"
     assert cell_id in targets[table_page["pageId"]]["page_element"]
     assert item_id in targets[list_page["pageId"]]["page_element"]
-    repository = DocumentationSceneRepository(tmp_path / "scenes")
-    revision = repository.read("MMLE-50D", catalog["sourceRevision"], baseline["manualPlanRevision"])["revision"]
+    repository = DocumentationSceneRepository(tmp_path / "scenes", "operations_and_maintenance_manual")
+    revision = repository.read("MMLE-50D", catalog["sourceRevision"], baseline["manualPlanRevision"], identity_document=baseline)["revision"]
     for page, target_id, text in ((table_page, cell_id, "Edited cell 42 Nm"), (list_page, item_id, "Edited item")):
         changed = repository.apply_command(
             "MMLE-50D", catalog["sourceRevision"], baseline["manualPlanRevision"], base_revision=revision,
             command={"operation": "update_text", "targetType": "page_element", "targetId": target_id,
                      "pageId": page["pageId"], "text": text, "actor": "user"},
-            page_targets=targets)
+            page_targets=targets, identity_document=baseline)
         revision = changed["revision"]
-    with pytest.raises(Exception, match="does not belong"):
+    from ai_inspector.documentation.commands import DocumentEditError
+    with pytest.raises(DocumentEditError) as refused:
         repository.apply_command(
             "MMLE-50D", catalog["sourceRevision"], baseline["manualPlanRevision"], base_revision=revision,
             command={"operation": "update_text", "targetType": "page_element",
                      "targetId": f"{table['blockId']}.r999.c0", "pageId": table_page["pageId"], "text": "x",
                      "actor": "user"},
-            page_targets=targets)
+            page_targets=targets, identity_document=baseline)
+    assert refused.value.code == "ambiguous_legacy_target"
     rebuilt = build_operations_manual_document(
         profile, catalog, evidence_root=EVIDENCE_ROOT, documentation_scene=changed["scene"],
         documentation_scene_revision=changed["revision"])

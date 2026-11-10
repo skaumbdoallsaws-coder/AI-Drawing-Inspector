@@ -177,6 +177,7 @@ class FlowLayoutEngine:
             self._append_block(
                 {
                     "blockId": f"{section_id}-continuation-{suffix}",
+                    "sourceBlockId": f"{section_id}-continuation",
                     "blockType": "continuation_heading",
                     "text": f"{title} (continued)",
                     "lines": [f"{title} (continued)"],
@@ -623,6 +624,7 @@ class FlowLayoutEngine:
                     "sourceBlockId": str(block.get("blockId") or "table"),
                     "blockType": "table",
                     "columns": columns,
+                    "columnKeys": list(payload.get("columnKeys") or []),
                     "rows": chunk,
                     "rowHeights": [round(value, 3) for value in row_heights],
                     "continued": fragment > 1,

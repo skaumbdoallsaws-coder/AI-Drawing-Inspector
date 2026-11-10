@@ -108,9 +108,9 @@
     }
   },
   "parts": {
-    "before": "32603a71668f8df11af846ba50e189cbf1d7f07fd50e7ab2e4484de287ba9d9b",
+    "before": "d33d018658aa76fa4ac7dea3b25f4e9af59e9408aebdab8df47e8d48b6d64f1f",
     "docx": "unsupported",
-    "edited": "e9a7b785eba4a6e7a7997098440b63105dc3f1eb36a05a1a532ce3864b0b074f",
+    "edited": "b555d2dd8db32c86acbd49baf37efe398f300c3ea8fc51c1e9a582697bcedb7f",
     "pdf": {
       "before": {
         "pages": [
@@ -219,7 +219,7 @@
     },
     "readDidNotWrite": true,
     "reopenUnchanged": true,
-    "reopened": "e9a7b785eba4a6e7a7997098440b63105dc3f1eb36a05a1a532ce3864b0b074f",
+    "reopened": "b555d2dd8db32c86acbd49baf37efe398f300c3ea8fc51c1e9a582697bcedb7f",
     "undo": {
       "commandsForTwoEdits": 2,
       "oneUndoPreservesFirstEdit": true,
@@ -230,8 +230,8 @@
   },
   "schemaVersion": 1,
   "specification": {
-    "before": "af9cc2e08e56f4fc2097607bc5bfd133369bfe330bb5ce068a5e31ca21e9a2c0",
-    "edited": "90395c6eb6d68326fa2a9a6c6ba3af6270d980b4a65e15e818fb65a7da7547b5",
+    "before": "c9d4e6d50ffd49218228556b747180784b5db1471a878116016a95dd917389a2",
+    "edited": "ea534fffca4dcf51a79c6ddba59f443fc5f76e8a3c1fa6ded30fd2c1a0ae13d3",
     "exports": {
       "before": {
         "docx": {
@@ -274,7 +274,7 @@
     },
     "readDidNotWrite": true,
     "reopenUnchanged": true,
-    "reopened": "90395c6eb6d68326fa2a9a6c6ba3af6270d980b4a65e15e818fb65a7da7547b5",
+    "reopened": "ea534fffca4dcf51a79c6ddba59f443fc5f76e8a3c1fa6ded30fd2c1a0ae13d3",
     "undo": {
       "slotEditCreatesSceneUndo": false,
       "slotStoreHasUndoMethod": true
@@ -288,7 +288,7 @@
     "oneUndoRestoresCell": true,
     "readDidNotWrite": true,
     "reopenUnchanged": true,
-    "scene": "2be6efbca117dba997a2ea14a7755ce44eafe9d405c1d4798edda30e60c42835",
+    "scene": "b91c6854a86f60389ad012f8b3e6c9f71dad715dc37f521d165ec7183d899a4a",
     "scope": "isolated table adapter, not a generated operations manual or citation-status UI test"
   }
 }

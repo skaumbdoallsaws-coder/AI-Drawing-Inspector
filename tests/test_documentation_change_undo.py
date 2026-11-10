@@ -127,7 +127,7 @@ def test_old_slot_journal_is_additive_and_pure(tmp_path):
     change = store.last_receipt["changeId"]
     store.undo_change(change, expected_revision=store.read()["editRevision"], request_id="old-slot")
     assert store.read()["values"]["title"]["value"] == "before"
-    assert store.read()["schemaVersion"] == 2
+    assert store.read()["schemaVersion"] == 3
 
 
 def test_compound_slot_row_undo_checks_dependencies(tmp_path):

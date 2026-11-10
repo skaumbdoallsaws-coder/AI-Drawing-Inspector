@@ -5,7 +5,7 @@
   "inputsSha256": "4baa964400e708eb74d530343c3141da7dbd491e2ac1514072fbffe68962e6b2",
   "inputsUnchanged": true,
   "operations": {
-    "before": "c81f46c25b92190b04bb4439f01c35ca5b2b140eeb3c2824a590004d5e59f653",
+    "before": "c437ca0994a8a2dc3f6c9dd74d2ac38764655391a7d17802dc94060642e1a324",
     "citationDefect": {
       "before": {
         "activeEvidenceClaimIds": [
@@ -47,12 +47,18 @@
         "rowKeys": [
           "activeEvidenceClaimIds",
           "activeSourceIds",
+          "cellIds",
           "cells",
           "claimIds",
           "evidenceBindingVersion",
+          "identityScope",
+          "identitySourceKey",
+          "identityStatus",
           "originalEvidence",
           "provenance",
-          "sourceIds"
+          "rowId",
+          "sourceIds",
+          "sourceKey"
         ]
       },
       "blockId": "spec-table-1",
@@ -90,12 +96,18 @@
         "rowKeys": [
           "activeEvidenceClaimIds",
           "activeSourceIds",
+          "cellIds",
           "cells",
           "claimIds",
           "evidenceBindingVersion",
+          "identityScope",
+          "identitySourceKey",
+          "identityStatus",
           "originalEvidence",
           "provenance",
-          "sourceIds"
+          "rowId",
+          "sourceIds",
+          "sourceKey"
         ]
       },
       "compiledBlockKeepsCapacityClaim": true,
@@ -105,7 +117,7 @@
         {
           "alias": "spec-table-1.r0",
           "pageId": "page-specifications-1",
-          "targetId": "77b5f4f2-a36d-5ea7-9122-516d6e6696c0"
+          "targetId": "gen-row-3d48f26f0a0a5f3d78c2105e17045fca"
         }
       ],
       "editedRowEvidenceStatus": "edited_unverified",
@@ -140,12 +152,18 @@
         "rowKeys": [
           "activeEvidenceClaimIds",
           "activeSourceIds",
+          "cellIds",
           "cells",
           "claimIds",
           "evidenceBindingVersion",
+          "identityScope",
+          "identitySourceKey",
+          "identityStatus",
           "originalEvidence",
           "provenance",
-          "sourceIds"
+          "rowId",
+          "sourceIds",
+          "sourceKey"
         ]
       },
       "exports": {
@@ -220,7 +238,7 @@
       "rowBindingsPresent": true,
       "targetId": "spec-table-1.r0.c1"
     },
-    "edited": "e4a953348eda8ebfa74c8bf0d14c9976b4f798c6743bdac88569cc620055cb3b",
+    "edited": "452309abe0fb67ad5dcaa1c864bafb838e13501dc335cc201a7b136b19cef035",
     "exports": {
       "before": {
         "docx": {
@@ -775,7 +793,7 @@
     },
     "readDidNotWrite": true,
     "reopenUnchanged": true,
-    "reopened": "e4a953348eda8ebfa74c8bf0d14c9976b4f798c6743bdac88569cc620055cb3b",
+    "reopened": "452309abe0fb67ad5dcaa1c864bafb838e13501dc335cc201a7b136b19cef035",
     "undo": {
       "canUndoAfterEdit": true,
       "httpStatus": 200,
@@ -784,9 +802,9 @@
     }
   },
   "reviewedSpecification": {
-    "before": "f60c0cd5c51ad3e942d3fb2c571c4716070bf20c417011641a9171e8c225c0e2",
+    "before": "08c4dab19ffc881ad1f0aa20123c981fd700bed448fea9658cc26c8303a3f043",
     "beforeMatchesTrackedGolden": true,
-    "edited": "ad38d08f014039f75f3a439e88404897e921b283da8b050a8b3703df3e1a1bf9",
+    "edited": "da97cc4f2468286c50d6fdc389e3740622f7b551b6fca6ff0a5f0fcc88b5df9d",
     "exports": {
       "before": {
         "docx": {
@@ -829,7 +847,7 @@
     },
     "readDidNotWrite": true,
     "reopenUnchanged": true,
-    "reopened": "ad38d08f014039f75f3a439e88404897e921b283da8b050a8b3703df3e1a1bf9",
+    "reopened": "da97cc4f2468286c50d6fdc389e3740622f7b551b6fca6ff0a5f0fcc88b5df9d",
     "trackedGoldenTextSha256": "d1544f49712142be6ee240d3917cf301c30f3d1265e9693afc3df30168c93423",
     "undo": {
       "canUndoAfterEdit": true,
@@ -843,8 +861,8 @@
   "schemaVersion": 1,
   "status": "captured",
   "workInstructions": {
-    "before": "f430e4f1a82f8ddb690ce08c099caaa6950b50ce9c95123750ee0a16b4551a38",
-    "edited": "788c34140062d61b65c4473e9bf76780847de0976a6ba032cfa6883993c512d2",
+    "before": "e1e495461cc0381498ef0903e769d32adfde74468bfd0be76a822073c38e4692",
+    "edited": "da3df7b578c45756bc60caf492788c74e2c9cee7edae5fa3c8a98b8fe14722df",
     "exports": {
       "before": {
         "docx": {
@@ -1193,7 +1211,7 @@
     "readDidNotWrite": true,
     "recapturedPageIds": [],
     "reopenUnchanged": true,
-    "reopened": "788c34140062d61b65c4473e9bf76780847de0976a6ba032cfa6883993c512d2",
+    "reopened": "da3df7b578c45756bc60caf492788c74e2c9cee7edae5fa3c8a98b8fe14722df",
     "textEditExportHttpStatus": 200,
     "textEditInvalidatesPageCapture": false,
     "undo": {

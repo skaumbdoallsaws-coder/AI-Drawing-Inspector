@@ -1158,6 +1158,8 @@ class DocumentationGateway:
         return {"readOnly": True, "assemblyNumber": assembly_number, "scope": bom["scope"],
                 "uniqueItems": len(rows), "partInstances": sum(row["quantity"] for row in rows),
                 "offset": offset, "rows": rows[offset:offset + size],
+                "aliasMap": {target: target for row in rows[offset:offset + size]
+                             for target in row.get("targetIds", {}).values()},
                 "more": offset + size < len(rows),
                 "partNumberNote": "'Not specified' means the CAD has no engineering part number for that part."}
 
@@ -1230,17 +1232,21 @@ class DocumentationGateway:
                 captured = [read_targets(state, targets, [{"targetId": key}])["targets"][0] for key in targets]
                 chosen = [{"pageId": pages[0]["pageId"], "slots": captured}] if pages else []
             result = {**edit_binding(state), "sceneRevision": state.get("sceneRevision"),
-                      "documentType": document_type, "pageCount": len(pages), "pages": chosen}
+                      "documentType": document_type, "pageCount": len(pages), "pages": chosen,
+                      "aliasRevision": state.get("aliasRevision"),
+                      "aliasMap": {page["pageId"]: page.get("aliasMap", {}) for page in chosen}}
         from ai_inspector.documentation.provenance import confirmation_targets
         result["sourceSupport"] = deepcopy(snapshot["document"].get("sourceSupportSummary") or {})
-        visible = {(item["pageId"], item.get("legacyTargetId")) for item in captured}
+        visible = {(item["pageId"], key) for item in captured
+                   for key in (item.get("legacyTargetId"), item["targetId"])}
         result["confirmationTargets"] = [target for target in confirmation_targets(state, snapshot["document"]).values()
             if any((target["pageId"], alias) in visible for alias in target["values"])]
         if len(json.dumps({"ok": True, "data": result}, ensure_ascii=False, allow_nan=False).encode("utf-8")) > 65536:
             raise DocumentEditError("read_result_too_large", "Read fewer complete targets.",
                 targets=[{"targetId": item["targetId"], "fullLength": item["fullLength"]} for item in captured])
         self._pending_read = (document_type, {**edit_binding(state), "sceneRevision": state.get("sceneRevision"),
-                                             "structureHash": snapshot["hashes"].get("@sheet"), "targets": captured})
+                                             "structureHash": snapshot["hashes"].get("@sheet"), "targets": captured,
+                                             "aliasRevision": state.get("aliasRevision")})
         return result
 
     def _edit_document_text(self, arguments):

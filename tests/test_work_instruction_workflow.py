@@ -564,7 +564,7 @@ def test_a_text_edit_keeps_the_figures_captured_and_a_figure_edit_does_not(tmp_p
     base = "/api/work-instructions/MMLE-50D"
     state = client.get(base + "/documentation-scene").json()
     document = state["document"]
-    assert document["schemaVersion"] == 2
+    assert document["schemaVersion"] == 3
     figures = _figure_pages(document)
     capture = _technical_capture()
     for page_id, page in figures.items():
@@ -662,10 +662,15 @@ def _schema_one_document(document):
         if isinstance(value, dict):
             return {key: historical(item) for key, item in value.items() if key not in {
                 "fieldMeta", "provenanceTargets", "provenance", "originalEvidence",
-                "activeEvidenceClaimIds", "activeSourceIds", "sourceSupport", "sourceSupportSummary"}}
+                "activeEvidenceClaimIds", "activeSourceIds", "sourceSupport", "sourceSupportSummary",
+                "identityVersion", "aliasMap", "aliasRevision", "identities", "identityOrphans",
+                "identityOverrides", "stableId", "rowId", "cellIds", "columnIds", "itemId",
+                "identityStatus", "identityScope", "identitySourceKey", "identityCellFields", "sourceKey", "columnKeys", "bomColumnIds", "legacyDocumentationSceneRevision"}}
         return value
 
     old = historical(document)
+    if document.get("legacyDocumentationSceneRevision"):
+        old["documentationSceneRevision"] = document["legacyDocumentationSceneRevision"]
     old["schemaVersion"] = 1
     old.pop("documentRevision")
     for page in old["pages"]:
@@ -698,7 +703,7 @@ def test_legacy_work_instruction_capture_opens_unchanged(tmp_path: Path, monkeyp
     fixture.write_text(json.dumps(old), encoding="ascii", newline="\n")
     before = _stored_bytes(root)
     loaded = attach_draft_render_artifacts(root, "MMLE-50D", json.loads(fixture.read_text(encoding="ascii")))
-    assert loaded["schemaVersion"] == 2
+    assert loaded["schemaVersion"] == 3
     assert loaded["documentRevision"] == old["documentRevision"]
     assert review_export_readiness(loaded)["status"] == "READY"
     reopened_state = client.get(base + "/documentation-scene").json()

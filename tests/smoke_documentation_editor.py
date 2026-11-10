@@ -769,7 +769,7 @@ def main():
         reopened = get_scene()
         write_json(output / "reopened.json", reopened)
         page.screenshot(path=str(output / "reopened.png"), full_page=True)
-        record("scene_upgraded_in_place", reopened["scene"]["schemaVersion"] == 3
+        record("scene_upgraded_in_place", reopened["scene"]["schemaVersion"] == 4
                and not (server.manual / "edit.json").exists())
         record("original_v2_bytes_retained", sha(server.manual / "documentation-scene.v2.json") == copied_scene_hash)
         record("manual_plan_unchanged", sha(server.manual / "manual-plan.json") == legacy_before["manual-plan.json"])

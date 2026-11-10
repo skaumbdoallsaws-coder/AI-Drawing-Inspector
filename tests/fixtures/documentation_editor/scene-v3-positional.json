@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 3,
+  "assemblyNumber": "IDENTITY",
+  "sourceRevision": "source-a",
+  "manualPlanRevision": "plan-a",
+  "createdAt": null,
+  "updatedAt": null,
+  "editRevision": 1,
+  "editEpoch": 0,
+  "fieldVersions": {
+    "page-source/page_element/table.r0.c1": 1
+  },
+  "receipts": {},
+  "receiptOrder": [],
+  "commands": [
+    {
+      "commandId": "before-identities",
+      "actor": "user",
+      "operation": "update_text",
+      "pageId": "page-source",
+      "targetType": "page_element",
+      "targetId": "table.r0.c1",
+      "text": "Manual value",
+      "change": {
+        "changeId": "before-identities",
+        "actor": "user",
+        "createdAt": null,
+        "inverseOf": null,
+        "versionKeys": [
+          "page-source/page_element/table.r0.c1"
+        ],
+        "changes": [
+          {
+            "path": [
+              "pages",
+              "page-source",
+              "pageElementOverrides",
+              "table.r0.c1"
+            ],
+            "before": {
+              "present": false
+            },
+            "after": {
+              "present": true,
+              "value": {
+                "text": "Manual value"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "historyCursor": 1,
+  "pages": {
+    "page-source": {
+      "pageElementOverrides": {
+        "table.r0.c1": {
+          "text": "Manual value"
+        }
+      }
+    }
+  }
+}

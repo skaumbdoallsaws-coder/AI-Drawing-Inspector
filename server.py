@@ -16086,6 +16086,21 @@ def _operations_manual_base_document(
     )
 
 
+class _DocumentationDocument(dict):
+    """Request-local baseline handoff; attributes are not document JSON fields."""
+
+    def __init__(self, document, identity_document):
+        super().__init__(document)
+        self.identity_document = identity_document
+
+
+def _documentation_identity_document(document):
+    baseline = getattr(document, "identity_document", None)
+    if baseline is None:
+        raise DocumentEditError("document_read_required", "Compile the scene-free identity document before writing.")
+    return baseline
+
+
 def _operations_manual_build_document_with_scene(
     *,
     assembly_data: Mapping[str, Any],
@@ -16099,6 +16114,7 @@ def _operations_manual_build_document_with_scene(
         str(catalog["assemblyNumber"]),
         str(catalog["sourceRevision"]),
         plan_revision,
+        identity_document=baseline,
     )
     if rebaseline_stale and (
         not loaded_scene["sourceCurrent"] or not loaded_scene["manualPlanCurrent"]
@@ -16108,6 +16124,7 @@ def _operations_manual_build_document_with_scene(
             str(catalog["sourceRevision"]),
             plan_revision,
             preserve_theme=True,
+            identity_document=baseline,
         )
     if not loaded_scene["sourceCurrent"] or not loaded_scene["manualPlanCurrent"]:
         scene = loaded_scene["scene"]
@@ -16129,7 +16146,7 @@ def _operations_manual_build_document_with_scene(
         str(catalog["assemblyNumber"]),
         document,
     )
-    return document, loaded_scene
+    return _DocumentationDocument(document, baseline), loaded_scene
 
 
 def _operations_manual_editable_page_targets(
@@ -16191,7 +16208,9 @@ def _operations_manual_editable_page_targets(
         if render_request:
             page_targets["page_element"].append("illustration")
         targets[page_id] = page_targets
-    return targets
+    from ai_inspector.documentation.identity import editable_targets
+
+    return editable_targets(document, targets)
 
 
 def _operations_manual_error_response(
@@ -16279,6 +16298,7 @@ def _specification_sheet_compile(
     *,
     documentation_scene: Optional[Mapping[str, Any]] = None,
     documentation_scene_revision: Optional[str] = None,
+    identity_document: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     document = build_specification_sheet_document(
         assembly_data,
@@ -16288,6 +16308,7 @@ def _specification_sheet_compile(
         slot_root=SPECIFICATION_SHEET_ROOT,
         cad=_specification_sheet_cad(assembly_data, catalog),
         documentation_scene=documentation_scene,
+        identity_document=identity_document,
         documentation_scene_revision=documentation_scene_revision,
         appearance_revision=_specification_sheet_appearance_revision(str(catalog.get("assemblyNumber") or "")),
     )
@@ -16342,6 +16363,7 @@ def _specification_sheet_build_document_with_scene(
         str(catalog["assemblyNumber"]),
         str(catalog["sourceRevision"]),
         plan_revision,
+        identity_document=baseline,
     )
     if rebaseline_stale and (
         not loaded_scene["sourceCurrent"] or not loaded_scene["manualPlanCurrent"]
@@ -16351,6 +16373,7 @@ def _specification_sheet_build_document_with_scene(
             str(catalog["sourceRevision"]),
             plan_revision,
             preserve_theme=True,
+            identity_document=baseline,
         )
     if not loaded_scene["sourceCurrent"] or not loaded_scene["manualPlanCurrent"]:
         scene = loaded_scene["scene"]
@@ -16364,15 +16387,17 @@ def _specification_sheet_build_document_with_scene(
         assembly_data,
         catalog,
         documentation_scene=loaded_scene["scene"],
+        identity_document=baseline,
         documentation_scene_revision=str(loaded_scene["revision"]),
     )
-    snapshot = _documentation_snapshot_payload({**loaded_scene, "document": document}, "product_specification_sheet")
+    snapshot = _documentation_snapshot_payload({**loaded_scene, "document": document}, "product_specification_sheet",
+                                                identity_document=baseline)
     from ai_inspector.documentation.changes import history_choices
     slot_journal = SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, str(catalog["assemblyNumber"])).read()["journal"]
     slot_undo, slot_redo = history_choices(slot_journal)
     loaded_scene["slotHistory"] = {"canUndo": bool(slot_undo), "canRedo": bool(slot_redo)}
     loaded_scene["slotBinding"] = {**documentation_binding_data(snapshot["state"]), "hashes": snapshot["hashes"]}
-    return document, loaded_scene
+    return _DocumentationDocument(document, baseline), loaded_scene
 
 
 def _specification_sheet_error_response(
@@ -16539,6 +16564,7 @@ def _work_instruction_build_document_with_scene(
         str(catalog["assemblyNumber"]),
         str(catalog["sourceRevision"]),
         plan_revision,
+        identity_document=baseline,
     )
     if rebaseline_stale and (
         not loaded_scene["sourceCurrent"] or not loaded_scene["manualPlanCurrent"]
@@ -16548,6 +16574,7 @@ def _work_instruction_build_document_with_scene(
             str(catalog["sourceRevision"]),
             plan_revision,
             preserve_theme=True,
+            identity_document=baseline,
         )
     if not loaded_scene["sourceCurrent"] or not loaded_scene["manualPlanCurrent"]:
         scene = loaded_scene["scene"]
@@ -16568,7 +16595,7 @@ def _work_instruction_build_document_with_scene(
         str(catalog["assemblyNumber"]),
         document,
     )
-    return document, loaded_scene
+    return _DocumentationDocument(document, baseline), loaded_scene
 
 
 def _work_instruction_error_response(
@@ -16813,7 +16840,9 @@ def _parts_manual_editable_page_targets(
             if definition_id
             for field in PART_TEXT_FIELDS
         )
-    return targets
+    from ai_inspector.documentation.identity import editable_targets
+
+    return editable_targets(document, targets)
 
 
 def _parts_manual_document_page(
@@ -17148,10 +17177,14 @@ def _parts_manual_build_document_with_scene(
     catalog: Mapping[str, Any],
     loaded_plan: Mapping[str, Any],
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    # Compile source identities before the owner migrates a legacy scene.
+    baseline = build_manual_document(loaded_plan["plan"], catalog["occurrences"], assembly_data,
+                                     plan_revision=str(loaded_plan["revision"]))
     loaded_scene = _documentation_scene_repository().read(
         str(catalog["assemblyNumber"]),
         str(catalog["sourceRevision"]),
         str(loaded_plan["revision"]),
+        identity_document=baseline,
     )
     if not loaded_scene["sourceCurrent"] or not loaded_scene["manualPlanCurrent"]:
         scene = loaded_scene["scene"]
@@ -17169,7 +17202,7 @@ def _parts_manual_build_document_with_scene(
         documentation_scene=loaded_scene["scene"],
         documentation_scene_revision=str(loaded_scene["revision"]),
     )
-    return document, loaded_scene
+    return _DocumentationDocument(document, baseline), loaded_scene
 
 
 @app.get("/api/documentation/types")
@@ -17308,6 +17341,7 @@ def operations_manual_documentation_scene_command(
             catalog["sourceRevision"],
             current_document["manualPlanRevision"],
             base_revision=body.baseRevision,
+            identity_document=_documentation_identity_document(current_document),
             command=documentation_provenance_command(current_document, command),
             page_targets=_operations_manual_editable_page_targets(current_document),
         )
@@ -17369,6 +17403,7 @@ def _operations_manual_documentation_history(
             current_document["manualPlanRevision"],
             base_revision=body.baseRevision,
             direction=direction,
+            identity_document=_documentation_identity_document(current_document),
         )
         next_document = build_operations_manual_document(
             assembly_data,
@@ -17786,6 +17821,7 @@ def work_instructions_documentation_scene_command(
             catalog["sourceRevision"],
             current_document["manualPlanRevision"],
             base_revision=body.baseRevision,
+            identity_document=_documentation_identity_document(current_document),
             command=documentation_provenance_command(current_document, command),
             page_targets=_operations_manual_editable_page_targets(current_document),
         )
@@ -17851,6 +17887,7 @@ def _work_instructions_documentation_history(
             current_document["manualPlanRevision"],
             base_revision=body.baseRevision,
             direction=direction,
+            identity_document=_documentation_identity_document(current_document),
         )
         next_document = _work_instruction_document_for_scene(
             assembly_data,
@@ -18279,6 +18316,7 @@ def specification_sheet_documentation_scene_command(
             catalog["sourceRevision"],
             current_document["manualPlanRevision"],
             base_revision=body.baseRevision,
+            identity_document=_documentation_identity_document(current_document),
             command=command,
             page_targets=_operations_manual_editable_page_targets(current_document),
         )
@@ -18286,6 +18324,7 @@ def specification_sheet_documentation_scene_command(
             assembly_data,
             catalog,
             documentation_scene=result["scene"],
+            identity_document=_documentation_identity_document(current_document),
             documentation_scene_revision=result["revision"],
         )
     except (
@@ -18333,11 +18372,13 @@ def _specification_sheet_documentation_history(
             current_document["manualPlanRevision"],
             base_revision=body.baseRevision,
             direction=direction,
+            identity_document=_documentation_identity_document(current_document),
         )
         next_document = _specification_sheet_compile(
             assembly_data,
             catalog,
             documentation_scene=result["scene"],
+            identity_document=_documentation_identity_document(current_document),
             documentation_scene_revision=result["revision"],
         )
     except (
@@ -18659,7 +18700,8 @@ def documentation_confirm_values(document_id: str, body: Dict[str, Any], request
                 base_revision=state["sceneRevision"], expected_revision=body["expectedRevision"],
                 request_id=body["requestId"], commands=commands, page_targets=page_targets,
                 expected_hashes=expected, current_hashes={key: row["contentHash"] for key, row in available.items()},
-                hashes_revision=state["sceneRevision"], actor="user", payload=payload, allow_confirmation=True)
+                hashes_revision=state["sceneRevision"], actor="user", payload=payload, allow_confirmation=True,
+                identity_document=snapshot["identity_document"])
             # Confirmation changes document identity but not the figure request.
             after = host.document_snapshot(number, kind)["document"]
             if kind in {"operations_and_maintenance_manual", "work_instructions"}:
@@ -18670,15 +18712,17 @@ def documentation_confirm_values(document_id: str, body: Dict[str, Any], request
         return _documentation_value_error(error)
 
 
-def _documentation_snapshot_payload(payload, document_type):
+def _documentation_snapshot_payload(payload, document_type, *, identity_document=None):
     document, scene = payload["document"], payload["scene"]
+    baseline = identity_document if identity_document is not None else _documentation_identity_document(document)
     number = str(scene["assemblyNumber"])
     stored = (SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, number).read()
               if document_type == "product_specification_sheet" else scene)
     state = {"documentId": documentation_document_id(document_type, number),
              "revision": stored["editRevision"], "sourceRevision": str(document["sourceRevision"]),
              "manualPlanRevision": str(document["manualPlanRevision"]), "sceneRevision": payload["revision"],
-             "fieldVersions": stored["fieldVersions"], "editEpoch": stored["editEpoch"], "scene": scene}
+             "fieldVersions": stored["fieldVersions"], "editEpoch": stored["editEpoch"], "scene": scene,
+             "aliasRevision": baseline.get("aliasRevision")}
     targets = documentation_text_targets(state, document)
     hashes = {key: documentation_content_hash(state, key, value)
               for key, value in documentation_hash_values(targets).items()}
@@ -18687,7 +18731,8 @@ def _documentation_snapshot_payload(payload, document_type):
         hashes["@sheet"] = documentation_content_hash(state, "@sheet", {
             "slots": document["slots"], "sheet": document["sheet"], "sourceRevision": state["sourceRevision"],
             "manualPlanRevision": state["manualPlanRevision"]})
-    return {"state": state, "targets": targets, "hashes": hashes, "document": document}
+    return {"state": state, "targets": targets, "hashes": hashes, "document": document,
+            "identity_document": baseline}
 
 
 def _documentation_check_binding(observed, state):
@@ -18719,6 +18764,9 @@ def _specification_sheet_slot_change(assembly_number: str, change, *, observed=N
         if observed is not None:
             snapshot = _documentation_snapshot_payload({**loaded_scene, "document": base}, "product_specification_sheet")
             _documentation_check_binding(observed, snapshot["state"])
+            from ai_inspector.documentation.identity import check_alias_binding
+
+            check_alias_binding(observed, snapshot["state"])
             options = {"expected_revision": observed["expectedRevision"], "request_id": observed["requestId"],
                        "expected_hashes": observed["hashes"], "current_hashes": snapshot["hashes"],
                        "payload": observed, "actor": actor}
@@ -19626,6 +19674,11 @@ def parts_manual_sections_move(assembly_number: str, body: PartsManualSectionMov
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
         if body.sourceRevision != catalog["sourceRevision"]:
             raise PartsManualSourceConflictError(body.sourceRevision, catalog["sourceRevision"])
+        previous_plan = _parts_manual_repository().read(
+            catalog["assemblyNumber"], catalog["sourceRevision"],
+            known_occurrence_ids=[row["occurrenceId"] for row in catalog["occurrences"]])
+        previous_document = build_manual_document(previous_plan["plan"], catalog["occurrences"],
+            assembly_data, plan_revision=previous_plan["revision"])
         result = _parts_manual_repository().move_occurrences(
             catalog["assemblyNumber"],
             catalog["sourceRevision"],
@@ -19641,6 +19694,7 @@ def parts_manual_sections_move(assembly_number: str, body: PartsManualSectionMov
             catalog["sourceRevision"],
             result["previousRevision"],
             result["revision"],
+            identity_document=previous_document,
         )
     except DocumentationSceneError:
         # The parts have moved; only the page edits could not be carried.
@@ -19787,11 +19841,13 @@ def parts_manual_documentation_scene_get(assembly_number: str):
             catalog=catalog,
             loaded_plan=loaded_plan,
         )
+        identity_document = _documentation_identity_document(document)
         document = attach_render_artifacts(
             PARTS_MANUAL_ROOT,
             catalog["assemblyNumber"],
             document,
         )
+        document = _DocumentationDocument(document, identity_document)
     except (
         PartsManualRepositoryError,
         PartsManualValidationError,
@@ -19856,6 +19912,7 @@ def parts_manual_documentation_scene_command(
             catalog["sourceRevision"],
             loaded_plan["revision"],
             base_revision=body.baseRevision,
+            identity_document=_documentation_identity_document(document),
             command=documentation_provenance_command(document, command),
             page_targets=_parts_manual_editable_page_targets(document),
         )
@@ -19921,12 +19978,15 @@ def _parts_manual_documentation_history(
             )
         if body.manualPlanRevision != loaded_plan["revision"]:
             raise PartsManualConflictError(loaded_plan["revision"])
+        current_document, _loaded_scene = _parts_manual_build_document_with_scene(
+            assembly_data=assembly_data, catalog=catalog, loaded_plan=loaded_plan)
         result = _documentation_scene_repository().move_history(
             catalog["assemblyNumber"],
             catalog["sourceRevision"],
             loaded_plan["revision"],
             base_revision=body.baseRevision,
             direction=direction,
+            identity_document=_documentation_identity_document(current_document),
         )
         next_document = build_manual_document(
             loaded_plan["plan"],
@@ -41008,7 +41068,7 @@ class _DocumentationAgentHost:
             if document_type == "product_specification_sheet":
                 return SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, assembly_number).inspect_change(change_id)
             return self._edit_repository(document_type).inspect_change(assembly_number,
-                state["sourceRevision"], state["manualPlanRevision"], change_id)
+                state["sourceRevision"], state["manualPlanRevision"], change_id, identity_document=snapshot["identity_document"])
 
     def undo_document_change(self, assembly_number, document_type, arguments):
         with DocumentationSceneRepository.transaction_lock, SpecificationSlotStore.transaction_lock:
@@ -41022,7 +41082,7 @@ class _DocumentationAgentHost:
                 result = store.undo_change(**options)
             else:
                 result = self._edit_repository(document_type).undo_change(assembly_number,
-                    state["sourceRevision"], state["manualPlanRevision"], **options)
+                    state["sourceRevision"], state["manualPlanRevision"], identity_document=snapshot["identity_document"], **options)
             after = self.document_snapshot(assembly_number, document_type)["document"]
             if document_type in {"operations_and_maintenance_manual", "work_instructions"}:
                 carry_draft_render_artifacts(OPERATIONS_MANUAL_ROOT if document_type == "operations_and_maintenance_manual"
@@ -41344,7 +41404,13 @@ class _DocumentationAgentHost:
         else:
             parts = [row["occurrenceId"] for row in rows if row.get("kind") == "part" and not row.get("suppressed")]
             scope, bom = "whole assembly", build_scoped_bom(rows, parts)
+        from ai_inspector.parts_manual.document import part_text_target_id
+        from ai_inspector.documentation.identity import generated_id
+
         return {"scope": scope, "rows": [{"item": row.get("item"), "partNumber": row.get("displayPartNumber"),
+                                          "rowId": generated_id("part", row["definitionId"]),
+                                          "targetIds": {field: part_text_target_id(row["definitionId"], field)
+                                                        for field in ("partNumber", "description")},
                                           "description": self._short(row.get("description"), 120),
                                           "quantity": row.get("quantity")} for row in bom]}
 
@@ -41594,17 +41660,21 @@ class _DocumentationAgentHost:
         with repository.transaction_lock:
             # Receipt lookup precedes current target resolution: a successful
             # retry remains valid even after an intervening target deletion.
-            loaded = repository.read(assembly_number, observed["sourceRevision"], observed["manualPlanRevision"])
+            snapshot = self.document_snapshot(assembly_number, document_type)
+            _documentation_check_binding(observed, snapshot["state"])
+            loaded = repository.read(assembly_number, observed["sourceRevision"], observed["manualPlanRevision"],
+                                     identity_document=snapshot["identity_document"])
             scene = loaded["scene"]
             _documentation_check_binding(observed, {"documentId": documentation_document_id(document_type, assembly_number),
                 "sourceRevision": scene["sourceRevision"], "manualPlanRevision": scene["manualPlanRevision"]})
             previous = documentation_prior_receipt(scene, observed["requestId"],
                                                    documentation_request_hash(observed["requestId"], observed))
-            # Confirm the live source/plan binding even on retry.
-            snapshot = self.document_snapshot(assembly_number, document_type)
-            _documentation_check_binding(observed, snapshot["state"])
+            # The live source/plan binding above also applies to receipt retries.
             if previous is not None:
                 return {"receipt": previous, "changed": previous["changedIds"]}
+            from ai_inspector.documentation.identity import check_alias_binding
+
+            check_alias_binding(observed, snapshot["state"])
             commands, expected = [], {}
             for index, operation in enumerate(operations):
                 target = snapshot["targets"].get(operation["targetId"])
@@ -41625,7 +41695,7 @@ class _DocumentationAgentHost:
                 base_revision=observed.get("sceneRevision"), expected_revision=observed["expectedRevision"],
                 request_id=observed["requestId"], commands=commands, page_targets=targets,
                 expected_hashes=expected, current_hashes=snapshot["hashes"],
-                hashes_revision=snapshot["state"]["sceneRevision"], actor="sage", payload=observed)
+                hashes_revision=snapshot["state"]["sceneRevision"], actor="sage", payload=observed, identity_document=snapshot["identity_document"])
             if document_type == "work_instructions" and result["changed"]:
                 # Adopt legacy figure captures only after a committed mutation.
                 next_document = self._text_scene(assembly_number, document_type)["document"]

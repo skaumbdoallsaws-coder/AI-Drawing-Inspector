@@ -123,7 +123,7 @@ def test_legacy_scene_read_and_first_write_preserve_original(tmp_path):
     before = disk(store)
     loaded = store.repo.read(NUMBER, "sanitized-source-1", "sanitized-plan-1")
     old = json.loads(original)
-    assert loaded["scene"]["schemaVersion"] == 3
+    assert loaded["scene"]["schemaVersion"] == 4
     assert loaded["scene"]["pages"] == old["pages"]
     assert loaded["scene"]["commands"] == old["commands"]
     # Claude measured this with the pre-P1a repository.read() on the same
@@ -136,7 +136,7 @@ def test_legacy_scene_read_and_first_write_preserve_original(tmp_path):
         base_revision=loaded["revision"], page_targets=store.page_targets,
         command={"operation": "update_text", "targetType": "page_element", "pageId": PAGE,
                  "targetId": "title", "text": "new"})
-    assert result["scene"]["schemaVersion"] == 3
+    assert result["scene"]["schemaVersion"] == 4
     assert store.path.with_name("documentation-scene.v2.json").read_bytes() == original
     reopened = DocumentationSceneRepository(tmp_path).read(NUMBER, "sanitized-source-1", "sanitized-plan-1")
     assert reopened["scene"] == result["scene"]
@@ -150,7 +150,7 @@ def test_legacy_slots_read_and_first_write_preserve_original(tmp_path):
     store.path.write_bytes(original)
     before = disk(store)
     assert store.repo.read()["values"]["title"]["value"] == "old"
-    assert store.repo.read()["schemaVersion"] == 2
+    assert store.repo.read()["schemaVersion"] == 3
     assert disk(store) == before
     store.commit(request_for(store, {"title": "new"}))
     assert store.path.with_name("slots.v1.json").read_bytes() == original

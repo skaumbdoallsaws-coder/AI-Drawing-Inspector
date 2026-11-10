@@ -27,7 +27,7 @@ from ai_inspector.documentation.changes import (
     find_change, inspect_change, history_choices, validate_record, MAX_CHANGES,
 )
 
-SLOT_SCHEMA_VERSION = 2
+SLOT_SCHEMA_VERSION = 3
 # Storage metadata does not change the generated sheet's layout/source plan.
 SLOT_LAYOUT_VERSION = 1
 _SLOT_LOCK = threading.RLock()
@@ -71,6 +71,32 @@ CAD_ROWS = {
     "overall_dimensions": {"label": "Overall dimensions (W x D x H)", "hint": "from the CAD model's extents"},
     "weight": {"label": "Weight", "hint": "from the CAD when every part has a material"},
 }
+
+
+
+def _slot_identities(state):
+    """Slot keys already are persistent IDs. Retain deleted row keys for recovery."""
+    active = {"slot:" + key for key in PROSE_SLOTS}
+    active.update("slot:" + key for key in state.get("values", {}))
+    for row in state.get("rows") or []:
+        active.update("slot:spec." + row["key"] + "." + field for field in ("label", "value"))
+    identities = state.setdefault("identities", {})
+    for item in state.get("journal", []):
+        for change in item.get("changes", []):
+            address = change["path"]
+            if address[0] in {"values", "fieldMeta"} and len(address) == 2:
+                key = address[1] if address[0] == "fieldMeta" else "slot:" + address[1]
+                identities.setdefault(key, {"id": key})
+            if address == ["rows"]:
+                for side in ("before", "after"):
+                    for row in change[side].get("value") or []:
+                        for field in ("label", "value"):
+                            key = "slot:spec." + row["key"] + "." + field
+                            identities.setdefault(key, {"id": key})
+    for key in active:
+        identities.setdefault(key, {"id": key})
+    for key, value in identities.items():
+        value["state"] = "active" if key in active else "tombstone"
 
 
 class SpecificationSlotError(ValueError):
@@ -227,7 +253,7 @@ class SlotStore:
             return copy.deepcopy(self._candidate)
         payload = _read_json(self.path) or {}
         version = payload.get("schemaVersion", 1)
-        if version not in {1, SLOT_SCHEMA_VERSION}:
+        if version not in {1, 2, SLOT_SCHEMA_VERSION}:
             raise DocumentEditError("unsupported_document_schema", "This slot store needs a newer editor.")
         values = payload.get("values") if isinstance(payload.get("values"), dict) else {}
         rows = payload.get("rows") if isinstance(payload.get("rows"), list) else None
@@ -240,7 +266,7 @@ class SlotStore:
             "units": payload.get("units") if payload.get("units") in UNITS else None,
             "updatedAt": payload.get("updatedAt"),
         }
-        for key in ("editRevision", "editEpoch", "fieldVersions", "fieldMeta", "receipts", "receiptOrder", "conflicts", "journal"):
+        for key in ("editRevision", "editEpoch", "fieldVersions", "fieldMeta", "receipts", "receiptOrder", "conflicts", "journal", "identities"):
             if key in payload:
                 result[key] = copy.deepcopy(payload[key])
         transaction_defaults(result)
@@ -249,6 +275,7 @@ class SlotStore:
             raise DocumentEditError("unsupported_document_schema", "Invalid slot change history.")
         for item in result["journal"]:
             validate_record(item, {"values", "fieldMeta", "rows", "type", "units"})
+        _slot_identities(result)
         validate_transaction_metadata(result)
         return result
 
@@ -320,13 +347,15 @@ class SlotStore:
                     candidate["updatedAt"] = now()
                 if self.last_receipt is not None:
                     retain_receipt(candidate, self.last_receipt)
+                _slot_identities(candidate)
                 validate_transaction_metadata(candidate)
                 if len(json.dumps(candidate, ensure_ascii=False).encode("utf-8")) > 16 * 1024 * 1024:
                     raise DocumentEditError("document_history_full", "The slot change history exceeds its storage limit.")
                 if self.path.is_file():
                     original = self.path.read_bytes()
-                    if json.loads(original).get("schemaVersion", 1) == 1:
-                        backup = self.path.with_name("slots.v1.json")
+                    old_version = json.loads(original).get("schemaVersion", 1)
+                    if old_version in {1, 2}:
+                        backup = self.path.with_name(f"slots.v{old_version}.json")
                         if backup.exists() and backup.read_bytes() != original:
                             raise DocumentEditError("legacy_store_changed", "The slot rollback input changed.")
                         if not backup.exists():

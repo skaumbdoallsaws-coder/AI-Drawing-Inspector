@@ -11,12 +11,15 @@ import threading
 from typing import Any, Dict, Mapping
 import uuid
 
+from ai_inspector.operations_manual.artifacts import attach_draft_render_artifacts
 from ai_inspector.operations_manual.exports import (
     OperationsManualExportError,
     build_prototype_docx_bytes,
     build_prototype_pdf_bytes,
     prototype_export_readiness,
 )
+
+from .document import figure_request, with_figure_revisions
 
 
 class WorkInstructionExportError(RuntimeError):
@@ -88,7 +91,14 @@ def review_export_readiness(document: Mapping[str, Any]) -> Dict[str, Any]:
             "pendingPages": [],
             "requiredCaptureCount": 0,
         }
-    return prototype_export_readiness(document)
+    current = with_figure_revisions(document)
+    for page in current.get("pages") or []:
+        request = page.get("renderRequest")
+        if not isinstance(request, dict):
+            continue
+        if (request.get("image") or {}).get("figureRevision") != page["figureRevision"]:
+            request["image"] = {"status": "pending", **figure_request(request)["image"]}
+    return prototype_export_readiness(current)
 
 
 def store_review_pdf(
@@ -96,6 +106,7 @@ def store_review_pdf(
     assembly_number: str,
     document: Mapping[str, Any],
 ) -> Dict[str, Any]:
+    document = attach_draft_render_artifacts(root, assembly_number, document)
     readiness = review_export_readiness(document)
     if readiness["status"] != "READY":
         raise WorkInstructionExportError(
@@ -150,6 +161,7 @@ def store_review_docx(
     assembly_number: str,
     document: Mapping[str, Any],
 ) -> Dict[str, Any]:
+    document = attach_draft_render_artifacts(root, assembly_number, document)
     readiness = review_export_readiness(document)
     if readiness["status"] != "READY":
         raise WorkInstructionExportError(

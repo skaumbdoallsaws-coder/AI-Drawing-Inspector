@@ -106,8 +106,11 @@ def store_draft_render_artifact(
     manual_plan_revision: str,
     balloons: Iterable[Mapping[str, Any]] | None = None,
     api_route: str = "operations-manual",
+    figure_revision: str | None = None,
 ) -> Dict[str, Any]:
     document_revision = str(document.get("documentRevision") or "")
+    if document.get("documentType") == "work_instructions" and document.get("schemaVersion") not in {1, 2}:
+        raise OperationsManualArtifactError("unsupported work-instruction document schema")
     if source_revision != str(document.get("sourceRevision") or ""):
         raise OperationsManualArtifactError("draft capture source revision is stale")
     if manual_plan_revision != str(document.get("manualPlanRevision") or ""):
@@ -122,6 +125,15 @@ def store_draft_render_artifact(
     )
     if page is None or not isinstance(page.get("renderRequest"), Mapping):
         raise OperationsManualArtifactError("draft page has no CAD figure request")
+    capture_revision = document_revision
+    current_figure_revision = None
+    if document.get("documentType") == "work_instructions" and document.get("schemaVersion") == 2:
+        from ai_inspector.work_instructions.document import page_figure_revision
+
+        current_figure_revision = page_figure_revision(document, page)
+        if figure_revision is not None and figure_revision != current_figure_revision:
+            raise OperationsManualArtifactError("draft capture figure revision is stale")
+        capture_revision = current_figure_revision
     validated_balloons: list[Dict[str, Any]] = []
     if balloons is not None:
         try:
@@ -131,7 +143,7 @@ def store_draft_render_artifact(
         except PartsManualRenderArtifactError as exc:
             raise OperationsManualArtifactError(str(exc)) from exc
     width, height = _png_size(payload)
-    directory = _render_directory(root, assembly_number, document_revision)
+    directory = _render_directory(root, assembly_number, capture_revision)
     safe_page = _safe(page_id, "page ID")
     image_path = directory / f"{safe_page}.png"
     metadata_path = directory / f"{safe_page}.json"
@@ -158,9 +170,12 @@ def store_draft_render_artifact(
         "calloutManifestValidated": balloons is not None,
         "url": (
             f"/api/{route}/{assembly_number}/renders/"
-            f"{document_revision}/{page_id}"
+            f"{capture_revision}/{page_id}"
         ),
     }
+    if current_figure_revision is not None:
+        artifact["figureRevision"] = current_figure_revision
+        artifact["captureRevision"] = capture_revision
     _write_atomic(image_path, payload)
     _write_atomic(
         metadata_path,
@@ -184,6 +199,8 @@ def attach_draft_render_artifacts(
     assembly_number: str,
     document: Mapping[str, Any],
 ) -> Dict[str, Any]:
+    if document.get("documentType") == "work_instructions":
+        return _attach_work_instruction_artifacts(root, assembly_number, document)
     result = copy.deepcopy(dict(document))
     revision = str(result.get("documentRevision") or "")
     try:
@@ -223,6 +240,109 @@ def attach_draft_render_artifacts(
     return result
 
 
+def _attach_work_instruction_artifacts(
+    root: str | Path, assembly_number: str, document: Mapping[str, Any],
+) -> Dict[str, Any]:
+    from ai_inspector.work_instructions.document import (
+        figure_request, legacy_document_revision, with_figure_revisions,
+    )
+
+    legacy_revision = legacy_document_revision(document)
+    result = with_figure_revisions(document)
+    revision = str(result.get("documentRevision") or "")
+    for page in result.get("pages") or []:
+        request = page.get("renderRequest")
+        if not isinstance(request, dict):
+            continue
+        # Never retain an unvalidated attached image from the input document.
+        request["image"] = {"status": "pending", **figure_request(request)["image"]}
+        figure_revision = page["figureRevision"]
+        for capture_revision in dict.fromkeys([figure_revision, legacy_revision]):
+            if not capture_revision:
+                continue
+            try:
+                directory = _render_directory(root, assembly_number, capture_revision)
+                safe_page = _safe(str(page.get("pageId") or ""), "page ID")
+                with open(_filesystem_path(directory / f"{safe_page}.json"), "r", encoding="ascii") as handle:
+                    artifact = json.load(handle)
+                with open(_filesystem_path(directory / f"{safe_page}.png"), "rb") as handle:
+                    digest = hashlib.sha256(handle.read()).hexdigest()
+            except (OperationsManualArtifactError, OSError, UnicodeError, json.JSONDecodeError):
+                continue
+            if not isinstance(artifact, Mapping) or any((
+                artifact.get("status") != "ready",
+                artifact.get("sha256") != digest,
+                artifact.get("pageId") != page["pageId"],
+                artifact.get("sourceRevision") != result.get("sourceRevision"),
+                artifact.get("manualPlanRevision") != result.get("manualPlanRevision"),
+            )):
+                continue
+            if capture_revision == figure_revision:
+                if artifact.get("figureRevision") != figure_revision:
+                    continue
+            elif artifact.get("figureRevision") or artifact.get("documentRevision") != legacy_revision:
+                continue
+            request["image"] = {
+                **request["image"], **artifact,
+                "figureRevision": figure_revision,
+                "captureRevision": capture_revision,
+                "documentRevision": revision,
+                "url": f"/api/work-instructions/{assembly_number}/renders/{capture_revision}/{safe_page}",
+            }
+            break
+    return result
+
+
+def _carry_work_instruction_artifacts(
+    root: str | Path, assembly_number: str,
+    previous: Mapping[str, Any], document: Mapping[str, Any],
+) -> int:
+    """On explicit mutation adopt validated legacy captures; schema-2 files stay put."""
+    from ai_inspector.work_instructions.document import with_figure_revisions
+
+    old = _attach_work_instruction_artifacts(root, assembly_number, previous)
+    current = with_figure_revisions(document)
+    old_pages = {page["pageId"]: page for page in old.get("pages") or []}
+    kept = 0
+    for page in current.get("pages") or []:
+        if not isinstance(page.get("renderRequest"), Mapping):
+            continue
+        previous_page = old_pages.get(page["pageId"]) or {}
+        image = (previous_page.get("renderRequest") or {}).get("image") or {}
+        if image.get("status") != "ready" or previous_page.get("figureRevision") != page["figureRevision"]:
+            continue
+        if image.get("captureRevision") != page["figureRevision"]:
+            image_path = draft_render_path(root, assembly_number, image["captureRevision"], page["pageId"])
+            with open(_filesystem_path(image_path), "rb") as handle:
+                payload = handle.read()
+            if hashlib.sha256(payload).hexdigest() != image.get("sha256"):
+                continue
+            store_draft_render_artifact(
+                root, assembly_number, current, page["pageId"], payload,
+                source_revision=current["sourceRevision"], manual_plan_revision=current["manualPlanRevision"],
+                balloons=image.get("balloons") if image.get("calloutManifestValidated") else None,
+                api_route="work-instructions", figure_revision=page["figureRevision"],
+            )
+        kept += 1
+    return kept
+
+
+def document_draft_render_path(
+    root: str | Path, assembly_number: str,
+    document: Mapping[str, Any], page: Mapping[str, Any],
+) -> Path:
+    revision = str(document.get("documentRevision") or "")
+    if document.get("documentType") == "work_instructions":
+        from ai_inspector.work_instructions.document import page_figure_revision
+
+        image = (page.get("renderRequest") or {}).get("image") or {}
+        if (image.get("status") != "ready" or image.get("documentRevision") != revision
+                or image.get("figureRevision") != page_figure_revision(document, page)):
+            raise OperationsManualArtifactError("draft capture figure revision is stale")
+        revision = str(image.get("captureRevision") or image["figureRevision"])
+    return draft_render_path(root, assembly_number, revision, str(page.get("pageId") or ""))
+
+
 def _figure_request(request: Mapping[str, Any]) -> Dict[str, Any]:
     return {key: value for key, value in request.items() if key != "image"}
 
@@ -235,6 +355,8 @@ def carry_draft_render_artifacts(
 ) -> int:
     """Keep the figures captured for the previous revision when an edit left them as they were (a page's text, say):
     a page whose figure request is unchanged gets its capture under the new revision. Returns how many were kept."""
+    if document.get("documentType") == "work_instructions":
+        return _carry_work_instruction_artifacts(root, assembly_number, previous, document)
     old_revision = str(previous.get("documentRevision") or "")
     new_revision = str(document.get("documentRevision") or "")
     if not old_revision or not new_revision or old_revision == new_revision:

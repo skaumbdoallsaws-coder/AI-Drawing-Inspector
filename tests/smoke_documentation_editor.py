@@ -47,7 +47,15 @@ KNOWN_FIXTURE_LIMITATIONS = [
     "Drawing-map, drawing-pdf, part-features and process-map preview GETs may return 404 in the sanitized MMLE copy.",
     "Reference-views GET may return 500 because this copy has no MMLE drawings.",
     "The ignored static/contracts/semantic-knowledge-prototype-v1.json is not copied; its server startup FileNotFoundError is known.",
+    "A bridge status poll still in flight when the smoke reloads the page is aborted (net::ERR_ABORTED).",
 ]
+# The page polls this status route; the smoke's own reload between workspace opens can cut one off.
+KNOWN_ABORTED_POLLS = re.compile(r"/api/bridge/status")
+
+
+def known_network_failure(failure):
+    return (failure.get("error") == "net::ERR_ABORTED"
+            and bool(KNOWN_ABORTED_POLLS.fullmatch(urlsplit(failure.get("url", "")).path)))
 
 
 def known_http_failure(failure):
@@ -77,11 +85,18 @@ def classify_failures(report):
             known.append({"kind": "console", **item, "reason": "Console consequence of a known optional GET failure"})
         else:
             unexpected_console.append(item)
+    unexpected_network = []
+    for item in report["networkFailures"]:
+        if known_network_failure(item):
+            known.append({"kind": "network", **item, "reason": "Status poll aborted by the smoke's own page reload"})
+        else:
+            unexpected_network.append(item)
     report["knownFixtureFailures"] = known
     report["unexpectedHttpFailures"] = unexpected_http
     report["unexpectedConsoleErrors"] = unexpected_console
+    report["unexpectedNetworkFailures"] = unexpected_network
     return not (unexpected_http or unexpected_console or report["browserErrors"]
-                or report["networkFailures"] or report["outboundRequests"])
+                or unexpected_network or report["outboundRequests"])
 
 
 def sha(path):

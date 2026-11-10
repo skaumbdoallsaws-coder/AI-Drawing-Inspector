@@ -28624,7 +28624,10 @@
         }
 
         function _partsManualDocumentationComposition(source) {
-            const candidate = source?.renderRequest?.composition || source?.documentationComposition;
+            // Work instructions keep page text outside the CAD capture request.
+            const candidate = source?.figureRevision && source?.documentationComposition
+                ? source.documentationComposition
+                : source?.renderRequest?.composition || source?.documentationComposition;
             return candidate && typeof candidate === 'object' ? candidate : {};
         }
 
@@ -34535,8 +34538,9 @@
                 const capture = await _partsManualCaptureCurrentView(page, captureOptions);
                 const form = new FormData();
                 form.append('documentRevision', documentModel.documentRevision);
-                if (documentModel.figureRevision) {
-                    form.append('figureRevision', documentModel.figureRevision);
+                const captureFigureRevision = page.figureRevision || documentModel.figureRevision;
+                if (captureFigureRevision) {
+                    form.append('figureRevision', captureFigureRevision);
                 }
                 form.append('manualPlanRevision', documentModel.manualPlanRevision);
                 form.append('sourceRevision', documentModel.sourceRevision);

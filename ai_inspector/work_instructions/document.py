@@ -29,7 +29,7 @@ from ai_inspector.parts_manual.documentation import (
 )
 
 
-WORK_INSTRUCTION_SCHEMA_VERSION = 1
+WORK_INSTRUCTION_SCHEMA_VERSION = 2
 WORK_INSTRUCTION_PLAN_SCHEMA_VERSION = 2
 WORK_INSTRUCTION_RENDER_PIPELINE_VERSION = 2
 _MAX_CALLOUT_ITEMS = 7
@@ -1539,6 +1539,87 @@ def _benchmark_operation_page(
     }
 
 
+# Only these scene fields are consumed by the CAD renderer. Page text, styles,
+# frames and authored document objects remain in documentationComposition.
+_FIGURE_COMPOSITION_KEYS = (
+    "figureOverride", "manualGroupOverrides", "occurrenceOverrides",
+    "balloonOverrides", "leaderOverrides",
+)
+_CAPTURE_IMAGE_KEYS = {
+    "status", "draftOnly", "acceptedForControlledPublication", "documentRevision",
+    "figureRevision", "captureRevision", "sourceRevision", "manualPlanRevision",
+    "pageId", "widthPx", "heightPx", "sha256", "balloons",
+    "calloutManifestValidated", "url",
+}
+
+
+def _figure_composition(composition: Mapping[str, Any]) -> Dict[str, Any]:
+    return {key: copy.deepcopy(composition[key]) for key in _FIGURE_COMPOSITION_KEYS
+            if composition.get(key)}
+
+
+def figure_request(request: Mapping[str, Any]) -> Dict[str, Any]:
+    """The effective capture input, including its image sizing/quality contract."""
+    result = copy.deepcopy(dict(request))
+    result["composition"] = _figure_composition(result.get("composition") or {})
+    result["image"] = {key: copy.deepcopy(value)
+                       for key, value in (result.get("image") or {}).items()
+                       if key not in _CAPTURE_IMAGE_KEYS}
+    return result
+
+
+def page_figure_revision(document: Mapping[str, Any], page: Mapping[str, Any]) -> str:
+    return _stable_revision({
+        "assemblyNumber": (document.get("product") or {}).get("assemblyNumber"),
+        "sourceRevision": document.get("sourceRevision"),
+        "manualPlanRevision": document.get("manualPlanRevision"),
+        "renderPipelineVersion": document.get("renderPipelineVersion"),
+        "pageId": page.get("pageId"),
+        "renderRequest": figure_request(page["renderRequest"]),
+    })
+
+
+def legacy_document_revision(document: Mapping[str, Any]) -> str:
+    """Reconstruct the schema-1 hash; never search arbitrary older captures.
+
+    That hash binds the complete old figure request as well as source, plan and
+    pipeline. A changed request cannot address the old artifact. Attached image
+    metadata was not part of the generated document and is removed first.
+    """
+    legacy = copy.deepcopy(dict(document))
+    legacy.pop("documentRevision", None)
+    legacy["schemaVersion"] = 1
+    for page in legacy.get("pages") or []:
+        page.pop("figureRevision", None)
+        request = page.get("renderRequest")
+        if not isinstance(request, dict):
+            continue
+        composition = page.get("documentationComposition") or {}
+        if _figure_composition(request.get("composition") or {}) != _figure_composition(composition):
+            return ""
+        request["composition"] = copy.deepcopy(composition)
+        request["image"] = {"status": "pending", **figure_request(request)["image"]}
+    revision = _stable_revision(legacy)
+    if document.get("schemaVersion") == 1 and document.get("documentRevision") != revision:
+        return ""
+    return revision
+
+
+def with_figure_revisions(document: Mapping[str, Any]) -> Dict[str, Any]:
+    """Pure schema-1 read migration; a generated schema-2 write uses the new hash."""
+    if document.get("schemaVersion") not in {1, WORK_INSTRUCTION_SCHEMA_VERSION}:
+        raise WorkInstructionError("unsupported work-instruction document schema")
+    result = copy.deepcopy(dict(document))
+    result["schemaVersion"] = WORK_INSTRUCTION_SCHEMA_VERSION
+    for page in result.get("pages") or []:
+        request = page.get("renderRequest")
+        if not isinstance(request, dict):
+            continue
+        request["composition"] = _figure_composition(request.get("composition") or {})
+        page["figureRevision"] = page_figure_revision(result, page)
+    return result
+
+
 def _apply_scene(
     pages: list[Dict[str, Any]],
     documentation_scene: Optional[Mapping[str, Any]],
@@ -1577,7 +1658,7 @@ def _apply_scene(
             "cover" if page.get("pageType") == "operations_cover" else "reference"
         )
         if isinstance(page.get("renderRequest"), dict):
-            page["renderRequest"]["composition"] = copy.deepcopy(composition)
+            page["renderRequest"]["composition"] = _figure_composition(composition)
     return theme, page_masters
 
 
@@ -2003,6 +2084,7 @@ def build_work_instruction_document(
             "findings": release_findings,
         },
     }
+    document = with_figure_revisions(document)
     revision_payload = copy.deepcopy(document)
     revision_payload.pop("documentRevision", None)
     document["documentRevision"] = _stable_revision(revision_payload)

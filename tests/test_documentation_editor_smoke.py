@@ -96,3 +96,17 @@ def test_unlocated_console_errors_and_network_failures_are_not_hidden():
     report["consoleErrors"] = []
     report["networkFailures"] = [{"url": item["url"], "error": "net::ERR_CONNECTION_RESET"}]
     assert not classify_failures(report)
+
+
+def test_only_an_aborted_bridge_status_poll_is_known():
+    report = empty_report()
+    poll = "http://127.0.0.1:1/api/bridge/status"
+    report["networkFailures"] = [{"url": poll, "error": "net::ERR_ABORTED"}]
+    assert classify_failures(report)
+    assert report["knownFixtureFailures"][0]["kind"] == "network"
+    for url, error in ((poll, "net::ERR_CONNECTION_RESET"),
+                       ("http://127.0.0.1:1/api/parts-manual/MMLE-50D/documentation-scene", "net::ERR_ABORTED"),
+                       (poll + "/extra", "net::ERR_ABORTED")):
+        report = empty_report()
+        report["networkFailures"] = [{"url": url, "error": error}]
+        assert not classify_failures(report)

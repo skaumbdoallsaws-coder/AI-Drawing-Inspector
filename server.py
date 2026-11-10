@@ -17896,6 +17896,7 @@ async def work_instructions_page_render(
     page_id: str,
     file: UploadFile = File(...),
     documentRevision: str = Form(...),
+    figureRevision: str | None = Form(None),
     manualPlanRevision: str = Form(...),
     sourceRevision: str = Form(...),
     renderPipelineVersion: int | None = Form(None),
@@ -17911,7 +17912,12 @@ async def work_instructions_page_render(
             raise OperationsManualArtifactError(
                 "the work-instruction figure renderer is stale; refresh InspectorPro"
             )
-        if documentRevision != document["documentRevision"]:
+        page = next((row for row in document["pages"] if row["pageId"] == page_id), {})
+        if figureRevision is not None and figureRevision != page.get("figureRevision"):
+            raise OperationsManualArtifactError("draft capture figure revision is stale")
+        if documentRevision != document["documentRevision"] and (
+            figureRevision is None or figureRevision != page.get("figureRevision")
+        ):
             raise OperationsManualArtifactError(
                 "the work instructions changed; regenerate the page before capture"
             )
@@ -17940,6 +17946,7 @@ async def work_instructions_page_render(
             manual_plan_revision=manualPlanRevision,
             balloons=balloon_manifest,
             api_route="work-instructions",
+            figure_revision=figureRevision,
         )
     except (
         PartsManualRepositoryError,
@@ -41413,6 +41420,12 @@ class _DocumentationAgentHost:
                 request_id=observed["requestId"], commands=commands, page_targets=targets,
                 expected_hashes=expected, current_hashes=snapshot["hashes"],
                 hashes_revision=snapshot["state"]["sceneRevision"], actor="sage", payload=observed)
+            if document_type == "work_instructions" and result["changed"]:
+                # Adopt legacy figure captures only after a committed mutation.
+                next_document = self._text_scene(assembly_number, document_type)["document"]
+                carry_draft_render_artifacts(
+                    WORK_INSTRUCTION_ROOT, assembly_number, document, next_document
+                )
             return {"receipt": result["receipt"], "changed": result["changed"]}
 
     def export_specification_sheet(self, assembly_number, fillable=False):

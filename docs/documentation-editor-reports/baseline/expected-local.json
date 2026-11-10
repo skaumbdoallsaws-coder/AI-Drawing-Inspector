@@ -783,8 +783,8 @@
   "schemaVersion": 1,
   "status": "captured",
   "workInstructions": {
-    "before": "0cffceb4032aa5351360bac19f1651accf79bc8cafb6d2b6a31817a421c573da",
-    "edited": "8beac87d8758edbbaff06888b7d700f72ff5f4ffc7f13e08d87ed4d67220cc2e",
+    "before": "e11b7aa080a5617190355d89cff87b456b8f56e2eb8fdf7fd458cfa84b08b2eb",
+    "edited": "3a3e911fc765e4fa7de8d92e1317a68bc79dfdaaacfc34af25cda8ae91e0cbae",
     "exports": {
       "before": {
         "docx": {
@@ -1129,17 +1129,13 @@
         }
       }
     },
-    "pagesNeedingCaptureAfterTextEdit": [
-      "page-work-instructions-cover"
-    ],
+    "pagesNeedingCaptureAfterTextEdit": [],
     "readDidNotWrite": true,
-    "recapturedPageIds": [
-      "page-work-instructions-cover"
-    ],
+    "recapturedPageIds": [],
     "reopenUnchanged": true,
-    "reopened": "8beac87d8758edbbaff06888b7d700f72ff5f4ffc7f13e08d87ed4d67220cc2e",
-    "textEditExportHttpStatus": 422,
-    "textEditInvalidatesPageCapture": true,
+    "reopened": "3a3e911fc765e4fa7de8d92e1317a68bc79dfdaaacfc34af25cda8ae91e0cbae",
+    "textEditExportHttpStatus": 200,
+    "textEditInvalidatesPageCapture": false,
     "undo": {
       "canUndoAfterEdit": true,
       "httpStatus": 200,

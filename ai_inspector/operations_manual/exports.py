@@ -16,7 +16,7 @@ import uuid
 
 from ai_inspector.parts_manual.pdf import draw_balloon_manifest
 
-from .artifacts import draft_render_path
+from .artifacts import document_draft_render_path
 from .flow import wrap_text
 
 
@@ -595,7 +595,7 @@ def _draw_block(
         request = descriptor.get("renderRequest") or {}
         image = request.get("image") or {}
         image_rect = fitz.Rect(rect.x0, rect.y0, rect.x1, rect.y1 - 18)
-        image_path = draft_render_path(root, assembly_number, str(document.get("documentRevision") or ""), str(descriptor.get("pageId") or ""))
+        image_path = document_draft_render_path(root, assembly_number, document, descriptor)
         fitted = _fit_image_rect(fitz, image_rect, image_path)
         page.draw_rect(image_rect, color=(0.76, 0.81, 0.84), fill=(1, 1, 1), width=0.55)
         page.insert_image(fitted, filename=str(image_path), keep_proportion=True)
@@ -679,7 +679,7 @@ def build_prototype_pdf_bytes(
                 fontname="helv",
                 color=muted,
             )
-            image_path = draft_render_path(root, assembly_number, str(document.get("documentRevision") or ""), str(descriptor.get("pageId") or ""))
+            image_path = document_draft_render_path(root, assembly_number, document, descriptor)
             image_frame = (descriptor.get("renderRequest") or {}).get("frame") \
                 or cover_layout.get("illustration") \
                 or {"x": 150, "y": 184, "width": 660, "height": 294}
@@ -1114,7 +1114,7 @@ def build_prototype_docx_bytes(
                     run.font.bold = True
                     run.font.size = Pt(10)
                     run.font.color.rgb = RGBColor.from_string(primary)
-            image_path = draft_render_path(root, assembly_number, str(document.get("documentRevision") or ""), str(descriptor.get("pageId") or ""))
+            image_path = document_draft_render_path(root, assembly_number, document, descriptor)
             image_frame = (descriptor.get("renderRequest") or {}).get("frame") or {}
             image_width = min(
                 content_width_inches,
@@ -1215,7 +1215,7 @@ def build_prototype_docx_bytes(
                     for index in range(len(columns)):
                         cells[index].text = values[index] if index < len(values) else ""
             elif block_type == "cad_figure":
-                image_path = draft_render_path(root, assembly_number, str(document.get("documentRevision") or ""), str(descriptor.get("pageId") or ""))
+                image_path = document_draft_render_path(root, assembly_number, document, descriptor)
                 request = descriptor.get("renderRequest") or {}
                 image = request.get("image") or {}
                 frame = block.get("frame") or {}

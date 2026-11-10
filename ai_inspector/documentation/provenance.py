@@ -66,7 +66,7 @@ def _text_history(scene, page_id, aliases):
             history = []
         elif operation == "reset":
             history = [item for item in history if item.get("targetId") != target]
-        elif operation == "update_text" and target in aliases:
+        elif operation in {"update_text", "replace_rich_text"} and target in aliases:
             history.append(command)
     return history
 
@@ -224,7 +224,7 @@ def project_document(document, scene=None, *, generated_parts=None):
         page_id = "page-parts-index" if alias.startswith("part.") else target["pageId"]
         authored = target["targetType"] == "document_object"
         generated = None if authored else (generated_parts or {}).get(alias, original[key]["text"])
-        effective = target["text"]
+        effective = target.get("richField", {}).get("richText") or target["text"]
         history = _text_history(scene, page_id, [alias])
         creation = next((cmd for cmd in reversed(list(_leaves((scene.get("commands") or [])[:
             int(scene.get("historyCursor") or 0)]))) if cmd.get("operation") == "add_object"
@@ -248,7 +248,8 @@ def project_document(document, scene=None, *, generated_parts=None):
         "sourceIds": row["provenance"]["activeSourceIds"], "evidenceStatus": row["provenance"]["evidenceStatus"]}
         for row in targets if row["provenance"]["claimIds"] or row["provenance"]["sourceIds"]]
     from .conflict_exports import project_review
-    return project_review(result, scene)
+    from .rich_text import project_objects
+    return project_objects(project_review(result, scene))
 
 
 def support_summary(targets):
@@ -270,19 +271,29 @@ def prepare_text_command(document, command):
             raise DocumentEditError("ambiguous_legacy_target", "This source has no unique editable identity.")
         result["targetId"] = stable_target(document, result.get("pageId"), result.get("targetId"))
     command = result
-    if command.get("operation") != "update_text":
+    if command.get("operation") not in {"update_text", "replace_rich_text"}:
         return result
     changes = {}
     for target in document.get("provenanceTargets") or []:
         alias = command.get("targetId")
         if target["pageId"] != command.get("pageId") or alias not in target.get("editAliases", target["values"]):
             continue
-        if target["values"][alias] == command.get("text"):
+        if target["values"][alias] == command.get("richText" if command.get("operation") == "replace_rich_text" else "text"):
             continue
         meta = deepcopy(target["provenance"])
         meta.pop("confirmation", None)
         meta.update(origin="manual", evidenceStatus="edited_unverified" if meta["claimIds"] or meta["sourceIds"] else "unbound")
         changes[target["targetId"]] = meta
+    if command.get("operation") == "replace_rich_text" and command.get("targetType") == "document_object" and not changes:
+        key = command["targetId"]
+        if not any(key in target["values"] for target in document.get("provenanceTargets", [])):
+            # Specification objects were not prose targets before P2a. Record
+            # their first rich edit without altering unedited plain documents.
+            changes[key] = {"targetId": key, "pageId": command["pageId"], "alias": key, "aliases": [key],
+                "origin": "manual", "evidenceStatus": "unbound", "generatedValue": {key: None},
+                "generatedHash": digest({key: None}), "claimIds": [], "sourceIds": [],
+                "sourceRevision": document.get("sourceRevision"), "originalEvidence": {"claimIds": [], "sourceIds": []},
+                "activeClaimIds": [], "activeSourceIds": [], "marker": ""}
     if changes:
         result["fieldMeta"] = changes
     return result
@@ -320,6 +331,8 @@ def unconfirmed_targets(document):
 
 def export_document(document):
     """Old generated JSON gets the same pure provenance projection as live compilation."""
+    from .rich_text import refuse_export
+    refuse_export(document)
     kind = document.get("documentType")
     supported = VERSIONS.get(kind)
     if supported and document.get("schemaVersion", 1) > supported:
@@ -335,6 +348,8 @@ def export_document(document):
 
 
 def check_export(document, mode="review"):
+    from .rich_text import refuse_export
+    refuse_export(document)
     if mode not in {"review", "draft", "customer", "controlled"}:
         raise DocumentEditError("invalid_document_operation", "Unknown document export mode.")
     from .refresh import open_conflicts
@@ -361,7 +376,7 @@ def strip_projection(document):
     return document
 
 
-def project_slots(document, stored):
+def project_slots(document, stored, scene=None):
     result = deepcopy(document)
     if result.get("schemaVersion", 1) > 3:
         raise DocumentEditError("unsupported_document_schema", "This sheet needs a newer editor.")
@@ -412,8 +427,32 @@ def project_slots(document, stored):
             slot = block.get("slot")
             if slot and "slot:" + slot in meta_by_id:
                 block["provenance"] = deepcopy(meta_by_id["slot:" + slot])
+    # Authored sheet objects belong to the scene, never the typed slot store.
+    scene = scene or {}
+    from .rich_text import is_rich
+    for page in result.get("pages", []):
+        objects = (page.get("documentationComposition") or {}).get("documentObjects", {})
+        for key, item in objects.items():
+            if item.get("type") != "text" or not (is_rich(item.get("content")) or key in scene.get("fieldMeta", {})):
+                continue
+            history = _text_history(scene, page["pageId"], [key])
+            last = history[-1] if history else {}
+            meta = deepcopy(scene.get("fieldMeta", {}).get(key) or {
+                "origin": "manual", "evidenceStatus": "unbound", "generatedValue": {key: None},
+                "generatedHash": digest({key: None}), "changeId": last.get("commandId"),
+                "actor": last.get("actor", item.get("source", "user"))})
+            meta.update(targetId=key, pageId=page["pageId"], alias=key, aliases=[key], claimIds=[], sourceIds=[],
+                sourceRevision=result.get("sourceRevision"), originalEvidence={"claimIds": [], "sourceIds": []},
+                activeClaimIds=[], activeSourceIds=[], marker="")
+            result["fieldMeta"][key] = meta
+            result["provenanceTargets"].append({"targetId": key, "pageId": page["pageId"], "alias": key,
+                "values": {key: deepcopy(item.get("content", ""))}, "provenance": deepcopy(meta),
+                "versionKeys": [scene_field_key(page["pageId"], "document_object", key)]})
+    if any(not t["targetId"].startswith("slot:") for t in result["provenanceTargets"]):
+        result["sourceSupportSummary"] = support_summary(result["provenanceTargets"])
     from .conflict_exports import project_review
-    return project_review(result, stored)
+    from .rich_text import project_objects
+    return project_objects(project_review(result, stored))
 
 
 def slot_mutation_meta(before, candidate, defaults, *, actor, change_id, effective_values=None):

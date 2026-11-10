@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 import uuid
 from typing import Any, Mapping
 
 from .commands import DocumentEditError, binding, canonical_bytes, content_hash, digest, scene_field_key
 from .identity import alias_entry
+from .rich_text import field_read, enabled as rich_text_enabled, reserved_ids, PLAIN_EDIT_CONSEQUENCE
 
 
 def target_id(state: Mapping[str, Any], page_id: str, alias: str) -> str:
@@ -39,12 +41,22 @@ def text_targets(state: Mapping[str, Any], document: Mapping[str, Any]) -> dict[
             attributes["sourceIds"] = list(meta.get("activeSourceIds") or [])
             attributes["activeEvidenceClaimIds"] = list(meta.get("activeClaimIds") or [])
             attributes["activeSourceIds"] = list(meta.get("activeSourceIds") or [])
-        text = "" if value is None else str(value)
+        rich = field_read(value, reserved=reserved_ids(state.get("scene", {}).get("pages", {}), page_id, alias)) if target_type == "document_object" else None
+        if rich and rich["isRichText"]:
+            # Valid rich hashes cover the canonical envelope; corrupt values are
+            # opaque read-only data, including JSON with an unpaired surrogate.
+            attributes["content"] = (rich["richText"] if not rich["richTextError"] else
+                {"invalidRichText": json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"))})
+        text = rich["text"] if rich else "" if value is None else str(value)
         descriptor = {"targetId": stable, "alias": alias, "pageId": page_id,
                       "targetType": target_type, "storageId": storage_id, "text": text, "operation": kind,
                       "attributes": deepcopy(attributes), "override": deepcopy(override),
                       "versionKey": alias if kind == "set_slot_value" else scene_field_key(page_id, target_type, storage_id),
                       "versionPage": page_id if kind == "replace_text" and not storage_id.startswith(("part.", "gen-")) else ""}
+        if rich:
+            descriptor["richField"] = rich
+            if rich["richTextError"]:
+                descriptor["operation"] = "read_only"
         if stable in result:
             # Definition-keyed parts occur on multiple pages. Different effective
             # values are ambiguous, never selected by whichever page came last.
@@ -53,6 +65,15 @@ def text_targets(state: Mapping[str, Any], document: Mapping[str, Any]) -> dict[
             result[stable].setdefault("pageIds", [result[stable]["pageId"]]).append(page_id)
         else:
             result[stable] = descriptor
+
+    def add_objects(page):
+        objects = (state.get("scene", {}).get("pages", {}).get(page["pageId"], {}).get("documentObjects")
+                   or (page.get("documentationComposition") or {}).get("documentObjects")
+                   or page.get("documentationObjects") or {})
+        for object_id, item in objects.items():
+            if item.get("type") == "text":
+                add(page, object_id, item.get("content"), item,
+                    kind="read_only" if item.get("locked") else "replace_text", target_type="document_object")
 
     for page in ([] if document.get("slots") is not None else document.get("pages") or []):
         if document.get("documentType") == "illustrated_parts_manual":
@@ -99,10 +120,11 @@ def text_targets(state: Mapping[str, Any], document: Mapping[str, Any]) -> dict[
                                  ("description", row.get("description") or "")):
                 add(page, part_text_target_id(row["definitionId"], field), value,
                     {"definitionId": row["definitionId"], "field": field})
-        for object_id, item in (page.get("documentationObjects") or {}).items():
-            if item.get("type") == "text":
-                add(page, object_id, item.get("content"), item,
-                    kind="read_only" if item.get("locked") else "replace_text", target_type="document_object")
+        add_objects(page)
+    # Page-authored objects remain scene-owned even when the page also has slots.
+    if document.get("slots") is not None:
+        for page in document.get("pages") or []:
+            add_objects(page)
     if document.get("slots"):
         page = (document.get("pages") or [{"pageId": "page-specification"}])[0]
         for slot, item in document["slots"].items():
@@ -121,7 +143,7 @@ def hash_values(targets: Mapping[str, dict]) -> dict[str, dict]:
                 "pageId", "pageIds", "alias", "displayName", "frame", "itemNumber",
                 "displayText", "lines", "height", "continued", "rowContinuation"}}
         return value
-    return {key: semantic({field: value for field, value in target.items() if field != "targetId"})
+    return {key: semantic({field: value for field, value in target.items() if field not in {"targetId", "richField"}})
             for key, target in targets.items()}
 
 
@@ -134,6 +156,24 @@ def resolve_target(targets: Mapping[str, dict], requested: str, page_id: str | N
     return found[0]
 
 
+def owner_state(state, target):
+    """Specification slots and scene objects have independent mutation counters."""
+    if target["targetType"] != "document_object" or "editRevision" not in state.get("scene", {}):
+        return state
+    scene = state["scene"]
+    return {**state, "revision": scene["editRevision"], "editEpoch": scene["editEpoch"],
+            "fieldVersions": scene["fieldVersions"]}
+
+
+def capabilities(target):
+    if target["operation"] == "read_only":
+        return []
+    result = [target["operation"]]
+    if target.get("richField") is not None and rich_text_enabled():
+        result.append("replace_rich_text")
+    return result
+
+
 def read_targets(state: dict, targets: Mapping[str, dict], requested: list[dict], *, limit=65536) -> dict:
     if not 1 <= len(requested) <= 12:
         raise DocumentEditError("invalid_document_operation", "Read 1-12 targets at a time.")
@@ -142,17 +182,26 @@ def read_targets(state: dict, targets: Mapping[str, dict], requested: list[dict]
     for item in requested:
         target = resolve_target(targets, item["targetId"], item.get("pageId"))
         stable = target["targetId"]
+        owned = owner_state(state, target)
+        rich = target.get("richField")
+        provenance = deepcopy(target["attributes"].get("provenance", target["attributes"]))
+        if rich:
+            provenance.pop("content", None)
         from .refresh import open_conflicts
         conflict_ids = [c.get("conflictId") for c in open_conflicts(state) if c.get("targetId") == stable
                         or (c.get("scopeId") and c["scopeId"] == target["attributes"].get("provenance", {}).get("targetId"))]
         output.append({"targetId": stable, "hasOpenConflict": bool(conflict_ids), "conflictIds": conflict_ids, "legacyTargetId": target["alias"], "pageId": item.get("pageId") or target["pageId"],
                        "text": target["text"], "isExcerpt": False, "fullLength": len(target["text"]),
-                       "contentHash": content_hash(state, stable, values[stable]), "hashVersion": 1,
+                       "contentHash": content_hash(owned, stable, values[stable]), "hashVersion": 1,
                        "aliasRevision": state.get("aliasRevision"),
-                       "provenance": deepcopy(target["attributes"].get("provenance", target["attributes"])),
-                       "capabilities": [] if target["operation"] == "read_only" else [target["operation"]], "binding": binding(state)})
+                       "provenance": provenance,
+                       "capabilities": [] if conflict_ids else capabilities(target), "binding": binding(owned),
+                       "owner": "slots" if target["operation"] == "set_slot_value" else "scene",
+                       "revision": owned["revision"],
+                       **({**rich, "richTextEligible": True, "plainEditConsequence": PLAIN_EDIT_CONSEQUENCE,
+                           "wholeFieldReplacementRequired": rich["isRichText"]} if rich else {})})
     from .refresh import open_conflicts
-    result = {**binding(state), "openConflictCount": len(open_conflicts(state)), "sceneRevision": state.get("sceneRevision"), "targets": output,
+    result = {**binding(state), "documentationRichText": rich_text_enabled(), "openConflictCount": len(open_conflicts(state)), "sceneRevision": state.get("sceneRevision"), "targets": output,
               "aliasRevision": state.get("aliasRevision"),
               "aliasMap": {item["pageId"]: {row["legacyTargetId"]: row["targetId"] for row in output
                            if row["pageId"] == item["pageId"]} for item in output}}
@@ -178,7 +227,8 @@ class ReadBindings:
     def record(self, document_type: str, read: dict) -> None:
         for item in read["targets"]:
             captured = {**deepcopy(item), "binding": {
-                **binding(read), "sceneRevision": read.get("sceneRevision"), "structureHash": read.get("structureHash"), "aliasRevision": read.get("aliasRevision")}}
+                **binding(read), **item.get("binding", {}), "owner": item.get("owner", "slots" if item["targetId"].startswith("slot:") else "scene"),
+                "sceneRevision": read.get("sceneRevision"), "structureHash": read.get("structureHash"), "aliasRevision": read.get("aliasRevision")}}
             for key, old in list(self.targets.items()):
                 if key[0] == document_type and old["targetId"] == item["targetId"]:
                     self.targets[key] = captured
@@ -199,12 +249,13 @@ class ReadBindings:
             captured.append(read["binding"])
             operations.append({"operation": "replace_text", "targetId": read["targetId"], "text": item["text"],
                                "expectedContentHash": item.get("expectedContentHash", read["contentHash"]),
+                               **({"wholeFieldReplacement": item["wholeFieldReplacement"]} if "wholeFieldReplacement" in item else {}),
                                **({"legacyAlias": item["targetId"]} if item["targetId"] != read["targetId"] else {})})
         if not captured:
             raise DocumentEditError("invalid_document_operation", "Submit at least one edit.")
         first = captured[0]
         for observed in captured:
-            if any(first[key] != observed[key] for key in ("documentId", "sourceRevision", "manualPlanRevision")):
+            if any(first[key] != observed[key] for key in ("documentId", "sourceRevision", "manualPlanRevision", "owner")):
                 raise DocumentEditError("document_binding_changed", "Read all targets in the same document binding.")
         if arguments.get("documentId", first["documentId"]) != first["documentId"]:
             raise DocumentEditError("document_binding_changed", "The read belongs to another document.")
@@ -229,12 +280,17 @@ class ReadBindings:
             if read["isExcerpt"]:
                 raise DocumentEditError("full_read_required", "Read this target in full before replacement.",
                                         operationIndex=index, targetId=operation["targetId"])
+            if operation["operation"] == "replace_rich_text":
+                from .rich_text import require_enabled
+                require_enabled()
+                if operation["operation"] not in read.get("capabilities", []):
+                    raise DocumentEditError("read_only_derived_field", "This read does not permit rich text replacement.")
             captured.append(read["binding"])
             operations.append({**deepcopy(operation), "targetId": read["targetId"],
                 **({"legacyAlias": operation["targetId"]} if operation["targetId"] != read["targetId"] else {})})
         first = min(captured, key=lambda item: item["revision"])
         for observed in captured:
-            if any(first[key] != observed[key] for key in ("documentId", "sourceRevision", "manualPlanRevision")):
+            if any(first[key] != observed[key] for key in ("documentId", "sourceRevision", "manualPlanRevision", "owner")):
                 raise DocumentEditError("document_binding_changed", "The targets belong to different source bindings.")
         if first["documentId"] != arguments["documentId"]:
             raise DocumentEditError("document_binding_changed", "The read belongs to another document.")

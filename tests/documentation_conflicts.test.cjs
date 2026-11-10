@@ -225,3 +225,40 @@ test('a closed review never polls; reopening resumes the change check',async()=>
     assert.equal(h.calls.length,reopened+1);
     assert.match(h.calls.at(-1).url,/conflicts\?limit=1$/);
 });
+
+test('a reload during an in-flight change check still reloads the review',async()=>{
+    // Ribbon undo/redo or a Sage write reloads the workspace while the 5 s check awaits the server.
+    let release;
+    const held=new Promise(resolve=>{release=resolve;});
+    let hold=false;
+    const h=harness(async url=>{
+        if(hold && url.endsWith('conflicts?limit=1')){hold=false;await held;return response();}
+        return response();
+    });
+    h.api.show();await flush();
+    hold=true;
+    const tick=h.tick();await flush();
+    const during=h.calls.length;
+    h.context.payload.revision+='-undone';
+    h.api.sync(h.host);
+    assert.equal(h.calls.length,during,'no review load while the check is in flight');
+    release();await tick;await flush();
+    assert.equal(h.calls.length,during+1,'the deferred review load runs when the check finishes');
+    assert.match(h.calls.at(-1).url,/conflicts\?from=0&limit=100$/);
+    assert.ok(h.button('Keep mine'));
+});
+test('one workspace reload loads the review once although every page render syncs',async()=>{
+    // _documentationRenderPublicationPage queues a sync per page and thumbnail (about 40 per reload).
+    const h=harness(async()=>response());
+    h.api.show();await flush();
+    const before=h.calls.length;
+    h.context.payload.revision+='-undone';
+    for(let i=0;i<40;i++)h.api.sync(h.host);
+    await flush();
+    assert.equal(h.calls.length,before+1,'a single review load per document change');
+    assert.ok(h.button('Keep mine'));
+    h.context.payload.revision+='-redone';
+    for(let i=0;i<40;i++)h.api.sync(h.host);
+    await flush();
+    assert.equal(h.calls.length,before+2,'the next change loads once again');
+});

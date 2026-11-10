@@ -86,7 +86,8 @@
     `;
     doc.head.append(style);
     let host, key = '', data, pane, counter, observer, surface, serial = 0, loadedStamp = '', pending = false;
-    let message = '', receipt = '', selected = '', retry = null, watched = false, polling = false;
+    let message = '', receipt = '', selected = '', retry = null, watched = false, polling = false, deferredLoad = false;
+    let loadingStamp = null; // stamp of the load in flight: every page render syncs, so loads must be single-flight
     const drafts = new Map();
     const context = () => host?.context();
     const contextKey = c => c ? c.kind + '/' + c.number : '';
@@ -148,6 +149,7 @@
     async function load() {
         const c = context(); if (!c || !pane?.isConnected) return;
         const ticket = ++serial;
+        loadingStamp = stamp(c);
         data = null; render(); counts();
         try {
             const combined = { conflicts:[], orphans:[], resolutionHistory:[], restoreTargets:[] };
@@ -165,6 +167,8 @@
             render(); counts();
         } catch (error) {
             if (ticket === serial && current(c)) { message = error.message; render(); }
+        } finally {
+            if (ticket === serial) loadingStamp = null;
         }
     }
     function setOpen(open) {
@@ -306,7 +310,10 @@
         }
         if (data && stamp(c) !== loadedStamp) data = null;
         counts();
-        if ((watched || !pane.hidden) && !pending && !polling && !data) void load();
+        if ((watched || !pane.hidden) && !pending && !data && loadingStamp !== stamp(c)) {
+            // A poll in flight would see the cleared data and stop without loading; it loads on finishing.
+            if (polling) deferredLoad = true; else void load();
+        }
     }
     function blockEdit(pageId, alias) {
         const item = openItems(exposure().conflicts).find(v => targetMatches(v, pageId, alias, context()?.payload));
@@ -383,7 +390,13 @@
                 await load();
             }
         } catch (_) { /* Explicit reload and resolution surface actionable failures. */ }
-        finally { polling = false; }
+        finally {
+            polling = false;
+            if (deferredLoad) {
+                deferredLoad = false;
+                if (!data && !pending && pane?.isConnected && (watched || !pane.hidden)) void load();
+            }
+        }
     }, 5000);
     root.DocumentationConflicts = {sync, show, blockEdit, refreshed, preview, ...helpers};
 })(typeof window !== 'undefined' ? window : globalThis);

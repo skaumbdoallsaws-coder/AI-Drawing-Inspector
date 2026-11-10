@@ -1063,7 +1063,7 @@ def main():
             reopened = get_scene()
             write_json(output / "reopened.json", reopened)
             page.screenshot(path=str(output / "reopened.png"), full_page=True)
-            record("scene_upgraded_in_place", reopened["scene"]["schemaVersion"] == 4
+            record("scene_upgraded_in_place", reopened["scene"]["schemaVersion"] == 5
                    and not (server.manual / "edit.json").exists())
             record("original_v2_bytes_retained", sha(server.manual / "documentation-scene.v2.json") == copied_scene_hash)
             record("manual_plan_unchanged", sha(server.manual / "manual-plan.json") == legacy_before["manual-plan.json"])
@@ -1099,15 +1099,18 @@ def main():
                    and committed_files == {p.name: sha(p) for p in server.manual.iterdir() if p.is_file()})
             open_workspace()
             with page.expect_response(lambda response: response.request.method == "POST" and "/undo" in response.url,
-                                      timeout=120000):
+                                      timeout=120000) as first_undo:
                 page.locator("#documentationUndoRibbon").click()
+            # The reopen reloads the page: let the (large) response body finish first, or Chromium aborts it.
+            first_undo.value.finished()
             open_workspace()
             record("batch_undo_is_one_step", page.locator(
                 f'#documentationPublicationSurface [data-documentation-edit-target="{alias}"]:visible').first.inner_text() == human_text
                 and page.locator(f'#documentationPublicationSurface [data-documentation-edit-target="{other_alias}"]:visible').first.inner_text() == targets[1]["text"])
             with page.expect_response(lambda response: response.request.method == "POST" and "/undo" in response.url,
-                                      timeout=120000):
+                                      timeout=120000) as second_undo:
                 page.locator("#documentationUndoRibbon").click()
+            second_undo.value.finished()
             undone = get_scene()
             write_json(output / "undone.json", undone)
             open_workspace()

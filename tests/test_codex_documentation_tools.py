@@ -131,7 +131,13 @@ def test_the_tool_set_is_exact_typed_and_closed():
     specs = tool_specs()
     assert tuple(spec["name"] for spec in specs) == NAMES
     assert {s["name"] for s in specs if s["name"] in {"read_document_pages", "edit_document_text", "apply_document_edits"}} == {"read_document_pages", "edit_document_text", "apply_document_edits"}
-    assert next(s for s in specs if s["name"] == "apply_document_edits")["read_only"] is False
+    batch = next(s for s in specs if s["name"] == "apply_document_edits")
+    assert batch["read_only"] is False
+    variants = batch["input_schema"]["properties"]["operations"]["items"]["anyOf"]
+    assert {item["properties"]["operation"]["enum"][0] for item in variants} == {"replace_text", "set_slot_value", "replace_rich_text"}
+    plain = next(s for s in specs if s["name"] == "edit_document_text")["input_schema"]
+    assert plain["properties"]["edits"]["items"]["properties"]["wholeFieldReplacement"] == {"type": "boolean"}
+    assert "product_specification_sheet" in plain["properties"]["documentType"]["enum"]
     assert next(s for s in specs if s["name"] == "propose_document_value_confirmation")["read_only"] is True
     assert next(s for s in specs if s["name"] == "inspect_document_change")["read_only"] is True
     assert next(s for s in specs if s["name"] == "undo_document_change")["read_only"] is False

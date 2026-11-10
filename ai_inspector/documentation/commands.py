@@ -129,10 +129,10 @@ def operation_store(operations: list[dict]) -> str:
     if not isinstance(operations, list) or not 1 <= len(operations) <= 12 or any(not isinstance(o, dict) for o in operations):
         raise DocumentEditError("invalid_document_operation", "Submit 1-12 edit operations.")
     kinds = {o.get("operation") for o in operations}
-    if kinds == {"replace_text", "set_slot_value"}:
+    if "set_slot_value" in kinds and kinds & {"replace_text", "replace_rich_text"}:
         raise DocumentEditError("invalid_document_operation", "send text and value edits as separate requests")
-    if kinds not in ({"replace_text"}, {"set_slot_value"}):
+    if not (kinds <= {"replace_text", "replace_rich_text"} or kinds == {"set_slot_value"}):
         raise DocumentEditError("invalid_document_operation", "Unsupported edit operation.")
     if len({o.get("targetId") for o in operations}) != len(operations):
         raise DocumentEditError("invalid_document_operation", "Each target may occur only once in a batch.")
-    return "scene" if kinds == {"replace_text"} else "slots"
+    return "slots" if kinds == {"set_slot_value"} else "scene"

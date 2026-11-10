@@ -51,7 +51,15 @@ from ai_inspector.documentation.commands import (
     content_hash as documentation_content_hash, request_hash as documentation_request_hash,
     prior_receipt as documentation_prior_receipt, operation_store as documentation_operation_store,
 )
-from ai_inspector.documentation.targets import text_targets as documentation_text_targets, hash_values as documentation_hash_values
+from ai_inspector.documentation.targets import (
+    text_targets as documentation_text_targets, hash_values as documentation_hash_values,
+    owner_state as documentation_target_state, read_targets as documentation_read_targets,
+    capabilities as documentation_target_capabilities,
+)
+from ai_inspector.documentation.rich_text import (
+    enabled as documentation_rich_text_enabled, require_enabled as require_documentation_rich_text,
+    validate as validate_documentation_rich_text,
+)
 from ai_inspector.documentation.provenance import (
     prepare_text_command as documentation_provenance_command,
     confirmation_targets as documentation_confirmation_targets,
@@ -16024,6 +16032,16 @@ class PartsManualProposalApprovalBody(BaseModel):
     candidateIds: List[str] = Field(min_length=1)
 
 
+class _DocumentationJSONResponse(JSONResponse):
+    def render(self, content):
+        try:
+            return super().render(content)
+        except UnicodeEncodeError:
+            # A corrupt stored rich field is read-only but must not break GET.
+            # JSON escaping carries its exact code units without rewriting it.
+            return json.dumps(content, ensure_ascii=True, allow_nan=False, separators=(",", ":")).encode("ascii")
+
+
 class DocumentationSceneCommandBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -16048,6 +16066,9 @@ class DocumentationSceneCommandBody(BaseModel):
     repeatedPartStrategy: Optional[str] = None
     documentObject: Optional[Dict[str, Any]] = None
     text: Optional[str] = None
+    richText: Optional[Dict[str, Any]] = None
+    expectedContentHash: Optional[str] = None
+    wholeFieldReplacement: bool = False
     style: Optional[Dict[str, Any]] = None
     theme: Optional[Dict[str, Any]] = None
     pageMasters: Optional[Dict[str, Any]] = None
@@ -16162,6 +16183,7 @@ def _operations_manual_build_document_with_scene(
     if rebaseline_stale:
         loaded_scene = repository.commit_refresh(str(catalog["assemblyNumber"]), loaded_scene["scene"],
             refresh_receipt, base_revision=refresh_revision, identity_document=baseline)
+    loaded_scene.update(_documentation_editor_read(document, loaded_scene, baseline))
     return _DocumentationDocument(document, baseline), loaded_scene
 
 
@@ -16441,7 +16463,9 @@ def _specification_sheet_build_document_with_scene(
     slot_journal = SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, str(catalog["assemblyNumber"])).read()["journal"]
     slot_undo, slot_redo = history_choices(slot_journal)
     loaded_scene["slotHistory"] = {"canUndo": bool(slot_undo), "canRedo": bool(slot_redo)}
-    loaded_scene["slotBinding"] = {**documentation_binding_data(snapshot["state"]), "hashes": snapshot["hashes"]}
+    loaded_scene["slotBinding"] = {**documentation_binding_data(snapshot["state"]),
+        "hashes": {key: value for key, value in snapshot["hashes"].items() if key.startswith("slot:") or key == "@sheet"}}
+    loaded_scene.update(_documentation_editor_read(document, loaded_scene, baseline))
     return _DocumentationDocument(document, baseline), loaded_scene
 
 
@@ -16642,6 +16666,7 @@ def _work_instruction_build_document_with_scene(
     if rebaseline_stale:
         loaded_scene = repository.commit_refresh(str(catalog["assemblyNumber"]), loaded_scene["scene"],
             refresh_receipt, base_revision=refresh_revision, identity_document=baseline)
+    loaded_scene.update(_documentation_editor_read(document, loaded_scene, baseline))
     return _DocumentationDocument(document, baseline), loaded_scene
 
 
@@ -17250,6 +17275,7 @@ def _parts_manual_build_document_with_scene(
         documentation_scene=loaded_scene["scene"],
         documentation_scene_revision=str(loaded_scene["revision"]),
     )
+    loaded_scene.update(_documentation_editor_read(document, loaded_scene, baseline))
     return _DocumentationDocument(document, baseline), loaded_scene
 
 
@@ -17320,7 +17346,7 @@ def operations_manual_generate(assembly_number: str, rebaseline: bool = False):
     }
 
 
-@app.get("/api/operations-manual/{assembly_number}/documentation-scene")
+@app.get("/api/operations-manual/{assembly_number}/documentation-scene", response_class=_DocumentationJSONResponse)
 def operations_manual_documentation_scene_get(assembly_number: str):
     try:
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
@@ -17346,7 +17372,8 @@ def operations_manual_documentation_scene_get(assembly_number: str):
     }
 
 
-@app.post("/api/operations-manual/{assembly_number}/documentation-scene/commands")
+@app.post("/api/operations-manual/{assembly_number}/documentation-scene/commands", response_class=_DocumentationJSONResponse)
+@_documentation_store_lock
 def operations_manual_documentation_scene_command(
     assembly_number: str,
     body: DocumentationSceneCommandBody,
@@ -17390,7 +17417,7 @@ def operations_manual_documentation_scene_command(
             current_document["manualPlanRevision"],
             base_revision=body.baseRevision,
             identity_document=_documentation_identity_document(current_document),
-            command=documentation_provenance_command(current_document, command),
+            command=_documentation_prepare_scene_command(current_document, _loaded_scene, command),
             page_targets=_operations_manual_editable_page_targets(current_document),
         )
         next_document = build_operations_manual_document(
@@ -17485,7 +17512,7 @@ def _operations_manual_documentation_history(
     }
 
 
-@app.post("/api/operations-manual/{assembly_number}/documentation-scene/undo")
+@app.post("/api/operations-manual/{assembly_number}/documentation-scene/undo", response_class=_DocumentationJSONResponse)
 def operations_manual_documentation_scene_undo(
     assembly_number: str,
     body: DocumentationSceneHistoryBody,
@@ -17495,7 +17522,7 @@ def operations_manual_documentation_scene_undo(
     )
 
 
-@app.post("/api/operations-manual/{assembly_number}/documentation-scene/redo")
+@app.post("/api/operations-manual/{assembly_number}/documentation-scene/redo", response_class=_DocumentationJSONResponse)
 def operations_manual_documentation_scene_redo(
     assembly_number: str,
     body: DocumentationSceneHistoryBody,
@@ -17801,7 +17828,7 @@ def work_instructions_generate(assembly_number: str, rebaseline: bool = False):
     }
 
 
-@app.get("/api/work-instructions/{assembly_number}/documentation-scene")
+@app.get("/api/work-instructions/{assembly_number}/documentation-scene", response_class=_DocumentationJSONResponse)
 def work_instructions_documentation_scene_get(assembly_number: str):
     try:
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
@@ -17832,7 +17859,8 @@ def work_instructions_documentation_scene_get(assembly_number: str):
     }
 
 
-@app.post("/api/work-instructions/{assembly_number}/documentation-scene/commands")
+@app.post("/api/work-instructions/{assembly_number}/documentation-scene/commands", response_class=_DocumentationJSONResponse)
+@_documentation_store_lock
 def work_instructions_documentation_scene_command(
     assembly_number: str,
     body: DocumentationSceneCommandBody,
@@ -17870,7 +17898,7 @@ def work_instructions_documentation_scene_command(
             current_document["manualPlanRevision"],
             base_revision=body.baseRevision,
             identity_document=_documentation_identity_document(current_document),
-            command=documentation_provenance_command(current_document, command),
+            command=_documentation_prepare_scene_command(current_document, _loaded_scene, command),
             page_targets=_operations_manual_editable_page_targets(current_document),
         )
         next_document = _work_instruction_document_for_scene(
@@ -17973,7 +18001,7 @@ def _work_instructions_documentation_history(
     }
 
 
-@app.post("/api/work-instructions/{assembly_number}/documentation-scene/undo")
+@app.post("/api/work-instructions/{assembly_number}/documentation-scene/undo", response_class=_DocumentationJSONResponse)
 def work_instructions_documentation_scene_undo(
     assembly_number: str,
     body: DocumentationSceneHistoryBody,
@@ -17983,7 +18011,7 @@ def work_instructions_documentation_scene_undo(
     )
 
 
-@app.post("/api/work-instructions/{assembly_number}/documentation-scene/redo")
+@app.post("/api/work-instructions/{assembly_number}/documentation-scene/redo", response_class=_DocumentationJSONResponse)
 def work_instructions_documentation_scene_redo(
     assembly_number: str,
     body: DocumentationSceneHistoryBody,
@@ -18300,7 +18328,7 @@ def specification_sheet_generate(assembly_number: str, rebaseline: bool = False)
     }
 
 
-@app.get("/api/specification-sheet/{assembly_number}/documentation-scene")
+@app.get("/api/specification-sheet/{assembly_number}/documentation-scene", response_class=_DocumentationJSONResponse)
 def specification_sheet_documentation_scene_get(assembly_number: str):
     try:
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
@@ -18327,7 +18355,8 @@ def specification_sheet_documentation_scene_get(assembly_number: str):
     }
 
 
-@app.post("/api/specification-sheet/{assembly_number}/documentation-scene/commands")
+@app.post("/api/specification-sheet/{assembly_number}/documentation-scene/commands", response_class=_DocumentationJSONResponse)
+@_documentation_store_lock
 def specification_sheet_documentation_scene_command(
     assembly_number: str,
     body: DocumentationSceneCommandBody,
@@ -18365,7 +18394,7 @@ def specification_sheet_documentation_scene_command(
             current_document["manualPlanRevision"],
             base_revision=body.baseRevision,
             identity_document=_documentation_identity_document(current_document),
-            command=command,
+            command=_documentation_prepare_scene_command(current_document, _loaded_scene, command),
             page_targets=_operations_manual_editable_page_targets(current_document),
         )
         next_document = _specification_sheet_compile(
@@ -18448,7 +18477,7 @@ def _specification_sheet_documentation_history(
     }
 
 
-@app.post("/api/specification-sheet/{assembly_number}/documentation-scene/undo")
+@app.post("/api/specification-sheet/{assembly_number}/documentation-scene/undo", response_class=_DocumentationJSONResponse)
 def specification_sheet_documentation_scene_undo(
     assembly_number: str,
     body: DocumentationSceneHistoryBody,
@@ -18458,7 +18487,7 @@ def specification_sheet_documentation_scene_undo(
     )
 
 
-@app.post("/api/specification-sheet/{assembly_number}/documentation-scene/redo")
+@app.post("/api/specification-sheet/{assembly_number}/documentation-scene/redo", response_class=_DocumentationJSONResponse)
 def specification_sheet_documentation_scene_redo(
     assembly_number: str,
     body: DocumentationSceneHistoryBody,
@@ -18866,7 +18895,7 @@ def _documentation_snapshot_payload(payload, document_type, *, identity_document
         state["resolutionHistory"] += scene_review["resolutionHistory"]
         state["openConflictCount"] += scene_review["openConflictCount"]
     targets = documentation_text_targets(state, document)
-    hashes = {key: documentation_content_hash(state, key, value)
+    hashes = {key: documentation_content_hash(documentation_target_state(state, targets[key]), key, value)
               for key, value in documentation_hash_values(targets).items()}
     if document_type == "product_specification_sheet":
         # Structural operations depend on the entire row/settings/value collection.
@@ -18875,6 +18904,36 @@ def _documentation_snapshot_payload(payload, document_type, *, identity_document
             "manualPlanRevision": state["manualPlanRevision"]})
     return {"state": state, "targets": targets, "hashes": hashes, "document": document,
             "identity_document": baseline}
+
+
+def _documentation_editor_read(document, loaded, baseline):
+    if not any(item.get("type") == "text" for page in document.get("pages", [])
+               for item in page.get("documentationObjects", {}).values()):
+        return {"documentationRichText": documentation_rich_text_enabled(), "richTextFields": []}
+    snapshot = _documentation_snapshot_payload({**loaded, "document": document}, document["documentType"],
+                                                identity_document=baseline)
+    fields = [documentation_read_targets(snapshot["state"], snapshot["targets"], [{"targetId": key}], limit=None)["targets"][0]
+              for key, target in snapshot["targets"].items() if target["targetType"] == "document_object"]
+    return {"documentationRichText": documentation_rich_text_enabled(), "richTextFields": fields}
+
+
+def _documentation_prepare_scene_command(document, loaded, command):
+    """The workspace retains exact baseRevision checks; rich writes also bind the field hash."""
+    if command.get("operation") == "replace_rich_text":
+        require_documentation_rich_text()
+    if command.get("operation") == "replace_rich_text" or command.get("wholeFieldReplacement"):
+        snapshot = _documentation_snapshot_payload({**loaded, "document": document}, document["documentType"])
+        from ai_inspector.documentation.targets import resolve_target
+        target = resolve_target(snapshot["targets"], command["targetId"], command["pageId"])
+        if not command.get("expectedContentHash"):
+            raise DocumentEditError("document_read_required", "Read the complete field before replacing it.")
+        if command["expectedContentHash"] != snapshot["hashes"][target["targetId"]]:
+            raise DocumentEditError("content_hash_mismatch", "This field changed; keep the draft and read it again.", targetId=target["targetId"])
+        if command.get("operation") == "replace_rich_text" and "replace_rich_text" not in documentation_target_capabilities(target):
+            raise DocumentEditError("read_only_derived_field", "This target does not permit rich text.")
+    if document["documentType"] == "product_specification_sheet" and command.get("targetType") != "document_object":
+        return command  # Preserve the sheet owner's existing viewport/slot projection.
+    return documentation_provenance_command(document, command)
 
 
 def _documentation_check_binding(observed, state):
@@ -19297,6 +19356,7 @@ def specification_sheet_fillable_export(assembly_number: str):
             assembly_data=assembly_data,
             catalog=catalog,
         )
+        documentation_check_export(document)
         readiness = specification_export_readiness(document)
         if readiness["status"] != "READY":
             return JSONResponse(
@@ -19315,6 +19375,8 @@ def specification_sheet_fillable_export(assembly_number: str):
             document,
         )
     except (*_SPECIFICATION_SHEET_SLOT_ERRORS, SpecificationSheetExportError) as error:
+        if isinstance(error, DocumentEditError):
+            return JSONResponse(status_code=422, content={"success": False, "error": error.code, "message": str(error), "details": error.details})
         return _specification_sheet_error_response(error, operation="fillable_pdf")
     count = artifact["fieldCount"]
     return {
@@ -19963,7 +20025,7 @@ def parts_manual_section_bom(assembly_number: str, section_id: str):
     }
 
 
-@app.get("/api/parts-manual/{assembly_number}/documentation-scene")
+@app.get("/api/parts-manual/{assembly_number}/documentation-scene", response_class=_DocumentationJSONResponse)
 def parts_manual_documentation_scene_get(assembly_number: str):
     try:
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
@@ -20032,7 +20094,7 @@ def _parts_refresh_inputs(assembly_number):
     return assembly_data, catalog, plans, old_plan, candidate_plan, baseline, scenes, loaded
 
 
-@app.get("/api/parts-manual/{assembly_number}/documentation-scene/refresh")
+@app.get("/api/parts-manual/{assembly_number}/documentation-scene/refresh", response_class=_DocumentationJSONResponse)
 def parts_manual_refresh_preview(assembly_number: str):
     try:
         with DocumentationSceneRepository.transaction_lock, PartsManualRepository.transaction_lock:
@@ -20045,7 +20107,7 @@ def parts_manual_refresh_preview(assembly_number: str):
         return _parts_manual_error_response(error, operation="refresh_preview")
 
 
-@app.post("/api/parts-manual/{assembly_number}/documentation-scene/refresh")
+@app.post("/api/parts-manual/{assembly_number}/documentation-scene/refresh", response_class=_DocumentationJSONResponse)
 def parts_manual_refresh(assembly_number: str, body: Dict[str, Any]):
     try:
         with DocumentationSceneRepository.transaction_lock, PartsManualRepository.transaction_lock:
@@ -20069,7 +20131,8 @@ def parts_manual_refresh(assembly_number: str, body: Dict[str, Any]):
         return _parts_manual_error_response(error, operation="refresh")
 
 
-@app.post("/api/parts-manual/{assembly_number}/documentation-scene/commands")
+@app.post("/api/parts-manual/{assembly_number}/documentation-scene/commands", response_class=_DocumentationJSONResponse)
+@_documentation_store_lock
 def parts_manual_documentation_scene_command(
     assembly_number: str,
     body: DocumentationSceneCommandBody,
@@ -20107,7 +20170,7 @@ def parts_manual_documentation_scene_command(
             loaded_plan["revision"],
             base_revision=body.baseRevision,
             identity_document=_documentation_identity_document(document),
-            command=documentation_provenance_command(document, command),
+            command=_documentation_prepare_scene_command(document, _loaded_scene, command),
             page_targets=_parts_manual_editable_page_targets(document),
         )
         next_document = build_manual_document(
@@ -20132,7 +20195,7 @@ def parts_manual_documentation_scene_command(
     ) as error:
         if isinstance(error, ValueError) and not isinstance(
             error,
-            (PartsManualRepositoryError, PartsManualValidationError, DocumentationSceneError),
+            (PartsManualRepositoryError, PartsManualValidationError, DocumentationSceneError, DocumentEditError),
         ):
             return JSONResponse(
                 status_code=422,
@@ -20223,7 +20286,7 @@ def _parts_manual_documentation_history(
     }
 
 
-@app.post("/api/parts-manual/{assembly_number}/documentation-scene/undo")
+@app.post("/api/parts-manual/{assembly_number}/documentation-scene/undo", response_class=_DocumentationJSONResponse)
 def parts_manual_documentation_scene_undo(
     assembly_number: str,
     body: DocumentationSceneHistoryBody,
@@ -20235,7 +20298,7 @@ def parts_manual_documentation_scene_undo(
     )
 
 
-@app.post("/api/parts-manual/{assembly_number}/documentation-scene/redo")
+@app.post("/api/parts-manual/{assembly_number}/documentation-scene/redo", response_class=_DocumentationJSONResponse)
 def parts_manual_documentation_scene_redo(
     assembly_number: str,
     body: DocumentationSceneHistoryBody,
@@ -41924,6 +41987,8 @@ class _DocumentationAgentHost:
     def apply_document_edits(self, assembly_number, document_type, observed):
         operations = observed["operations"]
         destination = documentation_operation_store(operations)
+        if any(operation["operation"] == "replace_rich_text" for operation in operations):
+            require_documentation_rich_text()
         if destination == "slots":
             if document_type != "product_specification_sheet":
                 raise DocumentEditError("invalid_document_operation", "This document has no specification slots.")
@@ -41938,8 +42003,6 @@ class _DocumentationAgentHost:
                 "source": "chat", "values": [{"slot": op["targetId"].removeprefix("slot:"), "value": op["value"]}
                                               for op in operations],
                 "_edit": {**observed, "hashes": hashes}})
-        if document_type == "product_specification_sheet":
-            raise DocumentEditError("invalid_document_operation", "Use typed slot value edits for this sheet.")
         repository = self._edit_repository(document_type)
         with repository.transaction_lock:
             # Receipt lookup precedes current target resolution: a successful
@@ -41968,9 +42031,21 @@ class _DocumentationAgentHost:
                 if target["operation"] != "replace_text":
                     raise DocumentEditError("read_only_derived_field", "This target is not editable text.")
                 expected[operation["targetId"]] = operation["expectedContentHash"]
-                commands.append({"operation": "update_text", "pageId": PART_TEXT_PAGE_ID if target["alias"].startswith("part.") else target["pageId"],
-                    "targetType": target["targetType"], "targetId": target["alias"], "text": operation["text"],
-                    "_noChange": target["text"] == operation["text"]})
+                rich = operation["operation"] == "replace_rich_text"
+                if rich:
+                    require_documentation_rich_text()
+                    if "replace_rich_text" not in documentation_target_capabilities(target):
+                        raise DocumentEditError("read_only_derived_field", "This target does not permit rich text.")
+                    value = validate_documentation_rich_text(operation.get("richText"))
+                    unchanged = target.get("richField", {}).get("richText") == value
+                else:
+                    value = operation["text"]
+                    unchanged = target["text"] == value and not target.get("richField", {}).get("isRichText")
+                commands.append({"operation": "replace_rich_text" if rich else "update_text",
+                    "pageId": PART_TEXT_PAGE_ID if target["alias"].startswith("part.") else target["pageId"],
+                    "targetType": target["targetType"], "targetId": target["alias"],
+                    "richText" if rich else "text": value,
+                    "wholeFieldReplacement": operation.get("wholeFieldReplacement", False), "_noChange": unchanged})
             document = snapshot["document"]
             targets = (_parts_manual_editable_page_targets(document) if document_type == "illustrated_parts_manual"
                        else _operations_manual_editable_page_targets(document))

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from ai_inspector.documentation.rich_text import plain_text as _object_plain_text
+
 import hashlib
 import json
 import math
@@ -983,7 +985,7 @@ def _draw_documentation_objects(
             }.get(str(style.get("textAlign") or "left"), fitz.TEXT_ALIGN_LEFT)
             page.insert_textbox(
                 fitz.Rect(rect.x0 + 3, rect.y0 + 2, rect.x1 - 3, rect.y1 - 2),
-                str(value.get("content") or ""),
+                _object_plain_text(value.get("content")),
                 fontsize=float(style.get("fontSize") or 10),
                 fontname=_pdf_font(
                     style.get("fontFamily"),

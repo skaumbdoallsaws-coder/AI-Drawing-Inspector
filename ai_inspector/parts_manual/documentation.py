@@ -39,7 +39,12 @@ from ai_inspector.documentation.refresh import (
     reset_preview as preview_reset,
 )
 
-DOCUMENTATION_SCENE_SCHEMA_VERSION = 4
+from ai_inspector.documentation.rich_text import (
+    validate as validate_rich_text, is_rich, require_enabled as require_rich_text,
+    reserved_ids as rich_reserved_ids, field_read as rich_field_read, guard_restored_fields,
+)
+
+DOCUMENTATION_SCENE_SCHEMA_VERSION = 5
 DOCUMENTATION_TARGET_TYPES = frozenset(
     {
         "manual_group",
@@ -73,6 +78,7 @@ DOCUMENTATION_COMMAND_OPERATIONS = frozenset(
         "add_object",
         "remove_object",
         "update_text",
+        "replace_rich_text",
         "update_style",
         "set_theme",
         "apply_template",
@@ -549,7 +555,7 @@ def _document_asset(value: Any) -> Dict[str, Any]:
     }
 
 
-def _document_object(value: Any, *, expected_id: Optional[str] = None) -> Dict[str, Any]:
+def _document_object(value: Any, *, expected_id: Optional[str] = None, stored: bool = False) -> Dict[str, Any]:
     if not isinstance(value, Mapping):
         raise DocumentationSceneError("documentation object must be an object")
     object_id = str(value.get("objectId") or expected_id or "").strip()
@@ -579,8 +585,14 @@ def _document_object(value: Any, *, expected_id: Optional[str] = None) -> Dict[s
     if result["source"] not in {"user", "template", "sage"}:
         raise DocumentationSceneError("unsupported documentation object source")
     if object_type == "text":
-        content = str(value.get("content") or "")
-        if len(content) > _MAX_DOCUMENT_TEXT:
+        content = value.get("content", "")
+        if is_rich(content):
+            # Replay preserves even malformed envelopes. Reads quarantine only
+            # that field; live writes validate before entering the journal.
+            content = copy.deepcopy(content) if stored else validate_rich_text(content)
+        else:
+            content = str(content or "")
+        if isinstance(content, str) and len(content) > _MAX_DOCUMENT_TEXT:
             raise DocumentationSceneError("documentation text is too long")
         result["content"] = content
     elif object_type == "image":
@@ -977,11 +989,13 @@ def _replay_target_command(
             if current.get("type") != "text":
                 raise DocumentationSceneError("only text objects have editable text")
             current["content"] = str(command.get("text") or "")
+        elif operation == "replace_rich_text":
+            current["content"] = copy.deepcopy(command.get("richText"))
         elif operation == "update_style":
             merged_style = dict(current.get("styleOverrides") or {})
             merged_style.update(_document_style(command.get("style"), allow_empty=False))
             current["styleOverrides"] = merged_style
-        objects[target_id] = _document_object(current, expected_id=target_id)
+        objects[target_id] = _document_object(current, expected_id=target_id, stored=True)
         return
 
     collection, _ = _target_collection(page, target_type)
@@ -1139,7 +1153,7 @@ def replay_documentation_commands(commands: Iterable[Mapping[str, Any]]) -> Dict
             continue
         if operation == "add_object":
             document_object = _document_object(
-                command.get("documentObject"), expected_id=target_id
+                command.get("documentObject"), expected_id=target_id, stored=True
             )
             objects = page.setdefault("documentObjects", {})
             if target_id in objects:
@@ -1280,7 +1294,7 @@ def _arrange_transforms(value: Any) -> list[Dict[str, Any]]:
 
 def _upgrade_documentation_scene(scene: Dict[str, Any]) -> Dict[str, Any]:
     schema_version = scene.get("schemaVersion")
-    if schema_version not in {1, 2, 3, DOCUMENTATION_SCENE_SCHEMA_VERSION}:
+    if schema_version not in {1, 2, 3, 4, DOCUMENTATION_SCENE_SCHEMA_VERSION}:
         raise DocumentationSceneError("unsupported documentation scene schema")
     commands = scene.get("commands")
     if not isinstance(commands, list):
@@ -1352,7 +1366,7 @@ def validate_documentation_scene(scene: Mapping[str, Any]) -> None:
         if operation == "add_object":
             if target_type != "document_object":
                 raise DocumentationSceneError("object insertion requires a document object")
-            _document_object(command.get("documentObject"), expected_id=str(command.get("targetId") or ""))
+            _document_object(command.get("documentObject"), expected_id=str(command.get("targetId") or ""), stored=True)
             continue
         if operation == "set_theme":
             if target_type != "document_theme":
@@ -1577,10 +1591,10 @@ class DocumentationSceneRepository:
         if path.is_file():
             original = path.read_bytes()
             old_version = json.loads(original).get("schemaVersion")
-            if old_version not in {1, 2, 3, DOCUMENTATION_SCENE_SCHEMA_VERSION}:
+            if old_version not in {1, 2, 3, 4, DOCUMENTATION_SCENE_SCHEMA_VERSION}:
                 raise DocumentEditError("unsupported_document_schema", "This scene needs a newer editor.")
-            if old_version in {1, 2, 3}:
-                backup = path.with_name("documentation-scene.v3.json" if old_version == 3 else "documentation-scene.v2.json")
+            if old_version in {1, 2, 3, 4}:
+                backup = path.with_name("documentation-scene.v" + str(max(2, old_version)) + ".json")
                 if backup.exists():
                     if backup.read_bytes() != original:
                         raise DocumentEditError("legacy_store_changed", "The original scene differs from its rollback copy.")
@@ -1885,6 +1899,8 @@ class DocumentationSceneRepository:
             raise DocumentEditError("invalid_document_operation", "Use the human confirmation endpoint.")
         if actor not in DOCUMENTATION_COMMAND_ACTORS:
             raise DocumentEditError("invalid_document_operation", "Invalid trusted actor.")
+        if any(command.get("operation") == "replace_rich_text" for command in commands):
+            require_rich_text()
         payload_hash = request_hash(request_id, payload if payload is not None else {
             "commands": commands, "expectedRevision": expected_revision, "hashes": expected_hashes,
             "sourceRevision": source_revision, "manualPlanRevision": manual_plan_revision, "actor": actor})
@@ -1927,8 +1943,12 @@ class DocumentationSceneRepository:
             receipt = make_receipt(scene, request_id=request_id, payload_hash=payload_hash,
                 document=document_id(self.document_type, assembly_number), expected_revision=expected_revision,
                 changed=changed, undoable=True)
+            removed = [target for target, command in zip(changed, persisted) if command.get("richTextRemoved")]
+            if removed:
+                receipt["validation"].append({"code": "rich_text_replaced_with_plain", "targetIds": removed})
             if not changed:
                 retain_receipt(candidate, receipt)
+                guard_restored_fields(scene, candidate)
                 self._save(assembly_number, candidate)
                 return {**self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document), "receipt": receipt, "changed": []}
             for command in persisted:
@@ -1989,6 +2009,7 @@ class DocumentationSceneRepository:
             candidate["updatedAt"] = _utc_now()
             retain_receipt(candidate, receipt)
             candidate = _upgrade_documentation_scene(candidate)
+            guard_restored_fields(scene, candidate)
             self._save(assembly_number, candidate)
             return {**self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document), "receipt": receipt}
 
@@ -2031,6 +2052,7 @@ class DocumentationSceneRepository:
             # Replay normalizes empty page containers just like ordinary commands.
             candidate = _upgrade_documentation_scene(candidate)
             validate_documentation_scene(candidate)
+            guard_restored_fields(scene, candidate)
             self._save(assembly_number, candidate)
             return {**self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document), "receipt": receipt}
 
@@ -2072,6 +2094,7 @@ class DocumentationSceneRepository:
                 _advance_edit_versions(candidate, [entry])
                 candidate["updatedAt"] = _utc_now()
                 retain_receipt(candidate, receipt)
+                guard_restored_fields(scene, candidate)
                 self._save(assembly_number, candidate)
                 return {**self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document), "receipt": receipt}
             return self.undo_change(assembly_number, source_revision, manual_plan_revision,
@@ -2090,6 +2113,8 @@ def apply_documentation_command_candidate(
     """
     scene = copy.deepcopy(dict(scene))
     operation = str(command.get("operation") or "")
+    if operation == "replace_rich_text":
+        require_rich_text()
     target_type = str(command.get("targetType") or "")
     page_id = str(command.get("pageId") or "")
     target_id = str(command.get("targetId") or "")
@@ -2271,11 +2296,28 @@ def apply_documentation_command_candidate(
             raise DocumentationSceneError(
                 "unsupported documentation repeated-part strategy"
             )
+    # Live validation belongs here, shared by the workspace and Sage. Replay
+    # must not depend on the current flag (undo and read retain stored values).
+    rich_text = None
+    current_object = scene.get("pages", {}).get(page_id, {}).get("documentObjects", {}).get(target_id, {})
+    current_value = current_object.get("content", "")
+    if target_type == "document_object" and current_object and is_rich(current_value):
+        status = rich_field_read(current_value, reserved=rich_reserved_ids(scene.get("pages", {}), page_id, target_id))
+        if status["richTextError"]:
+            raise DocumentEditError(status["richTextError"], "This stored rich field is read-only.", targetId=target_id)
+        if operation == "update_text" and command.get("wholeFieldReplacement") is not True:
+            raise DocumentEditError("rich_text_replacement_required", "Explicit whole-field replacement is required to remove rich formatting.", targetId=target_id)
+    if operation == "replace_rich_text":
+        if target_type != "document_object" or current_object.get("type") != "text" or current_object.get("locked"):
+            raise DocumentEditError("read_only_derived_field", "Only an unlocked authored text object supports rich text.")
+        rich_text = validate_rich_text(command.get("richText"), reserved_ids=rich_reserved_ids(scene.get("pages", {}), page_id, target_id))
     document_object = None
     if operation == "add_object":
         document_object = _document_object(
             command.get("documentObject"), expected_id=target_id
         )
+    if document_object is not None and is_rich(document_object.get("content")):
+        raise DocumentEditError("invalid_document_operation", "Create a plain text object, then use replace_rich_text.")
     if operation == "remove_object" and target_type != "document_object":
         raise DocumentationSceneError("only document objects can be removed")
     text = None
@@ -2337,8 +2379,13 @@ def apply_documentation_command_candidate(
         persisted_command["repeatedPartStrategy"] = repeated_part_strategy
     if document_object is not None:
         persisted_command["documentObject"] = copy.deepcopy(document_object)
+    if rich_text is not None:
+        persisted_command["richText"] = rich_text
     if text is not None:
         persisted_command["text"] = text
+        if is_rich(current_value):
+            persisted_command["wholeFieldReplacement"] = True
+            persisted_command["richTextRemoved"] = True
     if style is not None:
         persisted_command["style"] = copy.deepcopy(style)
     if theme is not None:

@@ -24,7 +24,8 @@ from .flow import (
     assert_pages_within_bounds,
     publication_layout,
 )
-from .content import FIGURE_SPECS, prototype_sections
+from .content import FIGURE_SPECS, legacy_plan_projection, prototype_sections
+from ai_inspector.documentation.provenance import project_document
 from .nomenclature import (
     load_publication_aliases,
     resolve_publication_description,
@@ -32,7 +33,7 @@ from .nomenclature import (
 )
 
 
-OPERATIONS_MANUAL_DOCUMENT_SCHEMA_VERSION = 1
+OPERATIONS_MANUAL_DOCUMENT_SCHEMA_VERSION = 2
 OPERATIONS_MANUAL_RENDER_PIPELINE_VERSION = 4
 
 _APPROVED_FACT_STATUSES = {
@@ -1441,7 +1442,7 @@ def build_operations_manual_document(
             "assemblyNumber": assembly_number,
             "sourceRevision": catalog.get("sourceRevision"),
             "evidenceRevision": snapshot["revision"],
-            "sections": sections,
+            "sections": legacy_plan_projection(sections),
         }
     )
     document: Dict[str, Any] = {
@@ -1485,5 +1486,6 @@ def build_operations_manual_document(
         },
         "releaseGate": release_gate,
     }
+    document = project_document(document, documentation_scene)
     document["documentRevision"] = _stable_revision(document)
     return document

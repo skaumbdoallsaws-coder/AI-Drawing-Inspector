@@ -230,3 +230,43 @@ def test_specification_capture_exports_under_figure_revision(tmp_path):
         assert build_specification_pdf_bytes(attached, render_root=tmp_path, assembly_number=assembly).startswith(b"%PDF")
         docx = build_specification_docx_bytes(attached, render_root=tmp_path, assembly_number=assembly)
         assert baseline.docx_fingerprint(docx)["characters"] > 0
+
+
+def test_citation_probe_separates_active_row_support_from_original_sources():
+    document = _compiled_citation_fixture()
+    _, block = baseline.local_citation_target(document)
+    block["evidenceBindingVersion"] = 1
+    block["activeEvidenceClaimIds"] = ["CLM-SPEC-002"]
+    block["rows"][0].update(claimIds=[], sourceIds=[], activeEvidenceClaimIds=[],
+        provenance={"evidenceStatus": "edited_unverified"})
+    block["rows"].append({"cells": ["Travel", "20 in"], "claimIds": ["CLM-SPEC-002"], "sourceIds": ["SRC-001"]})
+    state = baseline.local_citation_state(document, block)
+    assert state["rowBindingsPresent"] is True and state["evidenceStatus"] == "edited_unverified"
+    assert state["activeEvidenceClaimIds"] == [] and state["claimCitations"] == []
+    assert state["evidenceClaimIds"] == ["CLM-SPEC-001", "CLM-SPEC-002"]
+    assert state["originalClaimCitations"][0]["authority"] == "OEM_CURRENT"
+    texts = {"pdf": ["Rated capacity\n1,000 lb", "Manufacturer specifications\nCurrent manufacturer source; cited by 2 claims"],
+             "docx": "Rated capacity\n1,000 lb\nManufacturer specifications\nCurrent manufacturer source; cited by 2 claims"}
+    # A source still used elsewhere is independently recorded, never mistaken
+    # for active support for the edited capacity row.
+    assert baseline.local_citation_export(document, block, texts)["sourceRegister"][0]["pdfPageNumbers"] == [2]
+
+
+def test_citation_integrity_probe_records_customer_targets_and_review_markers():
+    from ai_inspector.documentation.provenance import EDITED_MARKER
+
+    target = {"targetId": "scope-1", "pageId": "page-specifications-1", "alias": "spec-table-1.r0"}
+    document = {"provenanceTargets": [{**target, "provenance": {"evidenceStatus": "edited_unverified"}}]}
+    body = {"error": "unconfirmed_cited_values", "details": {"targets": [target]}}
+    client = SimpleNamespace(post=Mock(return_value=SimpleNamespace(status_code=422, text="blocked", json=lambda: body)))
+    texts = {"pdf": ["Rated capacity\n1,000 lb\n" + EDITED_MARKER], "docx": "1,000 lb\n" + EDITED_MARKER}
+    facts = baseline.local_citation_integrity_probe(client, "/operations", document, texts)
+    assert facts == {"customerExportHttpStatus": 422, "customerExportError": "unconfirmed_cited_values",
+                     "customerExportTargets": [target], "reviewExportMarked": {"pdf": True, "docx": True}}
+    client.post.assert_called_once_with("/operations/pdf", params={"mode": "customer"})
+    texts = {"pdf": ["Rated capacity\n1,000 lb"], "docx": "1,000 lb"}
+    assert baseline.local_citation_integrity_probe(client, "/operations", document, texts)["reviewExportMarked"] == {
+        "pdf": False, "docx": False}
+    client.post.return_value.status_code = 200
+    with pytest.raises(AssertionError):
+        baseline.local_citation_integrity_probe(client, "/operations", document, texts)

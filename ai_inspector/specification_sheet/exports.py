@@ -25,6 +25,7 @@ from ai_inspector.documentation.form_fields import (
     validate_form_fields,
 )
 from ai_inspector.operations_manual.artifacts import draft_render_path
+from ai_inspector.documentation.provenance import EDITED_MARKER, EDITED_LEGEND, check_export, export_document
 
 FILLABLE_KEYWORD_PREFIX = "inspectorpro-specification-sheet-fillable"
 # A slot's text shrinks to fit its box, down to 70% of its size; past that the export names the slot.
@@ -232,6 +233,11 @@ def _insert_fitted(page: Any, rect: Any, text: str, *, name: str, fontsize: floa
     )
 
 
+def _edited_slots(document, slots):
+    return [slot for slot in slots if (document.get("slots", {}).get(slot, {}).get("provenance") or {})
+            .get("evidenceStatus") == "edited_unverified"]
+
+
 def build_specification_pdf_bytes(
     document: Mapping[str, Any],
     *,
@@ -263,6 +269,8 @@ def _build_specification_pdf(
     assembly_number: str,
     fillable: bool,
 ) -> Tuple[bytes, List[Dict[str, Any]]]:
+    document = export_document(document)
+    check_export(document, document.get("exportMode", "review"))
     readiness = specification_export_readiness(document)
     if readiness["status"] != "READY":
         raise SpecificationSheetExportError("the current product image must be captured before export")
@@ -434,6 +442,8 @@ def _build_specification_pdf(
                 page, rect, str(cells[column]), name=name_of(row_slots[column]), fontname=font,
                 fontsize=7.8 * table_scale, color=text_color, align=align,
             )
+        if _edited_slots(document, row_slots):
+            page.insert_text((x, bottom - 1), EDITED_MARKER, fontsize=4.8, color=(0.60, 0.22, 0))
         top = bottom
 
     previous_shown = False
@@ -472,6 +482,15 @@ def _build_specification_pdf(
                 width=0.45,
             )
         previous_shown = True
+
+    for block in blocks.values():
+        candidates = [block.get("slot")] + list((block.get("slots") or {}).values()) if isinstance(
+            block.get("slots") or {}, Mapping) else [block.get("slot")]
+        if _edited_slots(document, candidates):
+            bounds = rect_of(block, (36, 700, 540, 20))
+            page.insert_text((bounds.x0, bounds.y1 + 5), EDITED_MARKER, fontsize=5, color=(0.60, 0.22, 0))
+    if _edited_slots(document, document.get("slots") or {}):
+        page.insert_text((36, 746), EDITED_LEGEND, fontsize=5, color=(0.60, 0.22, 0))
 
     page.draw_rect(fitz.Rect(24, 754, 588, 780), fill=primary, color=None)
     product = document.get("product") or {}
@@ -612,6 +631,8 @@ def build_specification_docx_bytes(
     render_root: str | Path,
     assembly_number: str,
 ) -> bytes:
+    document = export_document(document)
+    check_export(document, document.get("exportMode", "review"))
     readiness = specification_export_readiness(document)
     if readiness["status"] != "READY":
         raise SpecificationSheetExportError(
@@ -773,6 +794,8 @@ def build_specification_docx_bytes(
         bold=True,
         font_name=heading_font,
     )
+    specification_rows = [row for row in (blocks.get("specifications-table") or {}).get("rows") or []
+                          if isinstance(row, Mapping) and not any(row.get("open") or [])]
     specifications = [
         list(row.get("cells") or []) + ["", ""]
         for row in (blocks.get("specifications-table") or {}).get("rows") or []
@@ -792,6 +815,9 @@ def build_specification_docx_bytes(
             cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
         _docx_format_paragraph(cells[0].paragraphs[0], color=text_color, size=7.7, bold=True)
         _docx_format_paragraph(cells[1].paragraphs[0], color=text_color, size=7.7)
+        if _edited_slots(document, specification_rows[index].get("slots") or []):
+            note = cells[1].add_paragraph(EDITED_MARKER)
+            _docx_format_paragraph(note, color="993900", size=5.5)
 
     def feature_flags(feature: Mapping[str, Any]) -> Mapping[str, Any]:
         return feature.get("open") if isinstance(feature.get("open"), Mapping) else {}
@@ -836,6 +862,12 @@ def build_specification_docx_bytes(
             detail = cell.add_paragraph(str(feature.get("text") or ""))
             detail.paragraph_format.space_after = Pt(0)
             _docx_format_paragraph(detail, color=text_color, size=7.2)
+
+    marked = _edited_slots(document, document.get("slots") or {})
+    if marked:
+        names = ", ".join(str(document["slots"][slot].get("name") or slot) for slot in marked)
+        note = output.add_paragraph(names + ": " + EDITED_MARKER + ". " + EDITED_LEGEND)
+        _docx_format_paragraph(note, color="993900", size=6)
 
     output.core_properties.title = str(
         document.get("title") or "Product Specification Sheet"

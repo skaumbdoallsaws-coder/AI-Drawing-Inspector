@@ -29,6 +29,8 @@ from ai_inspector.documentation.commands import (
     document_id, scene_field_key,
 )
 
+from ai_inspector.documentation.provenance import replay_field_meta
+
 DOCUMENTATION_SCENE_SCHEMA_VERSION = 3
 DOCUMENTATION_TARGET_TYPES = frozenset(
     {
@@ -1055,6 +1057,9 @@ def _advance_edit_versions(scene, commands):
                 keys.add(scene_field_key(page, target["targetType"], target["targetId"]))
         else:
             keys.add(scene_field_key(page, str(command.get("targetType") or ""), str(command.get("targetId") or "")))
+    for command in _leaf_commands(commands):
+        for meta in (command.get("fieldMeta") or {}).values():
+            keys.update(scene_field_key(meta["pageId"], "page_element", alias) for alias in meta.get("aliases", []))
     for key in keys:
         scene["fieldVersions"][key] = scene["fieldVersions"].get(key, 0) + 1
     scene["editRevision"] += 1
@@ -1222,6 +1227,7 @@ def _upgrade_documentation_scene(scene: Dict[str, Any]) -> Dict[str, Any]:
         raise DocumentationSceneError("documentation history cursor is invalid")
     active_commands = commands[:cursor]
     transaction_defaults(scene)
+    scene["fieldMeta"] = replay_field_meta(active_commands)
     scene["schemaVersion"] = DOCUMENTATION_SCENE_SCHEMA_VERSION
     scene["pages"] = replay_documentation_commands(active_commands)
     theme, page_masters = replay_documentation_theme(active_commands)
@@ -1436,6 +1442,8 @@ def validate_documentation_scene(scene: Mapping[str, Any]) -> None:
             raise DocumentationSceneError(
                 "only leaders have an editable repeated-part strategy"
             )
+    if scene.get("fieldMeta", {}) != replay_field_meta(commands[:cursor]):
+        raise DocumentationSceneError("field provenance does not match active history")
     replayed = replay_documentation_commands(commands[:cursor])
     if scene.get("pages") != replayed:
         raise DocumentationSceneError(
@@ -1687,6 +1695,8 @@ class DocumentationSceneRepository:
             self._assert_revision(scene, base_revision)
             self._assert_binding(scene, source_revision, manual_plan_revision)
 
+            if any(meta.get("confirmation") for meta in (command.get("fieldMeta") or {}).values()):
+                raise DocumentationSceneError("Use the human confirmation endpoint.")
             candidate = apply_documentation_command_candidate(scene, command, page_targets)
             scene, persisted_command = candidate["scene"], candidate["command"]
             _advance_edit_versions(scene, [persisted_command])
@@ -1704,12 +1714,16 @@ class DocumentationSceneRepository:
 
     def apply_batch(self, assembly_number, source_revision, manual_plan_revision, *,
                     base_revision, expected_revision, request_id, commands, page_targets,
-                    expected_hashes, current_hashes, hashes_revision, actor="sage", payload=None):
+                    expected_hashes, current_hashes, hashes_revision, actor="sage", payload=None,
+                    allow_confirmation=False):
         """One history entry and one replace. The host compiles/hash-checks under
         transaction_lock and supplies hashes_revision to reject an unlocked race.
         """
         if not isinstance(commands, list) or not 1 <= len(commands) <= 12:
             raise DocumentEditError("invalid_document_operation", "Submit 1-12 commands.")
+        if any(meta.get("confirmation") for command in commands
+               for meta in (command.get("fieldMeta") or {}).values()) and not allow_confirmation:
+            raise DocumentEditError("invalid_document_operation", "Use the human confirmation endpoint.")
         if actor not in DOCUMENTATION_COMMAND_ACTORS:
             raise DocumentEditError("invalid_document_operation", "Invalid trusted actor.")
         payload_hash = request_hash(request_id, payload if payload is not None else {
@@ -1753,6 +1767,12 @@ class DocumentationSceneRepository:
                 retain_receipt(candidate, receipt)
                 self._save(assembly_number, candidate)
                 return {**self.read(assembly_number, source_revision, manual_plan_revision), "receipt": receipt, "changed": []}
+            for command in persisted:
+                for meta in (command.get("fieldMeta") or {}).values():
+                    meta["changeId"] = receipt["changeId"]
+                    if meta.get("confirmation"):
+                        meta["confirmation"]["changeId"] = receipt["changeId"]
+            candidate["fieldMeta"] = replay_field_meta([*scene["commands"][:scene["historyCursor"]], *persisted])
             cursor = scene["historyCursor"]
             candidate["commands"] = list(scene["commands"][:cursor]) + [{
                 "operation": "batch", "commands": persisted, "requestId": request_id, "actor": actor}]
@@ -1791,6 +1811,7 @@ class DocumentationSceneRepository:
             _advance_edit_versions(scene, [commands[next_cursor if direction == "undo" else cursor]])
             scene["historyCursor"] = next_cursor
             active_commands = commands[:next_cursor]
+            scene["fieldMeta"] = replay_field_meta(active_commands)
             scene["pages"] = replay_documentation_commands(active_commands)
             scene["theme"], scene["pageMasters"] = replay_documentation_theme(
                 active_commands
@@ -2079,12 +2100,19 @@ def apply_documentation_command_candidate(
         persisted_command["calloutItems"] = copy.deepcopy(callout_items)
     elif operation == "restore_callouts":
         persisted_command["calloutItems"] = None
+    if command.get("fieldMeta"):
+        persisted_command["fieldMeta"] = copy.deepcopy(command["fieldMeta"])
+        for meta in persisted_command["fieldMeta"].values():
+            meta.update(changeId=persisted_command["commandId"], actor=actor)
+            if meta.get("confirmation"):
+                meta["confirmation"].update(at=now, changeId=persisted_command["commandId"])
     commands.append(persisted_command)
     if not scene.get("createdAt"):
         scene["createdAt"] = now
     scene["updatedAt"] = now
     scene["commands"] = commands
     scene["historyCursor"] = len(commands)
+    scene["fieldMeta"] = replay_field_meta(commands)
     scene["pages"] = replay_documentation_commands(commands)
     scene["theme"], scene["pageMasters"] = replay_documentation_theme(commands)
     validate_documentation_scene(scene)

@@ -257,6 +257,7 @@ class FlowLayoutEngine:
                 "style": self._style_dict(style),
                 "frame": _frame(self._cursor_y, height),
                 "evidenceClaimIds": list(block.get("evidenceClaimIds") or []),
+                **({"evidenceBindingVersion": 1} if block.get("evidenceBindingVersion") == 1 else {}),
             },
             height=height,
             gap=12,
@@ -290,6 +291,7 @@ class FlowLayoutEngine:
                     "style": self._style_dict(BODY_STYLE),
                     "frame": _frame(self._cursor_y, height),
                     "evidenceClaimIds": list(block.get("evidenceClaimIds") or []),
+                **({"evidenceBindingVersion": 1} if block.get("evidenceBindingVersion") == 1 else {}),
                 },
                 height=height,
                 gap=8 if line_index + take >= len(lines) else 0,
@@ -316,6 +318,7 @@ class FlowLayoutEngine:
                 "style": self._style_dict(BODY_STYLE),
                 "frame": _frame(self._cursor_y, height),
                 "evidenceClaimIds": list(block.get("evidenceClaimIds") or []),
+                **({"evidenceBindingVersion": 1} if block.get("evidenceBindingVersion") == 1 else {}),
             },
             height=height,
             gap=10,
@@ -405,6 +408,7 @@ class FlowLayoutEngine:
                     "continued": fragment > 1,
                     "frame": _frame(self._cursor_y, height),
                     "evidenceClaimIds": list(block.get("evidenceClaimIds") or []),
+                **({"evidenceBindingVersion": 1} if block.get("evidenceBindingVersion") == 1 else {}),
                 },
                 height=height,
                 gap=10,
@@ -427,6 +431,7 @@ class FlowLayoutEngine:
                 "caption": str(payload.get("caption") or ""),
                 "frame": _frame(self._cursor_y, height),
                 "evidenceClaimIds": list(block.get("evidenceClaimIds") or []),
+                **({"evidenceBindingVersion": 1} if block.get("evidenceBindingVersion") == 1 else {}),
             },
             height=height,
             gap=12,
@@ -496,6 +501,7 @@ class FlowLayoutEngine:
             "caption": str(figure_payload.get("caption") or ""),
             "frame": _frame(y, pair_height, width=figure_width),
             "evidenceClaimIds": list(figure_block.get("evidenceClaimIds") or []),
+            **({"evidenceBindingVersion": 1} if figure_block.get("evidenceBindingVersion") == 1 else {}),
         }
         legend = {
             "blockId": str(legend_block.get("blockId") or "figure-legend"),
@@ -516,6 +522,7 @@ class FlowLayoutEngine:
                 width=legend_width,
             ),
             "evidenceClaimIds": list(legend_block.get("evidenceClaimIds") or []),
+            **({"evidenceBindingVersion": 1} if legend_block.get("evidenceBindingVersion") == 1 else {}),
         }
         self._page["layoutBlocks"].extend([figure, legend])
         self._page["evidenceClaimIds"] = sorted(
@@ -621,6 +628,7 @@ class FlowLayoutEngine:
                     "continued": fragment > 1,
                     "frame": _frame(self._cursor_y, height),
                     "evidenceClaimIds": list(block.get("evidenceClaimIds") or []),
+                **({"evidenceBindingVersion": 1} if block.get("evidenceBindingVersion") == 1 else {}),
                 },
                 height=height,
                 gap=10,

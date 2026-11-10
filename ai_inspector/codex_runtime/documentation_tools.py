@@ -175,7 +175,8 @@ LIBRARY_TOOLS = ("find_library_machines", "open_library_machine")
 APPEARANCE_TOOLS = ("list_appearances", "list_part_faces", "set_assembly_appearance", "list_signs_and_scenes",
                     "set_assembly_scene", "place_assembly_signs", "remove_assembly_signs")
 # The text on an operations manual's or work instructions' pages, read and changed as the user edits it there.
-DOCUMENT_TEXT_TOOLS = ("read_document_pages", "edit_document_text", "apply_document_edits")
+DOCUMENT_TEXT_TOOLS = ("read_document_pages", "edit_document_text", "propose_document_value_confirmation",
+                       "apply_document_edits")
 TEXT_TYPES = ("operations_and_maintenance_manual", "work_instructions", "illustrated_parts_manual")
 # The parts manual's sections: parts moved between them on the server, during the turn.
 PARTS_MANUAL_TOOLS = ("move_parts_manual_parts",)
@@ -763,6 +764,16 @@ def _document_text_tool_specs():
                      "text": {"type": "string", "maxLength": 2000}, "expectedContentHash": _HASH_SCHEMA},
                  "required": ["pageId", "targetId", "text"], "additionalProperties": False}}},
              "required": ["documentType", "edits"], "additionalProperties": False}},
+        {"name": "propose_document_value_confirmation", "description":
+            "Offer the user a confirmation review for edited cited values. This is a read-only proposal; "
+            "only a trusted click in the workspace can confirm values. Use the confirmationTargets from a page read.",
+         "read_only": True,
+         "input_schema": {"type": "object", "properties": {
+             "documentId": _EDIT_PRECONDITIONS["documentId"],
+             "targets": {"type": "array", "minItems": 1, "maxItems": 12, "items": {
+                 "type": "object", "properties": {"targetId": identifier, "expectedContentHash": _HASH_SCHEMA},
+                 "required": ["targetId", "expectedContentHash"], "additionalProperties": False}}},
+             "required": ["documentId", "targets"], "additionalProperties": False}},
         {"name": "apply_document_edits", "description":
             "Apply 1-12 read-bound replacements atomically within one store. Send text and value edits as separate "
             "requests. Slot values must be stated by the user; this tool cannot supply source or approval authority. "
@@ -1099,6 +1110,8 @@ class DocumentationGateway:
                     "lastReturn": data.get("lastReturn")}
         gate = data.get("releaseGate") or {}
         facts = {"releaseGate": gate.get("status"), "openFindings": len(gate.get("findings") or [])}
+        if data.get("sourceSupport"):
+            facts["sourceSupport"] = data["sourceSupport"]
         if data.get("planSummary"):
             facts["plan"] = data["planSummary"]
         if data.get("sheet"):
@@ -1202,6 +1215,11 @@ class DocumentationGateway:
                 chosen = [{"pageId": pages[0]["pageId"], "slots": captured}] if pages else []
             result = {**edit_binding(state), "sceneRevision": state.get("sceneRevision"),
                       "documentType": document_type, "pageCount": len(pages), "pages": chosen}
+        from ai_inspector.documentation.provenance import confirmation_targets
+        result["sourceSupport"] = deepcopy(snapshot["document"].get("sourceSupportSummary") or {})
+        visible = {(item["pageId"], item.get("legacyTargetId")) for item in captured}
+        result["confirmationTargets"] = [target for target in confirmation_targets(state, snapshot["document"]).values()
+            if any((target["pageId"], alias) in visible for alias in target["values"])]
         if len(json.dumps({"ok": True, "data": result}, ensure_ascii=False, allow_nan=False).encode("utf-8")) > 65536:
             raise DocumentEditError("read_result_too_large", "Read fewer complete targets.",
                 targets=[{"targetId": item["targetId"], "fullLength": item["fullLength"]} for item in captured])
@@ -1217,6 +1235,23 @@ class DocumentationGateway:
         if document_type not in self.text_changes:
             self.text_changes.append(document_type)
         return {**result, "note": "The workspace shows the change after your reply."}
+
+    def _propose_document_value_confirmation(self, arguments):
+        from ai_inspector.documentation.provenance import confirmation_targets
+        from ai_inspector.documentation.commands import digest
+
+        kind = self.document_reads.get(arguments["documentId"])
+        if kind is None:
+            raise DocumentEditError("document_read_required", "Read the document before proposing confirmation.")
+        if kind == SPEC:
+            raise DocumentEditError("invalid_document_operation", "Use the specification value review controls.")
+        snapshot = self.host.document_snapshot(self._require_assembly(), kind)
+        available = confirmation_targets(snapshot["state"], snapshot["document"])
+        for item in arguments["targets"]:
+            if item["targetId"] not in available or available[item["targetId"]]["contentHash"] != item["expectedContentHash"]:
+                raise DocumentEditError("content_hash_mismatch", "Read the current confirmation scope.", targetId=item["targetId"])
+        return {"proposalId": digest(arguments), "documentId": arguments["documentId"],
+                "targets": deepcopy(arguments["targets"]), "status": "awaiting_user"}
 
     def _apply_document_edits(self, arguments):
         destination = operation_store(arguments["operations"])

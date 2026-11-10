@@ -16,6 +16,7 @@ import uuid
 
 from ai_inspector.parts_manual.pdf import draw_balloon_manifest
 
+from ai_inspector.documentation.provenance import EDITED_MARKER, EDITED_LEGEND, check_export, export_document
 from .artifacts import document_draft_render_path
 from .flow import wrap_text
 
@@ -309,6 +310,18 @@ def _draw_header_footer(fitz: Any, page: Any, descriptor: Mapping[str, Any], doc
     )
 
 
+def _marked(owner):
+    return (owner.get("provenance") or {}).get("evidenceStatus") == "edited_unverified"
+
+
+def _has_marked(block):
+    return _marked(block) or any(_marked(row) for row in (block.get("rows") or block.get("items") or []))
+
+
+def _review_marks(document):
+    return document.get("exportMode", "review") in {"review", "draft"}
+
+
 def _draw_table(fitz: Any, page: Any, block: Mapping[str, Any], rect: Any) -> None:
     columns = [str(value) for value in block.get("columns") or []]
     rows = [row for row in block.get("rows") or [] if isinstance(row, Mapping)]
@@ -336,6 +349,9 @@ def _draw_table(fitz: Any, page: Any, block: Mapping[str, Any], rect: Any) -> No
             value = cells[index] if index < len(cells) else ""
             cell = fitz.Rect(rect.x0 + index * column_width + 5, y + 5, rect.x0 + (index + 1) * column_width - 5, bottom - 3)
             page.insert_textbox(cell, value, fontsize=6.7, fontname="helv", color=(0.10, 0.14, 0.17), lineheight=1.15)
+        if _marked(row):
+            page.insert_text(fitz.Point(rect.x0 + column_width * (len(columns) - 1) + 5, bottom - 2),
+                             EDITED_MARKER, fontsize=5.5, fontname="helv", color=(0.6, 0.22, 0.02))
         page.draw_line(fitz.Point(rect.x0, bottom), fitz.Point(rect.x1, bottom), color=light, width=0.35)
         y = bottom
     for index in range(1, len(columns)):
@@ -521,6 +537,9 @@ def _draw_list(fitz: Any, page: Any, block: Mapping[str, Any], rect: Any) -> Non
                     f"{item.get('itemNumber') or item_index + 1}"
                 ),
             )
+            if _marked(item):
+                page.insert_text(fitz.Point(x + marker_width + 3, y + row_height - 1),
+                                 EDITED_MARKER, fontsize=5.5, fontname="helv", color=(0.6, 0.22, 0.02))
             item_index += 1
         y += row_height
 
@@ -581,6 +600,10 @@ def _draw_block(
     block = _edited_block(descriptor, block)
     block_type = str(block.get("blockType") or "")
     text = _block_text(descriptor, block)
+    if _review_marks(document) and _has_marked(block):
+        label = (EDITED_MARKER + ". " if _marked(block) else "") + EDITED_LEGEND
+        page.insert_text(fitz.Point(rect.x0, rect.y1 + 6), label, fontsize=5.5,
+                         fontname="helv", color=(0.6, 0.22, 0.02))
     style = dict(block.get("style") or {})
     override = _page_override(descriptor, str(block.get("blockId") or ""))
     if isinstance(override.get("style"), Mapping):
@@ -640,6 +663,8 @@ def build_prototype_pdf_bytes(
     assembly_number: str,
     document: Mapping[str, Any],
 ) -> bytes:
+    document = export_document(document)
+    check_export(document, document.get("exportMode", "review"))
     readiness = prototype_export_readiness(document)
     if readiness["status"] != "READY":
         raise OperationsManualExportError(
@@ -1043,6 +1068,8 @@ def build_prototype_docx_bytes(
     assembly_number: str,
     document: Mapping[str, Any],
 ) -> bytes:
+    document = export_document(document)
+    check_export(document, document.get("exportMode", "review"))
     readiness = prototype_export_readiness(document)
     if readiness["status"] != "READY":
         raise OperationsManualExportError(
@@ -1129,6 +1156,10 @@ def build_prototype_docx_bytes(
             block = _edited_block(descriptor, block)
             block_type = str(block.get("blockType") or "")
             text = _block_text(descriptor, block)
+            if _review_marks(document) and _has_marked(block):
+                notice = output.add_paragraph((EDITED_MARKER + ". " if _marked(block) else "") + EDITED_LEGEND)
+                for run in notice.runs:
+                    run.font.size = Pt(7)
             if block_type in {"heading", "continuation_heading"}:
                 level = 1 if float((block.get("style") or {}).get("fontSize") or 14) >= 18 else 2
                 output.add_heading(text, level=level)
@@ -1180,6 +1211,8 @@ def build_prototype_docx_bytes(
                             paragraph.add_run(": ")
                     if item.get("text"):
                         paragraph.add_run(str(item.get("text")))
+                    if _marked(item):
+                        paragraph.add_run("\n" + EDITED_MARKER)
                     if int(item.get("quantity") or 1) > 1:
                         quantity = paragraph.add_run(
                             f"  ({int(item.get('quantity') or 1)}X)"
@@ -1214,6 +1247,8 @@ def build_prototype_docx_bytes(
                     values = [str(value or "") for value in row.get("cells") or []]
                     for index in range(len(columns)):
                         cells[index].text = values[index] if index < len(values) else ""
+                    if _marked(row):
+                        cells[-1].add_paragraph(EDITED_MARKER)
             elif block_type == "cad_figure":
                 image_path = document_draft_render_path(root, assembly_number, document, descriptor)
                 request = descriptor.get("renderRequest") or {}
@@ -1251,13 +1286,16 @@ def _store_export(
     revision = _safe(document.get("documentRevision"), "document revision")
     directory = _document_directory(root, assembly_number, revision)
     extension = "pdf" if kind == "pdf" else "docx"
-    filename = f"{_safe(assembly_number, 'assembly number')}-operations-manual.{extension}"
+    mode = document.get("exportMode", "review")
+    suffix = "" if mode in {"review", "draft"} else "-" + mode
+    filename = f"{_safe(assembly_number, 'assembly number')}-operations-manual{suffix}.{extension}"
     path = directory / filename
-    metadata_path = directory / f"review-{kind}.json"
+    metadata_path = directory / f"review{suffix}-{kind}.json"
     _write_atomic(path, payload)
     descriptor = {
         "status": "ready",
         "artifactClass": "draft_review",
+        "provenanceVersion": 1,
         "controlledRelease": False,
         "finalApprovalRequired": True,
         "mimeType": "application/pdf" if kind == "pdf" else "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -1268,7 +1306,7 @@ def _store_export(
         "byteLength": len(payload),
         "sha256": hashlib.sha256(payload).hexdigest(),
         "filename": filename,
-        "url": f"/api/operations-manual/{assembly_number}/documents/{revision}/{extension}",
+        "url": f"/api/operations-manual/{assembly_number}/documents/{revision}/{extension}" + (f"?mode={mode}" if suffix else ""),
     }
     if kind == "docx":
         descriptor["rendererVersion"] = _DOCX_RENDERER_VERSION
@@ -1289,9 +1327,11 @@ def _cached_export(
     revision = _safe(document.get("documentRevision"), "document revision")
     directory = _document_directory(root, assembly_number, revision)
     extension = "pdf" if kind == "pdf" else "docx"
-    filename = f"{_safe(assembly_number, 'assembly number')}-operations-manual.{extension}"
+    mode = document.get("exportMode", "review")
+    suffix = "" if mode in {"review", "draft"} else "-" + mode
+    filename = f"{_safe(assembly_number, 'assembly number')}-operations-manual{suffix}.{extension}"
     path = directory / filename
-    metadata_path = directory / f"review-{kind}.json"
+    metadata_path = directory / f"review{suffix}-{kind}.json"
     native_path = _filesystem_path(path)
     native_metadata_path = _filesystem_path(metadata_path)
     if not os.path.isfile(native_path) or not os.path.isfile(native_metadata_path):
@@ -1305,6 +1345,7 @@ def _cached_export(
         return None
     expected = {
         "status": "ready",
+        "provenanceVersion": 1,
         "documentRevision": revision,
         "sourceRevision": str(document.get("sourceRevision") or ""),
         "manualPlanRevision": str(document.get("manualPlanRevision") or ""),
@@ -1325,6 +1366,8 @@ def _cached_export(
 def store_prototype_pdf(
     root: str | Path, assembly_number: str, document: Mapping[str, Any]
 ) -> Dict[str, Any]:
+    document = export_document(document)
+    check_export(document, document.get("exportMode", "review"))
     with _EXPORT_LOCK:
         cached = _cached_export(root, assembly_number, document, kind="pdf")
         if cached is not None:
@@ -1343,6 +1386,8 @@ def store_prototype_pdf(
 def store_prototype_docx(
     root: str | Path, assembly_number: str, document: Mapping[str, Any]
 ) -> Dict[str, Any]:
+    document = export_document(document)
+    check_export(document, document.get("exportMode", "review"))
     with _EXPORT_LOCK:
         cached = _cached_export(root, assembly_number, document, kind="docx")
         if cached is not None:
@@ -1363,10 +1408,14 @@ def prototype_export_path(
     assembly_number: str,
     document_revision: str,
     kind: str,
+    mode: str = "review",
 ) -> Path:
+    if mode not in {"review", "draft", "customer", "controlled"}:
+        raise OperationsManualExportError("invalid export mode")
+    suffix = "" if mode in {"review", "draft"} else "-" + mode
     extension = "pdf" if kind == "pdf" else "docx"
     directory = _document_directory(root, assembly_number, document_revision)
-    path = directory / f"{_safe(assembly_number, 'assembly number')}-operations-manual.{extension}"
+    path = directory / f"{_safe(assembly_number, 'assembly number')}-operations-manual{suffix}.{extension}"
     filesystem_path = _filesystem_path(path)
     if not os.path.isfile(filesystem_path):
         raise OperationsManualExportError("operations-manual export not found")

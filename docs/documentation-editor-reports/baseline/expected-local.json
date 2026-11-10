@@ -5,9 +5,12 @@
   "inputsSha256": "4baa964400e708eb74d530343c3141da7dbd491e2ac1514072fbffe68962e6b2",
   "inputsUnchanged": true,
   "operations": {
-    "before": "3dac06efcfef878d97429e5d3ed7f1600a8d337e84d139491774843f7f81ae00",
+    "before": "c81f46c25b92190b04bb4439f01c35ca5b2b140eeb3c2824a590004d5e59f653",
     "citationDefect": {
       "before": {
+        "activeEvidenceClaimIds": [
+          "CLM-SPEC-001"
+        ],
         "cells": [
           "Rated capacity",
           "1,100 lb"
@@ -31,27 +34,38 @@
           "CLM-ELECTRICAL-002",
           "CLM-RUNNING-001"
         ],
+        "evidenceStatus": "source_backed",
+        "originalClaimCitations": [
+          {
+            "authority": "OEM_CURRENT",
+            "sourceId": "SRC-OEM-MMLE-WEB-2026",
+            "title": "Lift Products Maxx-Mini Electric Mobile Lift product page",
+            "url": "https://www.liftproducts.com/liftcarts/mmle.html"
+          }
+        ],
+        "rowBindingsPresent": true,
         "rowKeys": [
-          "cells"
+          "activeEvidenceClaimIds",
+          "activeSourceIds",
+          "cells",
+          "claimIds",
+          "evidenceBindingVersion",
+          "originalEvidence",
+          "provenance",
+          "sourceIds"
         ]
       },
       "blockId": "spec-table-1",
       "changedValueKeepsBlockClaimIds": true,
-      "changedValueKeepsCitationAuthorities": true,
+      "changedValueKeepsCitationAuthorities": false,
       "claimId": "CLM-SPEC-001",
       "compiledAfter": {
+        "activeEvidenceClaimIds": [],
         "cells": [
           "Rated capacity",
           "1,100 lb"
         ],
-        "claimCitations": [
-          {
-            "authority": "OEM_CURRENT",
-            "sourceId": "SRC-OEM-MMLE-WEB-2026",
-            "title": "Lift Products Maxx-Mini Electric Mobile Lift product page",
-            "url": "https://www.liftproducts.com/liftcarts/mmle.html"
-          }
-        ],
+        "claimCitations": [],
         "evidenceClaimIds": [
           "CLM-SPEC-001",
           "CLM-SPEC-002",
@@ -63,24 +77,45 @@
           "CLM-ELECTRICAL-002",
           "CLM-RUNNING-001"
         ],
+        "evidenceStatus": "edited_unverified",
+        "originalClaimCitations": [
+          {
+            "authority": "OEM_CURRENT",
+            "sourceId": "SRC-OEM-MMLE-WEB-2026",
+            "title": "Lift Products Maxx-Mini Electric Mobile Lift product page",
+            "url": "https://www.liftproducts.com/liftcarts/mmle.html"
+          }
+        ],
+        "rowBindingsPresent": true,
         "rowKeys": [
-          "cells"
+          "activeEvidenceClaimIds",
+          "activeSourceIds",
+          "cells",
+          "claimIds",
+          "evidenceBindingVersion",
+          "originalEvidence",
+          "provenance",
+          "sourceIds"
         ]
       },
       "compiledBlockKeepsCapacityClaim": true,
+      "customerExportError": "unconfirmed_cited_values",
+      "customerExportHttpStatus": 422,
+      "customerExportTargets": [
+        {
+          "alias": "spec-table-1.r0",
+          "pageId": "page-specifications-1",
+          "targetId": "77b5f4f2-a36d-5ea7-9122-516d6e6696c0"
+        }
+      ],
+      "editedRowEvidenceStatus": "edited_unverified",
       "effectiveAfter": {
+        "activeEvidenceClaimIds": [],
         "cells": [
           "Rated capacity",
           "1,000 lb"
         ],
-        "claimCitations": [
-          {
-            "authority": "OEM_CURRENT",
-            "sourceId": "SRC-OEM-MMLE-WEB-2026",
-            "title": "Lift Products Maxx-Mini Electric Mobile Lift product page",
-            "url": "https://www.liftproducts.com/liftcarts/mmle.html"
-          }
-        ],
+        "claimCitations": [],
         "evidenceClaimIds": [
           "CLM-SPEC-001",
           "CLM-SPEC-002",
@@ -92,8 +127,25 @@
           "CLM-ELECTRICAL-002",
           "CLM-RUNNING-001"
         ],
+        "evidenceStatus": "edited_unverified",
+        "originalClaimCitations": [
+          {
+            "authority": "OEM_CURRENT",
+            "sourceId": "SRC-OEM-MMLE-WEB-2026",
+            "title": "Lift Products Maxx-Mini Electric Mobile Lift product page",
+            "url": "https://www.liftproducts.com/liftcarts/mmle.html"
+          }
+        ],
+        "rowBindingsPresent": true,
         "rowKeys": [
-          "cells"
+          "activeEvidenceClaimIds",
+          "activeSourceIds",
+          "cells",
+          "claimIds",
+          "evidenceBindingVersion",
+          "originalEvidence",
+          "provenance",
+          "sourceIds"
         ]
       },
       "exports": {
@@ -159,10 +211,16 @@
           ]
         }
       },
+      "otherRowsClaimsRetained": true,
       "pageId": "page-specifications-1",
+      "reviewExportMarked": {
+        "docx": true,
+        "pdf": true
+      },
+      "rowBindingsPresent": true,
       "targetId": "spec-table-1.r0.c1"
     },
-    "edited": "372751a7cb273e936f360a88085680a5fe8f13c9d755c766c2359bc3e74fd84c",
+    "edited": "fefa83caa6be3e9d24f834ca7728772b9db5a9d56b80489efde339215fe8e24b",
     "exports": {
       "before": {
         "docx": {
@@ -441,9 +499,9 @@
       },
       "edited": {
         "docx": {
-          "characters": 29311,
-          "paragraphs": 468,
-          "textSha256": "8ac7e7b866ba7cfe3e2b3d01ed098070709605674861ccbc7ff07750751b6fd3"
+          "characters": 29460,
+          "paragraphs": 470,
+          "textSha256": "ff6970b40cce27de40fe380941a99d17fd016ffae1a1114d84e1ea511bd551fd"
         },
         "pdf": {
           "pages": [
@@ -520,12 +578,12 @@
               "textSha256": "bb64226b53d9a1532c8f48cac71b6a49c580e2f8929bcf082f7801b5b17452b5"
             },
             {
-              "characters": 686,
+              "characters": 835,
               "sizePt": [
                 960.0,
                 540.0
               ],
-              "textSha256": "0347ba8648bb8806d4d49cc036bd88512bffb912af44acb2e12791f5ce25867f"
+              "textSha256": "81c0e86bea7a26c54cbccb9e18d9a3ce8ac94b3f9153f4fa2509877f659e8858"
             },
             {
               "characters": 993,
@@ -717,7 +775,7 @@
     },
     "readDidNotWrite": true,
     "reopenUnchanged": true,
-    "reopened": "372751a7cb273e936f360a88085680a5fe8f13c9d755c766c2359bc3e74fd84c",
+    "reopened": "fefa83caa6be3e9d24f834ca7728772b9db5a9d56b80489efde339215fe8e24b",
     "undo": {
       "canUndoAfterEdit": true,
       "httpStatus": 200,
@@ -726,9 +784,9 @@
     }
   },
   "reviewedSpecification": {
-    "before": "df13253d2389cba8ad7efee97364494fef1f28669229b04c9eb79f4a90fa4b6b",
+    "before": "f60c0cd5c51ad3e942d3fb2c571c4716070bf20c417011641a9171e8c225c0e2",
     "beforeMatchesTrackedGolden": true,
-    "edited": "11d5897a95fd7ef9fb0cd00d8703f37ff4a0b84df60eef38f93df6aa44776184",
+    "edited": "b9619cbc0927fbca8a4969ebd5bb9f3b2763b675f60b85f0adbffa2d2ea25211",
     "exports": {
       "before": {
         "docx": {
@@ -751,19 +809,19 @@
       },
       "edited": {
         "docx": {
-          "characters": 728,
-          "paragraphs": 26,
-          "textSha256": "14085bfb934b769142778639ce66713ed13ce16caea9114eebe21b699680eefd"
+          "characters": 943,
+          "paragraphs": 28,
+          "textSha256": "1d81e91a303ccffb6e4d12fba1c214b48a8322bfb14ed02a6e8e011632378dc1"
         },
         "pdf": {
           "pages": [
             {
-              "characters": 817,
+              "characters": 966,
               "sizePt": [
                 612.0,
                 792.0
               ],
-              "textSha256": "8e2480c32aab453ed21f15593f1162882088074d0ee057e07dda4507631f6740"
+              "textSha256": "6333b67c60c3724a00e2adeb081a14cefb8f9a616a02c8b9ed10eb051cfbeb49"
             }
           ]
         }
@@ -771,7 +829,7 @@
     },
     "readDidNotWrite": true,
     "reopenUnchanged": true,
-    "reopened": "11d5897a95fd7ef9fb0cd00d8703f37ff4a0b84df60eef38f93df6aa44776184",
+    "reopened": "b9619cbc0927fbca8a4969ebd5bb9f3b2763b675f60b85f0adbffa2d2ea25211",
     "trackedGoldenTextSha256": "d1544f49712142be6ee240d3917cf301c30f3d1265e9693afc3df30168c93423",
     "undo": {
       "canUndoAfterEdit": false,
@@ -783,8 +841,8 @@
   "schemaVersion": 1,
   "status": "captured",
   "workInstructions": {
-    "before": "e11b7aa080a5617190355d89cff87b456b8f56e2eb8fdf7fd458cfa84b08b2eb",
-    "edited": "3a3e911fc765e4fa7de8d92e1317a68bc79dfdaaacfc34af25cda8ae91e0cbae",
+    "before": "f430e4f1a82f8ddb690ce08c099caaa6950b50ce9c95123750ee0a16b4551a38",
+    "edited": "1463d18694903e1c5a54b936757647c306e80845290f57454314922ae34b59c4",
     "exports": {
       "before": {
         "docx": {
@@ -1133,7 +1191,7 @@
     "readDidNotWrite": true,
     "recapturedPageIds": [],
     "reopenUnchanged": true,
-    "reopened": "3a3e911fc765e4fa7de8d92e1317a68bc79dfdaaacfc34af25cda8ae91e0cbae",
+    "reopened": "1463d18694903e1c5a54b936757647c306e80845290f57454314922ae34b59c4",
     "textEditExportHttpStatus": 200,
     "textEditInvalidatesPageCapture": false,
     "undo": {

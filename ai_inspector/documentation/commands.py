@@ -51,6 +51,7 @@ def transaction_defaults(state: dict) -> dict:
     state.setdefault("editRevision", 0)
     state.setdefault("editEpoch", 0)
     state.setdefault("fieldVersions", {})
+    state.setdefault("fieldMeta", {})
     state.setdefault("receipts", {})
     state.setdefault("receiptOrder", [])
     return state
@@ -60,6 +61,8 @@ def validate_transaction_metadata(state: dict) -> None:
     for field in ("editRevision", "editEpoch"):
         if type(state.get(field)) is not int or state[field] < 0:
             raise DocumentEditError("unsupported_document_schema", "Invalid edit revision.")
+    if not isinstance(state.get("fieldMeta", {}), dict):
+        raise DocumentEditError("unsupported_document_schema", "Invalid field provenance.")
     versions = state.get("fieldVersions")
     if not isinstance(versions, dict) or any(type(v) is not int or v < 0 for v in versions.values()):
         raise DocumentEditError("unsupported_document_schema", "Invalid field versions.")

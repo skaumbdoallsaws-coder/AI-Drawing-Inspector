@@ -29,7 +29,7 @@ from ai_inspector.parts_manual.documentation import (
 )
 
 
-SPECIFICATION_SHEET_DOCUMENT_SCHEMA_VERSION = 1
+SPECIFICATION_SHEET_DOCUMENT_SCHEMA_VERSION = 2
 SPECIFICATION_SHEET_RENDER_PIPELINE_VERSION = 1
 SPECIFICATION_SHEET_PAGE_WIDTH_PT = 612.0
 SPECIFICATION_SHEET_PAGE_HEIGHT_PT = 792.0
@@ -707,5 +707,8 @@ def build_specification_sheet_document(
         },
         "releaseGate": _release_gate(data["order"], slots),
     }
+    from ai_inspector.documentation.provenance import project_slots
+
+    document = project_slots(document, stored)
     document["documentRevision"] = _stable_revision(document)
     return document

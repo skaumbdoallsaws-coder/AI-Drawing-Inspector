@@ -30,6 +30,14 @@ def text_targets(state: Mapping[str, Any], document: Mapping[str, Any]) -> dict[
         override = ((state["scene"].get("pages") or {}).get("page-parts-index" if alias.startswith("part.") else page_id) or {}).get("pageElementOverrides", {}).get(alias, {})
         if kind == "replace_text" and "text" in override:
             value = override["text"]
+        attributes = deepcopy(attributes)
+        meta = attributes.get("row", {}).get("provenance") or attributes.get("item", {}).get("provenance") or attributes.get("provenance") or document.get("fieldMeta", {}).get(stable)
+        if meta:
+            attributes["provenance"] = deepcopy(meta)
+            attributes["evidenceClaimIds"] = list(meta.get("activeClaimIds") or [])
+            attributes["sourceIds"] = list(meta.get("activeSourceIds") or [])
+            attributes["activeEvidenceClaimIds"] = list(meta.get("activeClaimIds") or [])
+            attributes["activeSourceIds"] = list(meta.get("activeSourceIds") or [])
         text = "" if value is None else str(value)
         descriptor = {"targetId": stable, "alias": alias, "pageId": page_id,
                       "targetType": target_type, "text": text, "operation": kind,
@@ -129,7 +137,7 @@ def read_targets(state: dict, targets: Mapping[str, dict], requested: list[dict]
         output.append({"targetId": stable, "legacyTargetId": target["alias"], "pageId": item.get("pageId") or target["pageId"],
                        "text": target["text"], "isExcerpt": False, "fullLength": len(target["text"]),
                        "contentHash": content_hash(state, stable, values[stable]), "hashVersion": 1,
-                       "provenance": deepcopy(target["attributes"]),
+                       "provenance": deepcopy(target["attributes"].get("provenance", target["attributes"])),
                        "capabilities": [] if target["operation"] == "read_only" else [target["operation"]], "binding": binding(state)})
     result = {**binding(state), "sceneRevision": state.get("sceneRevision"), "targets": output}
     if limit is not None and len(canonical_bytes({"ok": True, "data": result})) > limit:

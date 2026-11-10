@@ -132,6 +132,8 @@ def test_the_tool_set_is_exact_typed_and_closed():
     assert tuple(spec["name"] for spec in specs) == NAMES
     assert {s["name"] for s in specs if s["name"] in {"read_document_pages", "edit_document_text", "apply_document_edits"}} == {"read_document_pages", "edit_document_text", "apply_document_edits"}
     assert next(s for s in specs if s["name"] == "apply_document_edits")["read_only"] is False
+    assert next(s for s in specs if s["name"] == "propose_document_value_confirmation")["read_only"] is True
+    assert "confirm_document_values" not in {s["name"] for s in specs}
     for spec in specs:
         schema = spec["input_schema"]
         assert schema["type"] == "object" and schema["additionalProperties"] is False, spec["name"]
@@ -141,7 +143,7 @@ def test_the_tool_set_is_exact_typed_and_closed():
     assert {spec["name"] for spec in specs if spec.get("read_only", True)} == {
         "inspect_documentation_context", "inspect_documentation_type", "inspect_parts_manual_bom",
         "find_library_machines", "list_appearances", "list_part_faces", "list_signs_and_scenes",
-        "read_document_pages"}
+        "read_document_pages", "propose_document_value_confirmation"}
 
 
 def test_public_research_joins_the_tools_behind_its_flag(monkeypatch):

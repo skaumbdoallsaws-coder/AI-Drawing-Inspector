@@ -656,7 +656,16 @@ def test_a_text_edit_keeps_the_figures_captured_and_a_figure_edit_does_not(tmp_p
 def _schema_one_document(document):
     # Reproduce the old compiler's shape and canonical hash independently of the
     # migration helper: full composition in renderRequest, no figureRevision.
-    old = copy.deepcopy(document)
+    def historical(value):
+        if isinstance(value, list):
+            return [historical(item) for item in value]
+        if isinstance(value, dict):
+            return {key: historical(item) for key, item in value.items() if key not in {
+                "fieldMeta", "provenanceTargets", "provenance", "originalEvidence",
+                "activeEvidenceClaimIds", "activeSourceIds", "sourceSupport", "sourceSupportSummary"}}
+        return value
+
+    old = historical(document)
     old["schemaVersion"] = 1
     old.pop("documentRevision")
     for page in old["pages"]:

@@ -16,6 +16,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional, Sequence
 
+from ai_inspector.documentation.provenance import project_document, strip_projection
 from ai_inspector.operations_manual.flow import publication_layout
 from ai_inspector.operations_manual.nomenclature import (
     load_publication_aliases,
@@ -1586,7 +1587,7 @@ def legacy_document_revision(document: Mapping[str, Any]) -> str:
     pipeline. A changed request cannot address the old artifact. Attached image
     metadata was not part of the generated document and is removed first.
     """
-    legacy = copy.deepcopy(dict(document))
+    legacy = strip_projection(copy.deepcopy(dict(document)))
     legacy.pop("documentRevision", None)
     legacy["schemaVersion"] = 1
     for page in legacy.get("pages") or []:
@@ -2084,6 +2085,7 @@ def build_work_instruction_document(
             "findings": release_findings,
         },
     }
+    document = project_document(document, documentation_scene)
     document = with_figure_revisions(document)
     revision_payload = copy.deepcopy(document)
     revision_payload.pop("documentRevision", None)

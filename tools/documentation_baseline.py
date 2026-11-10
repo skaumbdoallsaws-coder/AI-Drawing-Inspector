@@ -445,12 +445,37 @@ def local_citation_target(document):
 
 def local_citation_state(document, block):
     row = block["rows"][0]
-    # The association to this value is known from the fixture's plan. Current
-    # compiled rows have only cells; evidenceClaimIds live on the whole block.
-    citations = [{key: entry.get(key) for key in ("sourceId", "title", "authority", "url")}
-                 for entry in document.get("evidenceCitations", []) if "CLM-SPEC-001" in entry.get("claimIds", [])]
+    # Keep the legacy block receipt, but measure active support at the explicit
+    # row binding when available. Original sources remain independently visible.
+    original = [{key: entry.get(key) for key in ("sourceId", "title", "authority", "url")}
+                for entry in document.get("evidenceCitations", []) if "CLM-SPEC-001" in entry.get("claimIds", [])]
+    bound = block.get("evidenceBindingVersion") == 1 and "claimIds" in row
+    active = (row.get("activeEvidenceClaimIds", row.get("claimIds", [])) if bound else
+              block.get("activeEvidenceClaimIds", block.get("evidenceClaimIds", [])))
+    meta = row.get("provenance", {}) if bound else block.get("provenance", {})
     return {"cells": row["cells"], "rowKeys": sorted(row),
-            "evidenceClaimIds": block.get("evidenceClaimIds", []), "claimCitations": citations}
+            "evidenceClaimIds": block.get("evidenceClaimIds", []),
+            "activeEvidenceClaimIds": active, "rowBindingsPresent": bound,
+            "evidenceStatus": meta.get("evidenceStatus"),
+            "claimCitations": original if "CLM-SPEC-001" in active else [],
+            "originalClaimCitations": original}
+
+
+def local_citation_integrity_probe(client, base, document, texts):
+    from ai_inspector.documentation.provenance import EDITED_MARKER, unconfirmed_targets
+
+    response = client.post(base + "/pdf", params={"mode": "customer"})
+    body = response.json()
+    targets = unconfirmed_targets(document)
+    assert response.status_code == 422 and body.get("error") == "unconfirmed_cited_values", response.text
+    assert body.get("details", {}).get("targets") == targets
+    normalized = lambda text: " ".join(text.split())
+    return {"customerExportHttpStatus": response.status_code, "customerExportError": body["error"],
+            "customerExportTargets": body["details"]["targets"],
+            "reviewExportMarked": {
+                "pdf": any(EDITED_MARKER in normalized(page) and "Rated capacity" in normalized(page)
+                           for page in texts["pdf"]),
+                "docx": EDITED_MARKER in normalized(texts["docx"])}}
 
 
 def local_citation_export(document, block, texts):
@@ -472,7 +497,7 @@ def local_citation_export(document, block, texts):
     assert pdf["rowPageNumbers"], "MMLE cited specification row is missing from PDF text"
     assert word["rowPresent"], "MMLE cited specification row is missing from DOCX text"
     registers = []
-    for citation in local_citation_state(document, block)["claimCitations"]:
+    for citation in local_citation_state(document, block)["originalClaimCitations"]:
         for page in document["pages"]:
             for source_block in page.get("layoutBlocks", []):
                 if source_block.get("sourceBlockId") != "sources-table":
@@ -602,6 +627,10 @@ def local_document_baseline(client, route, store, capture):
             "compiledBlockKeepsCapacityClaim": "CLM-SPEC-001" in compiled_block.get("evidenceClaimIds", []),
             "changedValueKeepsBlockClaimIds": effective["evidenceClaimIds"] == original["evidenceClaimIds"],
             "changedValueKeepsCitationAuthorities": effective["claimCitations"] == original["claimCitations"],
+            "rowBindingsPresent": effective["rowBindingsPresent"],
+            "editedRowEvidenceStatus": effective["evidenceStatus"],
+            "otherRowsClaimsRetained": [row.get("claimIds") for row in compiled_block["rows"][1:]]
+                == [row.get("claimIds") for row in block["rows"][1:]],
         }
     disk = file_hashes(store)
     reopened = api_json(client, "GET", base + "/documentation-scene")
@@ -613,6 +642,7 @@ def local_document_baseline(client, route, store, capture):
             client, store, edited, capture, store_draft_render_artifact)
     after_exports, after_texts = exported(export_receipt)
     if citation:
+        citation.update(local_citation_integrity_probe(client, base, edited, after_texts))
         citation["exports"] = {"before": local_citation_export(before, block, before_texts),
                                "edited": local_citation_export(edited, shown, after_texts)}
     undo_body = {"baseRevision": edited_state["revision"], "sourceRevision": edited["sourceRevision"],

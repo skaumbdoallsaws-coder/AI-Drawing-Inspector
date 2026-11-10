@@ -52,6 +52,12 @@ from ai_inspector.documentation.commands import (
     prior_receipt as documentation_prior_receipt, operation_store as documentation_operation_store,
 )
 from ai_inspector.documentation.targets import text_targets as documentation_text_targets, hash_values as documentation_hash_values
+from ai_inspector.documentation.provenance import (
+    prepare_text_command as documentation_provenance_command,
+    confirmation_targets as documentation_confirmation_targets,
+    confirmation_command as documentation_confirmation_command,
+    check_export as documentation_check_export,
+)
 
 from dotenv import load_dotenv
 
@@ -1613,6 +1619,15 @@ def _is_facility_authority_path(path: str) -> bool:
         or path.startswith("/api/industrial-assets")
         or path.startswith("/api/training/facility-layout")
     )
+
+
+@app.middleware("http")
+async def _documentation_confirmation_origin_boundary(request: Request, call_next):
+    if request.url.path.startswith("/api/documentation/") and request.url.path.endswith("/confirm-values") \
+            and not _request_origin_is_trusted(request):
+        return JSONResponse(status_code=403, content={"ok": False, "error": {
+            "code": "documentation_origin_forbidden", "message": "Untrusted document origin."}})
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -17177,6 +17192,7 @@ def operations_manual_get(assembly_number: str):
         "releaseGate": document["releaseGate"],
         "evidenceSummary": document["evidenceSummary"],
         "evidenceCitations": document.get("evidenceCitations") or [],
+        "sourceSupport": document.get("sourceSupportSummary") or {},
         "sceneRevision": loaded_scene["revision"],
         "sceneCurrent": bool(
             loaded_scene["sourceCurrent"] and loaded_scene["manualPlanCurrent"]
@@ -17279,7 +17295,7 @@ def operations_manual_documentation_scene_command(
             catalog["sourceRevision"],
             current_document["manualPlanRevision"],
             base_revision=body.baseRevision,
-            command=command,
+            command=documentation_provenance_command(current_document, command),
             page_targets=_operations_manual_editable_page_targets(current_document),
         )
         next_document = build_operations_manual_document(
@@ -17498,7 +17514,7 @@ def operations_manual_render_artifact(
 
 
 @app.post("/api/operations-manual/{assembly_number}/pdf")
-def operations_manual_prototype_export(assembly_number: str):
+def operations_manual_prototype_export(assembly_number: str, mode: str = "review"):
     """Export review-only PDF and DOCX artifacts from the current draft revision."""
     try:
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
@@ -17506,6 +17522,11 @@ def operations_manual_prototype_export(assembly_number: str):
             assembly_data=assembly_data,
             catalog=catalog,
         )
+        documentation_check_export(document, mode)
+        if mode == "controlled" and not document.get("releaseGate", {}).get("controlledPdfAllowed"):
+            raise DocumentEditError("controlled_release_blocked", "Controlled-release prerequisites remain open.")
+        if mode != "review":
+            document = {**document, "exportMode": mode}
         readiness = prototype_export_readiness(document)
         if readiness["status"] != "READY":
             return JSONResponse(
@@ -17539,6 +17560,8 @@ def operations_manual_prototype_export(assembly_number: str):
         OperationsManualExportError,
         ValueError,
     ) as error:
+        if isinstance(error, DocumentEditError):
+            return _documentation_value_error(error)
         return _operations_manual_error_response(error, operation="pdf")
     return {
         "success": True,
@@ -17559,6 +17582,7 @@ def operations_manual_prototype_export(assembly_number: str):
 def operations_manual_prototype_pdf_get(
     assembly_number: str,
     document_revision: str,
+    mode: str = "review",
 ):
     try:
         path = prototype_export_path(
@@ -17566,6 +17590,7 @@ def operations_manual_prototype_pdf_get(
             assembly_number,
             document_revision,
             "pdf",
+            mode=mode,
         )
     except OperationsManualExportError as error:
         return _operations_manual_error_response(error, operation="prototype_pdf_get")
@@ -17583,6 +17608,7 @@ def operations_manual_prototype_pdf_get(
 def operations_manual_prototype_docx_get(
     assembly_number: str,
     document_revision: str,
+    mode: str = "review",
 ):
     try:
         path = prototype_export_path(
@@ -17590,6 +17616,7 @@ def operations_manual_prototype_docx_get(
             assembly_number,
             document_revision,
             "docx",
+            mode=mode,
         )
     except OperationsManualExportError as error:
         return _operations_manual_error_response(error, operation="prototype_docx_get")
@@ -17640,6 +17667,7 @@ def work_instructions_get(assembly_number: str):
         "releaseGate": document["releaseGate"],
         "evidenceSummary": document["evidenceSummary"],
         "evidenceCitations": document.get("evidenceCitations") or [],
+        "sourceSupport": document.get("sourceSupportSummary") or {},
         "sceneRevision": loaded_scene["revision"],
         "sceneCurrent": bool(
             loaded_scene["sourceCurrent"] and loaded_scene["manualPlanCurrent"]
@@ -17745,7 +17773,7 @@ def work_instructions_documentation_scene_command(
             catalog["sourceRevision"],
             current_document["manualPlanRevision"],
             base_revision=body.baseRevision,
-            command=command,
+            command=documentation_provenance_command(current_document, command),
             page_targets=_operations_manual_editable_page_targets(current_document),
         )
         next_document = _work_instruction_document_for_scene(
@@ -17991,13 +18019,18 @@ def work_instructions_render_artifact(
 
 
 @app.post("/api/work-instructions/{assembly_number}/pdf")
-def work_instructions_review_export(assembly_number: str):
+def work_instructions_review_export(assembly_number: str, mode: str = "review"):
     try:
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
         document, _loaded_scene = _work_instruction_build_document_with_scene(
             assembly_data=assembly_data,
             catalog=catalog,
         )
+        documentation_check_export(document, mode)
+        if mode == "controlled" and not document.get("releaseGate", {}).get("controlledPdfAllowed"):
+            raise DocumentEditError("controlled_release_blocked", "Controlled-release prerequisites remain open.")
+        if mode != "review":
+            document = {**document, "exportMode": mode}
         readiness = work_instruction_review_export_readiness(document)
         if readiness["status"] != "READY":
             return JSONResponse(
@@ -18036,6 +18069,8 @@ def work_instructions_review_export(assembly_number: str):
         ProcessMapAssetError,
         ValueError,
     ) as error:
+        if isinstance(error, DocumentEditError):
+            return _documentation_value_error(error)
         return _work_instruction_error_response(error, operation="pdf")
     return {
         "success": True,
@@ -18130,6 +18165,7 @@ def specification_sheet_get(assembly_number: str):
         "releaseGate": document["releaseGate"],
         "evidenceSummary": document["evidenceSummary"],
         "evidenceCitations": document.get("evidenceCitations") or [],
+        "sourceSupport": document.get("sourceSupportSummary") or {},
         "sheet": document["sheet"],
         "slots": document["slots"],
         "slotOrder": document["slotOrder"],
@@ -18511,6 +18547,92 @@ _SPECIFICATION_SHEET_SLOT_ERRORS = (
 )
 
 
+_DOCUMENTATION_READ_BINDINGS: Dict[str, Tuple[str, str]] = {}
+
+
+@app.get("/api/documentation/{document_type}/{assembly_number}/confirmation-targets")
+def documentation_confirmation_read(document_type: str, assembly_number: str):
+    try:
+        if document_type not in _DocumentationAgentHost._TEXT_ROUTES:
+            raise DocumentEditError("invalid_document_operation", "This document has no confirmation capability.")
+        snapshot = _DocumentationAgentHost().document_snapshot(assembly_number, document_type)
+        state = snapshot["state"]
+        _DOCUMENTATION_READ_BINDINGS[state["documentId"]] = (assembly_number, document_type)
+        return {"success": True, "documentId": state["documentId"], "revision": state["revision"],
+                "targets": list(documentation_confirmation_targets(state, snapshot["document"]).values()),
+                "sources": snapshot["document"].get("evidenceCitations") or []}
+    except DocumentEditError as error:
+        return _documentation_value_error(error)
+
+
+def _documentation_value_error(error: DocumentEditError):
+    return JSONResponse(status_code=422, content={"success": False, "ok": False,
+        "error": error.code, "message": str(error), "details": error.details})
+
+
+@app.post("/api/documentation/{document_id}/confirm-values")
+def documentation_confirm_values(document_id: str, body: Dict[str, Any], request: Request):
+    if not _request_origin_is_trusted(request):
+        return JSONResponse(status_code=403, content={"ok": False, "error": {
+            "code": "documentation_origin_forbidden", "message": "Untrusted document origin."}})
+    try:
+        if set(body) != {"expectedRevision", "requestId", "targets"}:
+            raise DocumentEditError("invalid_document_operation", "Confirmation accepts revision, request ID and targets only.")
+        binding = _DOCUMENTATION_READ_BINDINGS.get(document_id)
+        if binding is None:
+            raise DocumentEditError("document_read_required", "Open the confirmation values before confirming.")
+        number, kind = binding
+        if kind == "product_specification_sheet":
+            raise DocumentEditError("invalid_document_operation", "Use the specification value review controls.")
+        # Reuse the already configured in-process principal resolver, without the
+        # facility host's bootstrap side effects or reading any identity file.
+        by = _FACILITY_PRINCIPAL_RESOLVER(request).principal_id
+        payload = {**body, "documentId": document_id, "by": by}
+        host = _DocumentationAgentHost()
+        repository = host._edit_repository(kind)
+        with repository.transaction_lock:
+            snapshot = host.document_snapshot(number, kind)
+            state, document = snapshot["state"], snapshot["document"]
+            scene = state["scene"]
+            previous = documentation_prior_receipt(scene, body["requestId"],
+                documentation_request_hash(body["requestId"], payload))
+            if previous is not None:
+                return {"success": True, "receipt": previous}
+            items = body["targets"]
+            if not isinstance(items, list) or not 1 <= len(items) <= 12:
+                raise DocumentEditError("invalid_document_operation", "Confirm 1-12 scopes at a time.")
+            if type(body["expectedRevision"]) is not int or body["expectedRevision"] != state["revision"]:
+                raise DocumentEditError("stale_revision", "Review the current values before confirming.")
+            available = documentation_confirmation_targets(state, document)
+            expected, commands = {}, []
+            page_targets = (_parts_manual_editable_page_targets(document) if kind == "illustrated_parts_manual"
+                            else _operations_manual_editable_page_targets(document))
+            for item in items:
+                if (not isinstance(item, dict) or set(item) != {"targetId", "expectedContentHash"}
+                        or not isinstance(item.get("targetId"), str)
+                        or not isinstance(item.get("expectedContentHash"), str)):
+                    raise DocumentEditError("invalid_document_operation", "Every confirmation needs a target and its hash.")
+                target = available.get(item["targetId"])
+                if target is None or item["targetId"] in expected:
+                    raise DocumentEditError("target_not_found", "Review a unique edited scope.", targetId=item["targetId"])
+                expected[item["targetId"]] = item["expectedContentHash"]
+                command = documentation_confirmation_command(target, by=by)
+                commands.append(command)
+            result = repository.apply_batch(number, state["sourceRevision"], state["manualPlanRevision"],
+                base_revision=state["sceneRevision"], expected_revision=body["expectedRevision"],
+                request_id=body["requestId"], commands=commands, page_targets=page_targets,
+                expected_hashes=expected, current_hashes={key: row["contentHash"] for key, row in available.items()},
+                hashes_revision=state["sceneRevision"], actor="user", payload=payload, allow_confirmation=True)
+            # Confirmation changes document identity but not the figure request.
+            after = host.document_snapshot(number, kind)["document"]
+            if kind in {"operations_and_maintenance_manual", "work_instructions"}:
+                carry_draft_render_artifacts(OPERATIONS_MANUAL_ROOT if kind == "operations_and_maintenance_manual"
+                    else WORK_INSTRUCTION_ROOT, number, document, after)
+            return {"success": True, "receipt": result["receipt"]}
+    except DocumentEditError as error:
+        return _documentation_value_error(error)
+
+
 def _documentation_snapshot_payload(payload, document_type):
     document, scene = payload["document"], payload["scene"]
     number = str(scene["assemblyNumber"])
@@ -18546,6 +18668,15 @@ def _specification_sheet_slot_change(assembly_number: str, change, *, observed=N
         else:
             base, loaded_scene = _specification_sheet_build_document_with_scene(assembly_data=assembly_data, catalog=catalog)
         store = SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, str(catalog["assemblyNumber"]))
+        provenance_document = base
+        if observed is None:
+            try:
+                provenance_document, _ = _specification_sheet_build_document_with_scene(
+                    assembly_data=assembly_data, catalog=catalog)
+            except DocumentationSceneBindingError:
+                pass
+        store.provenance_defaults = copy.deepcopy(provenance_document.get("fieldMeta") or {})
+        store.provenance_values = {key: item.get("value") for key, item in provenance_document.get("slots", {}).items()}
         options = {}
         if observed is not None:
             snapshot = _documentation_snapshot_payload({**loaded_scene, "document": base}, "product_specification_sheet")
@@ -18818,13 +18949,18 @@ def specification_sheet_render_artifact(
 
 
 @app.post("/api/specification-sheet/{assembly_number}/pdf")
-def specification_sheet_export(assembly_number: str):
+def specification_sheet_export(assembly_number: str, mode: str = "review"):
     try:
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
         document, _loaded_scene = _specification_sheet_build_document_with_scene(
             assembly_data=assembly_data,
             catalog=catalog,
         )
+        documentation_check_export(document, mode)
+        if mode == "controlled" and not document.get("releaseGate", {}).get("controlledPdfAllowed"):
+            raise DocumentEditError("controlled_release_blocked", "Controlled-release prerequisites remain open.")
+        if mode != "review":
+            document = {**document, "exportMode": mode}
         readiness = specification_export_readiness(document)
         if readiness["status"] != "READY":
             return JSONResponse(
@@ -18856,6 +18992,8 @@ def specification_sheet_export(assembly_number: str):
         SpecificationSheetExportError,
         ValueError,
     ) as error:
+        if isinstance(error, DocumentEditError):
+            return _documentation_value_error(error)
         return _specification_sheet_error_response(error, operation="pdf")
     return {
         "success": True,
@@ -19680,7 +19818,7 @@ def parts_manual_documentation_scene_command(
             catalog["sourceRevision"],
             loaded_plan["revision"],
             base_revision=body.baseRevision,
-            command=command,
+            command=documentation_provenance_command(document, command),
             page_targets=_parts_manual_editable_page_targets(document),
         )
         next_document = build_manual_document(
@@ -41029,6 +41167,7 @@ class _DocumentationAgentHost:
             },
             "evidence": {key: value for key, value in (payload.get("evidenceSummary") or {}).items()
                          if isinstance(value, (int, str))},
+            "sourceSupport": copy.deepcopy(payload.get("sourceSupport") or {}),
             "citedSources": [{"title": self._short(item.get("title"), 120), "kind": item.get("kind"),
                               "authority": item.get("authority")}
                              for item in (payload.get("evidenceCitations") or [])][:12],
@@ -41415,6 +41554,7 @@ class _DocumentationAgentHost:
             document = snapshot["document"]
             targets = (_parts_manual_editable_page_targets(document) if document_type == "illustrated_parts_manual"
                        else _operations_manual_editable_page_targets(document))
+            commands = [documentation_provenance_command(document, command) for command in commands]
             result = repository.apply_batch(assembly_number, observed["sourceRevision"], observed["manualPlanRevision"],
                 base_revision=observed.get("sceneRevision"), expected_revision=observed["expectedRevision"],
                 request_id=observed["requestId"], commands=commands, page_targets=targets,

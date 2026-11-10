@@ -10,7 +10,7 @@
     <title>InspectorPro</title>
     <link rel="stylesheet" href="/static/cad_viewport.css">
     <link rel="stylesheet" href="/static/packaging_ribbon_icons.css">
-    <script src="/static/documentation_commands.js?v=20261109-p1a-2"></script>
+    <script src="/static/documentation_commands.js?v=20261109-p1b-2"></script>
     <script src="/static/cad_viewport.js"></script>
     <script>
         // Theme bootstrap — set data-theme BEFORE the stylesheet is parsed
@@ -34832,6 +34832,7 @@
                         topic: String(row.topic || ''),
                         message: String(row.message || ''),
                     })),
+                sourceSupport: documentModel?.sourceSupportSummary || {},
                 sourceCitations: (documentModel?.evidenceCitations || []).map(row => ({
                     citationNumber: Number(row.citationNumber || 0),
                     sourceId: String(row.sourceId || ''),
@@ -34959,6 +34960,7 @@
                     documentModel?.releaseGate?.controlledReleaseStatus || 'BLOCKED'
                 ),
                 releaseFindings: findings,
+                sourceSupport: documentModel?.sourceSupportSummary || {},
                 sourceCitations: (documentModel?.evidenceCitations || []).map(row => ({
                     citationNumber: Number(row.citationNumber || 0),
                     sourceId: String(row.sourceId || ''),
@@ -35004,6 +35006,7 @@
                 citedSourceCount: Number(
                     documentModel?.evidenceSummary?.citedSourceCount || 0
                 ),
+                sourceSupport: documentModel?.sourceSupportSummary || {},
                 sourceCitations: (documentModel?.evidenceCitations || []).map(row => ({
                     citationNumber: Number(row.citationNumber || 0),
                     sourceId: String(row.sourceId || ''),
@@ -38708,7 +38711,7 @@
                 _documentationAssertSageWork(work);
                 const page = pages[index];
                 const pageClaimIds = new Set(
-                    (page.evidenceClaimIds || []).map(value => String(value))
+                    (page.activeEvidenceClaimIds ?? page.evidenceClaimIds ?? []).map(value => String(value))
                 );
                 const allCitations = Array.isArray(payload.document?.evidenceCitations)
                     ? payload.document.evidenceCitations : [];
@@ -38717,7 +38720,7 @@
                 );
                 _documentationSetSageCitations(
                     work,
-                    pageCitations.length ? pageCitations : allCitations
+                    page.activeEvidenceClaimIds ? pageCitations : (pageCitations.length ? pageCitations : allCitations)
                 );
                 generation.nextPageId = String(page.pageId);
                 generation.lastRevealedPageId = null;
@@ -40884,6 +40887,27 @@
                 panel.appendChild(empty);
                 return;
             }
+            const provenanceModel = _documentationPayload()?.document;
+            const pageEvidence = Object.values(provenanceModel?.fieldMeta || {}).filter(meta =>
+                meta.evidenceStatus === 'edited_unverified' && (!meta.pageId || meta.pageId === page.pageId));
+            if (pageEvidence.length) {
+                const evidence = document.createElement('div');
+                evidence.className = 'documentation-property-section';
+                for (const meta of pageEvidence) {
+                    const label = document.createElement('p');
+                    label.textContent = (meta.displayName || meta.alias || meta.targetId) + ': Edited - source does not verify this value';
+                    evidence.appendChild(label);
+                    const original = document.createElement('p');
+                    original.textContent = 'Original source: ' + (meta.originalEvidence?.sourceIds || [])
+                        .map(id => provenanceModel.evidenceCitations?.find(source => source.sourceId === id)?.title || id).join(', ');
+                    evidence.appendChild(original);
+                }
+                DocumentationCommands.confirmationControl(evidence, provenanceModel,
+                    () => _documentationRefreshScene({ revealAll: true }),
+                    () => _documentationPayload()?.document?.documentType === provenanceModel.documentType
+                        && _documentationPayload()?.document?.product?.assemblyNumber === provenanceModel.product?.assemblyNumber);
+                panel.appendChild(evidence);
+            }
             if (_documentationIsSpecificationSheet()) {
                 const documentModel = _documentationPayload()?.document;
                 if (!documentModel) return;
@@ -42201,6 +42225,7 @@
                     _documentationEditablePart(cell, page, `${block.blockId}.r${index}.c${column}`);
                     row.appendChild(cell);
                 });
+                DocumentationCommands.mark(row.lastElementChild, source.provenance);
                 body.appendChild(row);
             });
             table.appendChild(body);
@@ -42277,6 +42302,7 @@
                     quantity.textContent = `${Number(item.quantity)}X`;
                     copy.appendChild(quantity);
                 }
+                DocumentationCommands.mark(copy, item.provenance);
                 row.appendChild(copy);
                 list.appendChild(row);
             });
@@ -42334,6 +42360,9 @@
         }
 
         function _specSheetSourceLabel(info) {
+            if (info?.provenance?.evidenceStatus === 'edited_unverified') {
+                return 'Edited - source does not verify this value';
+            }
             if (!info?.source) return 'Open';
             if (info.accepted && info.source === 'research') return 'Public source, accepted';
             if (info.accepted && info.source === 'sage_draft') return 'Sage draft, accepted';
@@ -42380,6 +42409,7 @@
             element.classList.toggle('open', open);
             element.classList.toggle('spec-slot-selected', state.specSheetSlotSelected === slot);
             element.dataset.specSlot = slot;
+            DocumentationCommands.mark(element, info?.provenance);
             element.textContent = open ? _specSheetPlaceholder(slot, info) : String(info.value);
             element.title = open
                 ? `${info?.hint ? `${info.hint}. ` : ''}Double-click to type it.`
@@ -42997,6 +43027,7 @@
             handle.addEventListener('pointerdown', event => {
                 _documentationBeginPageElementResize(event, targetId);
             });
+            DocumentationCommands.mark(element, block.provenance);
             element.appendChild(handle);
             return element;
         }

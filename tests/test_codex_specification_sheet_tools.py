@@ -231,3 +231,12 @@ def test_internal_readiness_checks_do_not_authorize_slot_writes(client):
     refused = raw_call(gateway, "provide_document_values", {"documentType": SPEC,
         "values": [{"slot": "title", "value": "New title"}]})
     assert refused["error"]["code"] == "document_read_required"
+
+
+def test_confirmation_proposal_does_not_add_a_specification_acceptance_tool():
+    from ai_inspector.codex_runtime.documentation_tools import tool_specs
+
+    tools = {tool["name"]: tool for tool in tool_specs()}
+    assert tools["propose_document_value_confirmation"]["read_only"] is True
+    assert tools["accept_specification_values"]["read_only"] is False
+    assert "confirm_document_values" not in tools

@@ -20,7 +20,7 @@ from .version import (
 )
 
 
-PARTS_MANUAL_DOCUMENT_SCHEMA_VERSION = 4
+PARTS_MANUAL_DOCUMENT_SCHEMA_VERSION = 5
 MANUAL_SECTION_BOM_ROWS_PER_PAGE = 20
 # The PDF draws index rows 22 pt apart from y 106 inside the index content area (y 66-564).
 PARTS_INDEX_ROWS_PER_PAGE = 20
@@ -868,5 +868,12 @@ def build_manual_document(
         "pageCount": len(pages),
         "pages": pages,
     }
+    from ai_inspector.documentation.provenance import project_document
+
+    generated_parts = {part_text_target_id(row["definitionId"], field): str(
+        row.get(column) or ("Not specified" if field == "partNumber" else ""))
+        for record in section_records for row in record["bom"] if row.get("definitionId")
+        for field, column in PART_TEXT_FIELDS.items()}
+    document = project_document(document, documentation_scene, generated_parts=generated_parts)
     document["documentRevision"] = _stable_revision(document)
     return document

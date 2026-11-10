@@ -204,13 +204,18 @@ class SlotStore:
     def __init__(self, root: str | Path, assembly_number: str):
         self._candidate = None
         self.last_receipt = None
+        self.provenance_defaults = {}
+        self.provenance_values = {}
         number = str(assembly_number or "").strip()
         if not _SAFE_RE.fullmatch(number):
             raise SpecificationSlotError("invalid specification-sheet assembly number")
         self.assembly_number = number
         base = Path(root).resolve()
-        self.path = (base / number.lower() / "slots.json").resolve()
-        self.path.relative_to(base)
+        # Resolve the assembly folder, never slots.json itself: while another writer replaces the file, Windows can
+        # resolve it to its \\?\ form, which then fails the containment check (the scene store does the same).
+        directory = (base / number.lower()).resolve()
+        directory.relative_to(base)
+        self.path = directory / "slots.json"
 
     def read(self) -> Dict[str, Any]:
         if self._candidate is not None:
@@ -230,7 +235,7 @@ class SlotStore:
             "units": payload.get("units") if payload.get("units") in UNITS else None,
             "updatedAt": payload.get("updatedAt"),
         }
-        for key in ("editRevision", "editEpoch", "fieldVersions", "receipts", "receiptOrder", "conflicts"):
+        for key in ("editRevision", "editEpoch", "fieldVersions", "fieldMeta", "receipts", "receiptOrder", "conflicts"):
             if key in payload:
                 result[key] = copy.deepcopy(payload[key])
         transaction_defaults(result)
@@ -276,6 +281,11 @@ class SlotStore:
                 if not changed and payload_hash is None:
                     return result
                 if changed:
+                    from ai_inspector.documentation.provenance import slot_mutation_meta
+                    import secrets
+
+                    slot_mutation_meta(before, candidate, self.provenance_defaults, effective_values=self.provenance_values, actor=actor,
+                        change_id=self.last_receipt["changeId"] if self.last_receipt else secrets.token_hex(16))
                     candidate["editRevision"] = before["editRevision"] + 1
                     for key in set(changed) | {"@sheet"}:
                         candidate["fieldVersions"][key] = before["fieldVersions"].get(key, 0) + 1

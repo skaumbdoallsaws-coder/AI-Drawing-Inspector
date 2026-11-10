@@ -12,6 +12,7 @@ from typing import Any, Dict, Mapping
 import uuid
 
 from ai_inspector.operations_manual.artifacts import attach_draft_render_artifacts
+from ai_inspector.documentation.provenance import check_export, export_document
 from ai_inspector.operations_manual.exports import (
     OperationsManualExportError,
     build_prototype_docx_bytes,
@@ -106,6 +107,8 @@ def store_review_pdf(
     assembly_number: str,
     document: Mapping[str, Any],
 ) -> Dict[str, Any]:
+    document = export_document(document)
+    check_export(document, document.get("exportMode", "review"))
     document = attach_draft_render_artifacts(root, assembly_number, document)
     readiness = review_export_readiness(document)
     if readiness["status"] != "READY":
@@ -161,6 +164,8 @@ def store_review_docx(
     assembly_number: str,
     document: Mapping[str, Any],
 ) -> Dict[str, Any]:
+    document = export_document(document)
+    check_export(document, document.get("exportMode", "review"))
     document = attach_draft_render_artifacts(root, assembly_number, document)
     readiness = review_export_readiness(document)
     if readiness["status"] != "READY":

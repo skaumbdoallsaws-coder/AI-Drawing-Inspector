@@ -19,7 +19,9 @@ def _block(
     claims: Iterable[str] = (),
     **payload: Any,
 ) -> Dict[str, Any]:
+    claims = list(claims)
     return {
+        **({"evidenceBindingVersion": 1} if list(claims) or any("claimIds" in row for row in payload.get("rows", payload.get("items", []))) else {}),
         "blockId": block_id,
         "blockType": block_type,
         "readingOrder": order,
@@ -239,6 +241,31 @@ def _source_rows(
     return rows
 
 
+def _cited_item(snapshot, claim_id, item):
+    claim = (snapshot.get("claims") or {}).get(claim_id) or {}
+    return {**item, "claimIds": [claim_id], "sourceIds": list(claim.get("sourceIds") or []),
+            "evidenceBindingVersion": 1}
+
+
+def _cited_row(snapshot, claim_id, cells):
+    # The authored plan names the registered claim beside the row; no text match.
+    claim = (snapshot.get("claims") or {}).get(claim_id) or {}
+    return {"cells": cells, "claimIds": [claim_id], "sourceIds": list(claim.get("sourceIds") or []),
+            "evidenceBindingVersion": 1}
+
+
+def legacy_plan_projection(value):
+    """Keep saved scenes bound to the historical plan while adding evidence keys."""
+    if isinstance(value, list):
+        return [legacy_plan_projection(row) for row in value]
+    if isinstance(value, dict):
+        removed = {"evidenceBindingVersion"}
+        if value.get("evidenceBindingVersion") == 1 and ("cells" in value or "itemNumber" in value):
+            removed.update({"claimIds", "sourceIds"})
+        return {key: legacy_plan_projection(item) for key, item in value.items() if key not in removed}
+    return value
+
+
 def prototype_sections(
     snapshot: Mapping[str, Any],
     *,
@@ -313,15 +340,15 @@ def prototype_sections(
             _heading("spec-title", 1, "4 Specifications and Application Limits"),
             _paragraph("spec-intro", 2, "Values are shown as published by the manufacturer. Shipping weight is not represented as operating weight. Specifications are presented in the manufacturer's published US customary units."),
             _table("spec-table", 3, ["Characteristic", "Published value"], [
-                ["Rated capacity", "1,100 lb"],
-                ["Vertical travel", "44 in"],
-                ["Lowered height", "19.5 in"],
-                ["Raised height", "63.5 in"],
-                ["Platform", "20.5 x 39.8 in"],
-                ["Shipping weight", "436 lb"],
-                ["Battery architecture", "Onboard 12 V battery"],
-                ["Charger architecture", "Internal automatic 110 V charger"],
-                ["Running gear", "Two front rigid and two rear swivel polyurethane casters"],
+                _cited_row(snapshot, "CLM-SPEC-001", ["Rated capacity", "1,100 lb"]),
+                _cited_row(snapshot, "CLM-SPEC-002", ["Vertical travel", "44 in"]),
+                _cited_row(snapshot, "CLM-SPEC-003", ["Lowered height", "19.5 in"]),
+                _cited_row(snapshot, "CLM-SPEC-004", ["Raised height", "63.5 in"]),
+                _cited_row(snapshot, "CLM-SPEC-005", ["Platform", "20.5 x 39.8 in"]),
+                _cited_row(snapshot, "CLM-SPEC-006", ["Shipping weight", "436 lb"]),
+                _cited_row(snapshot, "CLM-ELECTRICAL-001", ["Battery architecture", "Onboard 12 V battery"]),
+                _cited_row(snapshot, "CLM-ELECTRICAL-002", ["Charger architecture", "Internal automatic 110 V charger"]),
+                _cited_row(snapshot, "CLM-RUNNING-001", ["Running gear", "Two front rigid and two rear swivel polyurethane casters"]),
             ], claims=specification_claims + ["CLM-ELECTRICAL-001", "CLM-ELECTRICAL-002", "CLM-RUNNING-001"]),
             _heading("spec-application-title", 4, "4.1 Application Approval Checklist", level=2),
             _list("spec-application", 5, [
@@ -340,11 +367,11 @@ def prototype_sections(
             _figure_legend("controls-legend", 4, "OM-FIG-002", legends.get("OM-FIG-002", [])),
             _heading("controls-functions-title", 5, "5.1 Control Functions", level=2),
             _list("controls-table", 6, [
-                {"label": "UP push button", "text": "Commands upward platform motion while held. Verify the label and momentary operation on the actual machine."},
-                {"label": "DOWN push button", "text": "Commands downward platform motion while held. Verify direction and release-to-stop behavior before handling a load."},
-                {"label": "Battery-discharge indicator", "text": "Displays available battery state. Interpret the indication only according to the current machine label."},
-                {"label": "Main switch or isolation device", "text": "Controls electrical availability. Confirm the maintenance-isolation device and sequence for the machine configuration."},
-                {"label": "Onboard charger connection", "text": "Connects the internal charger to the facility supply. Confirm the voltage, cord condition, and charger label before connection."},
+                _cited_item(snapshot, "CLM-CONTROL-001", {"label": "UP push button", "text": "Commands upward platform motion while held. Verify the label and momentary operation on the actual machine."}),
+                _cited_item(snapshot, "CLM-CONTROL-001", {"label": "DOWN push button", "text": "Commands downward platform motion while held. Verify direction and release-to-stop behavior before handling a load."}),
+                _cited_item(snapshot, "CLM-CONTROL-001", {"label": "Battery-discharge indicator", "text": "Displays available battery state. Interpret the indication only according to the current machine label."}),
+                _cited_item(snapshot, "CLM-SAFETY-FEATURE-001", {"label": "Main switch or isolation device", "text": "Controls electrical availability. Confirm the maintenance-isolation device and sequence for the machine configuration."}),
+                _cited_item(snapshot, "CLM-ELECTRICAL-002", {"label": "Onboard charger connection", "text": "Connects the internal charger to the facility supply. Confirm the voltage, cord condition, and charger label before connection."}),
             ], style="definitions", claims=["CLM-CONTROL-001", "CLM-ELECTRICAL-001", "CLM-ELECTRICAL-002", "CLM-SAFETY-FEATURE-001"]),
             _note("controls-stop", 7, "warning", "If motion continues after a control is released, motion is reversed, or an indicator behaves unexpectedly, stop using the lift, prevent access, and refer the machine to qualified service personnel."),
         ]),

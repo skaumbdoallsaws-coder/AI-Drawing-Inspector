@@ -19,6 +19,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from urllib.parse import urlsplit
 from urllib.request import ProxyHandler, build_opener
@@ -46,16 +47,19 @@ KNOWN_OPTIONAL_HTTP = (
 KNOWN_FIXTURE_LIMITATIONS = [
     "Drawing-map, drawing-pdf, part-features and process-map preview GETs may return 404 in the sanitized MMLE copy.",
     "Reference-views GET may return 500 because this copy has no MMLE drawings.",
-    "The ignored static/contracts/semantic-knowledge-prototype-v1.json is not copied; its server startup FileNotFoundError is known.",
-    "A bridge status poll still in flight when the smoke reloads the page is aborted (net::ERR_ABORTED).",
+    "A page reload aborts GETs still in flight (bridge status poll, static assets, figure images): net::ERR_ABORTED.",
 ]
-# The page polls this status route; the smoke's own reload between workspace opens can cut one off.
-KNOWN_ABORTED_POLLS = re.compile(r"/api/bridge/status")
+# The smoke reloads the app between workspace opens, which aborts GETs still in flight: the bridge status poll,
+# static assets and saved figure images. Only those reads; an aborted write or any other route still fails.
+KNOWN_ABORTED_GETS = re.compile(
+    r"/api/bridge/status"
+    r"|/static/[A-Za-z0-9_./-]+"
+    r"|/api/(?:parts-manual|operations-manual|work-instructions|specification-sheet)/[^/]+/renders/[0-9a-f]{64}/[A-Za-z0-9_.-]+")
 
 
 def known_network_failure(failure):
-    return (failure.get("error") == "net::ERR_ABORTED"
-            and bool(KNOWN_ABORTED_POLLS.fullmatch(urlsplit(failure.get("url", "")).path)))
+    return (failure.get("error") == "net::ERR_ABORTED" and failure.get("method", "GET") == "GET"
+            and bool(KNOWN_ABORTED_GETS.fullmatch(urlsplit(failure.get("url", "")).path)))
 
 
 def known_http_failure(failure):
@@ -88,7 +92,7 @@ def classify_failures(report):
     unexpected_network = []
     for item in report["networkFailures"]:
         if known_network_failure(item):
-            known.append({"kind": "network", **item, "reason": "Status poll aborted by the smoke's own page reload"})
+            known.append({"kind": "network", **item, "reason": "GET aborted by the smoke's own page reload"})
         else:
             unexpected_network.append(item)
     report["knownFixtureFailures"] = known
@@ -97,6 +101,71 @@ def classify_failures(report):
     report["unexpectedNetworkFailures"] = unexpected_network
     return not (unexpected_http or unexpected_console or report["browserErrors"]
                 or unexpected_network or report["outboundRequests"])
+
+
+def attach_stall_probe(page):
+    """A DevTools session kept open on each tab, so a later stall can still be examined: Debugger.pause and
+    Performance.getMetrics interrupt a running script, but enabling those domains does not."""
+    cdp = page.context.new_cdp_session(page)
+    cdp.send("Performance.enable")
+    cdp.send("Debugger.enable")
+    return cdp
+
+
+def stall_probe(page, cdp, report, on_blocked):
+    """After a timeout: is the page running a script (and where), busy in layout, or idle but not drawing?
+    A watchdog calls on_blocked if the renderer stops answering DevTools altogether."""
+    probe = report["stallProbe"] = {}
+    watchdog = threading.Timer(90, on_blocked)
+    watchdog.daemon = True
+    watchdog.start()
+    try:
+        def metrics():
+            return {item["name"]: item["value"] for item in cdp.send("Performance.getMetrics")["metrics"]}
+        first = metrics()
+        page.wait_for_timeout(3000)
+        second = metrics()
+        probe["busySecondsOver3s"] = {name: round(second.get(name, 0) - first.get(name, 0), 3) for name in
+            ("TaskDuration", "ScriptDuration", "LayoutDuration", "RecalcStyleDuration")}
+        probe["jsHeapUsedMB"] = round(second.get("JSHeapUsedSize", 0) / 1e6, 1)
+        probe["domNodes"] = second.get("Nodes")
+        paused = []
+        cdp.on("Debugger.paused", lambda event: paused.append(event))  # Playwright cannot wrap a builtin method
+        cdp.send("Debugger.pause")
+        for _ in range(20):
+            if paused:
+                break
+            page.wait_for_timeout(250)
+        if paused:
+            probe["pauseReason"] = paused[0].get("reason")
+            probe["stack"] = [
+                "{} {}:{}:{}".format(frame.get("functionName") or "<anonymous>",
+                                     (frame.get("url") or "").rsplit("/", 1)[-1],
+                                     frame["location"]["lineNumber"] + 1, frame["location"].get("columnNumber", 0) + 1)
+                for frame in paused[0].get("callFrames", [])[:16]]
+            cdp.send("Debugger.resume")
+        else:
+            probe["stack"] = None
+        if probe["busySecondsOver3s"]["ScriptDuration"] < 1:
+            probe["frames"] = page.evaluate("""() => new Promise(resolve => {
+                const started = performance.now();
+                const timer = setTimeout(() => resolve({animationFrame: false, waitedMs: Math.round(performance.now() - started)}), 3000);
+                requestAnimationFrame(() => { clearTimeout(timer); resolve({animationFrame: true, waitedMs: Math.round(performance.now() - started)}); });
+            }).then(result => ({...result, visibility: document.visibilityState, focused: document.hasFocus()}))""")
+            probe["pageState"] = page.evaluate("""() => {
+                const debug = window.__compareDbg, state = debug && debug.state;
+                let generation = null;
+                try { generation = debug && debug.documentationGenerationSnapshot(); } catch (error) { generation = String(error); }
+                return {url: location.pathname + location.search, documentType: state && state.documentationDocumentType,
+                    workspaceVisible: !!document.querySelector('#documentationWorkspace:not([hidden])'),
+                    workspaceBusy: !!document.querySelector('#documentationWorkspace.busy'),
+                    pageId: state && state.partsManualDocumentationPageId, generation,
+                    pageItems: document.querySelectorAll('.documentation-page-item').length};
+            }""")
+    except Exception as error:
+        probe["error"] = f"{type(error).__name__}: {error}"[:600]
+    finally:
+        watchdog.cancel()
 
 
 def sha(path):
@@ -142,6 +211,12 @@ class IsolatedDocumentationServer:
         names.update(p.relative_to(ROOT).as_posix() for p in (ROOT / "ai_inspector/documentation").glob("*.py"))
         names.update(p.relative_to(ROOT).as_posix() for p in (ROOT / "static").glob("documentation_*.js"))
         names.update(inputs["inputFiles"])
+        # Work instructions accept the function-ready MMLE package only in semantic-knowledge prototype mode, which
+        # this ignored engineering contract defines (no credentials; its review receipt is in docs/semantic-knowledge).
+        prototype_contract = "static/contracts/semantic-knowledge-prototype-v1.json"
+        if safe_source(prototype_contract).is_file():
+            names.add(prototype_contract)
+            inputs["inputFiles"].append(prototype_contract)
         for name in sorted(names):
             source = safe_source(name)
             if not source.is_file():
@@ -216,18 +291,257 @@ class IsolatedDocumentationServer:
         return all(sha(safe_source(name)) == checksum for name, checksum in self.original.items())
 
 
+def run_p1b(page, request, server, output, report, record, begin_edit, tool, fresh_page):
+    """Real UI edits, captures and trusted confirmation; production HTTP export gates."""
+    import fitz
+    from tools.documentation_baseline import docx_paragraphs
+
+    marker = "Edited - source does not verify this value"
+    ops = "operations_and_maintenance_manual"
+    wi = "work_instructions"
+    routes = {ops: "operations-manual", wi: "work-instructions"}
+    report["visualArtifacts"] = {}
+    report["p1bInputs"] = [name for name in server.original if any(part in name for part in
+        ("docs/operations-manual/", "docs/process-map/", "generated/training/", "docs/semantic-knowledge/"))]
+    renders = []
+
+    def observe(response):
+        if response.request.method == "POST" and re.search(r"/document/[^/]+/render$", urlsplit(response.url).path):
+            renders.append({"url": response.url, "status": response.status})
+
+    page.on("response", observe)
+
+    def base(kind):
+        return server.url + "/api/" + routes[kind] + "/" + ASSEMBLY
+
+    def state(kind):
+        response = request.get(base(kind) + "/documentation-scene", timeout=120000)
+        if not response.ok:
+            raise RuntimeError(response.text()[:1000])
+        return response.json()
+
+    def open_document(kind, page_id):
+        # Reopening loads the app in a new tab (the old one is closed), then uses its visible type picker and
+        # Refresh: a full reload with a fresh renderer. No document state injection or fake renderer.
+        # (One tab reloaded eight or nine times froze headless Chromium in three runs; see stallProbe if it recurs.)
+        nonlocal page
+        page = fresh_page()
+        page.on("response", observe)
+        page.goto(server.url + "/?assemblyProfile=MMLE-50D", wait_until="domcontentloaded", timeout=90000)
+        page.wait_for_function("""() => window.__compareDbg?.state.partNumber === 'MMLE-50D'
+            && window.__compareDbg.state.assyLiveScene""", timeout=90000)
+        page.evaluate("() => window.__compareDbg.openDocumentationWorkflow()")
+        page.locator("#documentationWorkspace").wait_for(state="visible", timeout=120000)
+        page.wait_for_function("() => !document.querySelector('#documentationWorkspace.busy')", timeout=120000)
+        page.locator("#documentationTypeRibbonTrigger").click()
+        page.locator("#documentationTypeRibbonOption-" + kind).click()
+        page.wait_for_function("kind => window.__compareDbg.state.documentationDocumentType === kind && !document.querySelector('#documentationWorkspace.busy')", arg=kind, timeout=120000)
+        with page.expect_response(lambda r: r.request.method == "GET" and r.url == base(kind) + "/documentation-scene", timeout=120000):
+            page.locator("#documentationRefreshRibbon").click()
+        page.wait_for_function("() => !document.querySelector('#documentationWorkspace.busy') && window.__compareDbg.documentationGenerationSnapshot().visiblePageCount > 0", timeout=120000)
+        # Refresh reveals the pages before its own activation of page 1 finishes rendering, so a click right after it
+        # can be overtaken by that late render (the app's pre-existing refresh race). Click until the chosen page is
+        # really active, and keep the attempt count as evidence.
+        attempts = 0
+        for attempts in range(1, 4):
+            page.locator(f'.documentation-page-item[data-page-id="{page_id}"]').click()
+            try:
+                page.wait_for_function("""pageId => window.__compareDbg.state.partsManualDocumentationPageId === pageId
+                    && !document.querySelector('#documentationWorkspace.busy')""", arg=page_id, timeout=5000)
+                page.wait_for_timeout(1000)
+                if page.evaluate("() => window.__compareDbg.state.partsManualDocumentationPageId") == page_id:
+                    break
+            except Exception:
+                pass
+        else:
+            raise RuntimeError(f"Page {page_id} did not stay active after three clicks")
+        report["workspaceOpens"].append({"phase": "P1b", "documentType": kind, "usedRefresh": True,
+            "pageClickAttempts": attempts,
+            "after": page.evaluate("() => window.__compareDbg.documentationGenerationSnapshot()")})
+
+    def cell(alias):
+        return page.locator(f'#documentationPublicationSurface [data-documentation-edit-target="{alias}"]:visible').first
+
+    def edit(alias, value):
+        target = cell(alias)
+        begin_edit(target)
+        target.fill(value)
+        with page.expect_response(lambda r: r.request.method == "POST" and "documentation-scene/commands" in r.url, timeout=120000) as saved:
+            target.press("Enter")
+        if not saved.value.ok:
+            raise RuntimeError(saved.value.text()[:1000])
+        page.wait_for_function("() => !document.querySelector('#documentationWorkspace.busy')", timeout=120000)
+        return saved.value.json()
+
+    def capture_all(kind):
+        start = len(renders)
+        # Capture/export are not navigations; their completion is awaited below, so never block on the click.
+        page.locator("#documentationCaptureAllRibbon").click(no_wait_after=True)
+        page.wait_for_function("""() => {
+            const payload = window.__compareDbg.state.partsManualDocumentation;
+            const figures = (payload?.document?.pages || []).filter(p => p.renderRequest);
+            return figures.length && figures.every(p => p.renderRequest.image?.status === 'ready')
+                && !document.querySelector('#documentationWorkspace.busy');
+        }""", timeout=240000)
+        document = state(kind)["document"]
+        figures = [p for p in document["pages"] if p.get("renderRequest")]
+        record(kind + "_real_captures", len(renders) - start == len(figures)
+               and all(row["status"] == 200 for row in renders[start:]), renders[start:])
+        return document
+
+    def export_ui(kind):
+        with page.expect_response(lambda r: r.request.method == "POST" and urlsplit(r.url).path == urlsplit(base(kind)).path + "/pdf", timeout=180000) as exported:
+            page.locator("#documentationPublishRibbon").click(no_wait_after=True)
+        if not exported.value.ok:
+            raise RuntimeError(exported.value.text()[:1000])
+        page.wait_for_function("() => !document.querySelector('#documentationWorkspace.busy')", timeout=120000)
+        return exported.value.json()
+
+    def save_page(receipt, name, match):
+        pdf_bytes = request.get(server.url + receipt["pdf"]["url"], timeout=120000).body()
+        word = "\n".join(docx_paragraphs(request.get(server.url + receipt["docx"]["url"], timeout=120000).body()))
+        (output / (name + ".pdf")).write_bytes(pdf_bytes)
+        with fitz.open(stream=pdf_bytes, filetype="pdf") as pdf:
+            index = next(i for i, p in enumerate(pdf) if match(p.get_text()))
+            text = pdf[index].get_text()
+            png = output / (name + ".png")
+            pdf[index].get_pixmap(matrix=fitz.Matrix(1.5, 1.5)).save(str(png))
+            report["visualArtifacts"][name] = {"path": png.relative_to(ROOT).as_posix(), "pageNumber": index + 1}
+        return text, word
+
+    def capacity(document):
+        return next(b for p in document["pages"] for b in p.get("layoutBlocks", []) if b.get("blockId") == "spec-table-1")
+
+    op_page, alias = "page-specifications-1", "spec-table-1.r0.c1"
+    open_document(ops, op_page)
+    original = capture_all(ops)
+    original_row = capacity(original)["rows"][0]
+    initial_claims = [row.get("claimIds", []) for row in capacity(original)["rows"]]
+    edited = edit(alias, "1,000 lb")
+    change_id = edited["command"]["commandId"]
+    open_document(ops, op_page)
+    record("p1b_operations_reopen_marked", cell(alias).inner_text() == "1,000 lb" and
+        page.locator('#documentationPublicationSurface [data-evidence-marker]').count() > 0)
+    read = tool("read_document_pages", {"documentType": ops, "targets": [{"pageId": op_page, "targetId": alias}]})
+    if not read.get("ok"):
+        raise RuntimeError(repr(read))
+    data = read["data"]
+    record("p1b_proof_read_marked", data["targets"][0]["provenance"]["evidenceStatus"] == "edited_unverified", read)
+    document = state(ops)["document"]
+    rows = capacity(document)["rows"]
+    record("p1b_other_rows_keep_sources", rows[0]["claimIds"] == [] and
+        [row.get("claimIds", []) for row in rows[1:]] == initial_claims[1:])
+    text, word = save_page(export_ui(ops), "p1b-review-capacity", lambda text: "Rated capacity" in text)
+    record("p1b_review_pdf_docx_marked", marker in text and marker in word and "1,000 lb" in text)
+    expected = [{"targetId": target["targetId"], "pageId": target["pageId"], "alias": target["alias"]}
+                for target in data["confirmationTargets"]]
+    blocked = request.post(base(ops) + "/pdf?mode=customer", timeout=120000)
+    record("p1b_customer_export_blocked_exact_targets", blocked.status == 422 and
+        blocked.json().get("error") == "unconfirmed_cited_values" and blocked.json().get("details", {}).get("targets") == expected,
+        blocked.json())
+    proposal = tool("propose_document_value_confirmation", {"documentId": data["documentId"], "targets": [
+        {"targetId": target["targetId"], "expectedContentHash": target["contentHash"]} for target in data["confirmationTargets"]]})
+    record("p1b_proposal_does_not_confirm", proposal.get("data", {}).get("status") == "awaiting_user" and
+        capacity(state(ops)["document"])["rows"][0]["provenance"]["evidenceStatus"] == "edited_unverified", proposal)
+    # Both clicks are Playwright mouse events, hence trusted. Never dispatch an
+    # event or invoke the confirmation handler through evaluate/the tool bridge.
+    if not page.get_by_role("button", name="Confirm as entered by me", exact=True).first.is_visible():
+        # At narrower widths the ribbon folds Inspector into More; use whichever control the user can see.
+        direct = page.locator("#documentationInspectorRibbon")
+        if direct.is_visible():
+            direct.click()
+        else:
+            page.locator("#documentationOverflowMenuRibbon").click()
+            page.locator(".documentation-ribbon-overflow-menu").get_by_role(
+                "button", name="Open or close the object Inspector", exact=True).click()
+    record("p1b_properties_show_edited", marker in page.locator("#documentationProperties").inner_text())
+    page.get_by_role("button", name="Confirm as entered by me", exact=True).first.click()
+    dialog = page.locator("dialog[open]")
+    record("p1b_confirmation_shows_value_and_source", "1,000 lb" in dialog.inner_text() and "Original source:" in dialog.inner_text())
+    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/confirm-values"), timeout=120000) as confirmed:
+        dialog.get_by_role("button", name="Confirm as entered by me", exact=True).click()
+    if not confirmed.value.ok:
+        raise RuntimeError(confirmed.value.text())
+    confirmation_receipt = confirmed.value.json()["receipt"]
+    customer = request.post(base(ops) + "/pdf?mode=customer", timeout=120000)
+    record("p1b_customer_export_succeeds", customer.ok, customer.json())
+    text, word = save_page(customer.json(), "p1b-customer-capacity", lambda text: "Rated capacity" in text)
+    confirmed_row = capacity(state(ops)["document"])["rows"][0]
+    record("p1b_confirmed_copy_clean", marker not in text + word and "1,000 lb" in text and
+        not confirmed_row["claimIds"] and not confirmed_row["sourceIds"] and
+        confirmed_row["provenance"]["evidenceStatus"] == "entered_by_user")
+    inspected = tool("inspect_document_change", {"documentId": data["documentId"], "changeId": change_id})
+    record("p1b_inspect_before_after", inspected.get("ok") and bool(inspected.get("data", {}).get("fields")), inspected)
+    refused = tool("undo_document_change", {"documentId": data["documentId"], "changeId": change_id,
+        "expectedRevision": confirmation_receipt["revision"], "requestId": "p1b-overlap"})
+    record("p1b_undo_checks_confirmation_provenance", refused.get("error", {}).get("code") == "undo_conflict", refused)
+    undone_confirmation = tool("undo_document_change", {"documentId": data["documentId"], "changeId": confirmation_receipt["changeId"],
+        "expectedRevision": confirmation_receipt["revision"], "requestId": "p1b-undo-confirmation"})
+    if not undone_confirmation.get("ok"):
+        raise RuntimeError(repr(undone_confirmation))
+    undone = tool("undo_document_change", {"documentId": data["documentId"], "changeId": change_id,
+        "expectedRevision": undone_confirmation["data"]["receipt"]["revision"], "requestId": "p1b-undo-edit"})
+    open_document(ops, op_page)
+    restored = capacity(state(ops)["document"])["rows"][0]
+    record("p1b_named_undo_restores_text_and_provenance", undone.get("ok") and cell(alias).inner_text() == "1,100 lb"
+        and restored["claimIds"] == original_row["claimIds"] and restored["provenance"]["evidenceStatus"] == "source_backed", undone)
+
+    cover = "page-work-instructions-cover"
+    open_document(wi, cover)
+    captured = capture_all(wi)
+    figures = {p["pageId"]: p["figureRevision"] for p in captured["pages"] if p.get("renderRequest")}
+    capture_count = len(renders)
+    changed = edit("wi-cover-status", "P1b browser instruction note.")["document"]
+    record("p1b_work_text_keeps_ready_figures", changed["documentRevision"] != captured["documentRevision"] and
+        all(p["figureRevision"] == figures[p["pageId"]] and p["renderRequest"]["image"]["status"] == "ready"
+            for p in changed["pages"] if p.get("renderRequest")))
+    exported = export_ui(wi)
+    text, word = save_page(exported, "p1b-work-instructions", lambda text: "P1b browser instruction note." in text)
+    record("p1b_work_exports_without_recapture", len(renders) == capture_count and
+        exported["pdf"]["documentRevision"] == exported["docx"]["documentRevision"] == changed["documentRevision"]
+        and bool(word))  # Cover status is a known P4 DOCX gap.
+    page.locator(f'.documentation-page-item[data-page-id="{cover}"]').click()
+    page.locator("#documentationViewMenuRibbon").click()
+    with page.expect_response(lambda r: r.request.method == "POST" and "documentation-scene/commands" in r.url, timeout=120000) as view:
+        page.locator("#documentationViewRightRibbon").click()
+    record("p1b_real_figure_change_saved", view.value.ok)
+    figure_changed = state(wi)["document"]
+    pending = [p["pageId"] for p in figure_changed["pages"] if p.get("renderRequest") and
+               p["renderRequest"].get("image", {}).get("status") != "ready"]
+    refused = request.post(base(wi) + "/pdf", timeout=120000)
+    record("p1b_figure_change_requires_only_cover", pending == [cover] and refused.status == 422 and
+        refused.json().get("error") == "work_instruction_capture_required" and
+        [p["pageId"] for p in refused.json().get("pendingPages", [])] == [cover], refused.json())
+    report["p1bCaptureRequests"] = renders
+    page.remove_listener("response", observe)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--phase", required=True, choices=PHASES)
     args = parser.parse_args()
     output = ROOT / ".runtime" / "de"
     output.mkdir(parents=True, exist_ok=True)
-    report = {"phase": args.phase, "assembly": ASSEMBLY, "checks": {}, "browserErrors": [],
+    report = {"phase": args.phase, "assembly": ASSEMBLY, "checks": {}, "editAttempts": [], "browserErrors": [],
               "consoleErrors": [], "networkFailures": [], "httpFailures": [], "outboundRequests": [], "passed": False,
               "knownFixtureLimitations": KNOWN_FIXTURE_LIMITATIONS, "failureScreenshots": [], "workspaceOpens": []}
     server = IsolatedDocumentationServer(output)
     playwright = browser = context = page = None
     page_handlers = {}
+    probe_session = {}
+
+    def on_blocked():
+        # Runs on the watchdog thread while the main thread waits on a renderer that no longer answers DevTools.
+        report.setdefault("stallProbe", {})["blocked"] = "Renderer stopped answering DevTools; the run was ended."
+        report["passed"] = False
+        try:
+            write_json(output / "report.json", report)
+            print(json.dumps(report, sort_keys=True), flush=True)
+        finally:
+            try:
+                server.stop()
+            finally:
+                os._exit(3)
 
     def failure_screenshot(check):
         evidence = {"check": check}
@@ -250,22 +564,51 @@ def main():
     def begin_edit(cell):
         # A manual page redraws on every press, so the browser never sees a double-click there; the workspace starts an
         # edit on two separate presses on the same text within half a second (_documentationTextPressed).
-        cell.wait_for(state="visible", timeout=30000)
-        box = cell.bounding_box()
-        x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
-        page.mouse.click(x, y)
-        page.wait_for_timeout(150)
-        page.mouse.click(x, y)
-        page.wait_for_function("() => !!document.querySelector('[contenteditable=\"true\"]')", timeout=15000)
+        # Playwright's mouse waits for each press to be handled (including the redraw) before sending the next, which
+        # a person's queued presses never do. Send two real presses 150 ms apart with explicit event timestamps, the
+        # way the system delivers a quick double press; the workspace times presses by event.timeStamp.
+        # A double press that lands while a just-activated page is still redrawing selects nothing; like a person,
+        # wait for the workspace to be idle and press again (at most three times). Attempts are kept as evidence.
+        for attempt in range(1, 4):
+            page.wait_for_function("() => !document.querySelector('#documentationWorkspace.busy')", timeout=120000)
+            cell.wait_for(state="visible", timeout=30000)
+            box = cell.bounding_box()
+            x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+            cdp = page.context.new_cdp_session(page)
+            try:
+                start = time.time()
+                cdp.send("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y, "timestamp": start})
+                for offset in (0.0, 0.15):
+                    for kind, lag, buttons in (("mousePressed", 0.0, 1), ("mouseReleased", 0.03, 0)):
+                        cdp.send("Input.dispatchMouseEvent", {"type": kind, "x": x, "y": y, "button": "left",
+                                  "buttons": buttons, "clickCount": 1, "timestamp": start + offset + lag})
+            finally:
+                cdp.detach()
+            try:
+                page.wait_for_function("() => !!document.querySelector('[contenteditable=\"true\"]')", timeout=5000)
+                report["editAttempts"].append(attempt)
+                return
+            except Exception:
+                page.wait_for_timeout(1000)
+        raise RuntimeError("Inline edit did not start after three double presses")
 
     try:
-        if args.phase != "P1a":
-            raise RuntimeError("Later cumulative phases are not implemented; this is the P1a gate only.")
+        if args.phase not in {"P1a", "P1b"}:
+            raise RuntimeError("Only the P1a and P1b cumulative gates are implemented.")
         from playwright.sync_api import sync_playwright
         server.start()
         report["isolation"] = server.isolation
         playwright = sync_playwright().start()
-        browser = playwright.chromium.launch(headless=True)
+        # The headless shell renders WebGL in software (SwiftShader), which hangs on this 3D-heavy app under memory
+        # pressure. Full Chromium's headless mode can use the real GPU (Direct3D 11) without a visible window; fall
+        # back to the shell when it is unavailable, and record the renderer either way.
+        try:
+            browser = playwright.chromium.launch(headless=True, channel="chromium",
+                                                 args=["--use-angle=d3d11", "--enable-gpu", "--ignore-gpu-blocklist"])
+            report["browserMode"] = "chromium-headless-gpu"
+        except Exception as error:
+            browser = playwright.chromium.launch(headless=True)
+            report["browserMode"] = "headless-shell (" + type(error).__name__ + ")"
         context = browser.new_context(viewport={"width": 1720, "height": 1080}, service_workers="block")
         if not hasattr(context, "route_web_socket"):
             raise RuntimeError("Installed Playwright lacks route_web_socket; outbound isolation cannot be proved")
@@ -290,18 +633,40 @@ def main():
 
         context.route("**/*", route)
         page = context.new_page()
+        probe_session["cdp"] = attach_stall_probe(page)
+        report["webglRenderer"] = page.evaluate("""() => {
+            const gl = document.createElement('canvas').getContext('webgl2');
+            const info = gl && gl.getExtension('WEBGL_debug_renderer_info');
+            return gl ? (info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)) : null;
+        }""")
         page_handlers = {
             "pageerror": lambda error: report["browserErrors"].append(str(error)),
             "console": lambda event: report["consoleErrors"].append(
                 {"message": event.text, "location": event.location}) if event.type == "error" else None,
             "requestfailed": lambda request: report["networkFailures"].append(
-                {"url": request.url, "error": request.failure}),
+                {"url": request.url, "method": request.method, "error": request.failure}),
             "response": lambda response: report["httpFailures"].append(
                 {"url": response.url, "status": response.status, "method": response.request.method})
                 if response.status >= 400 else None,
+            "crash": lambda crashed: report["browserErrors"].append("Renderer process crashed"),
+            "dialog": lambda dialog: (report["browserErrors"].append(
+                f"Unexpected {dialog.type} dialog: {dialog.message[:200]}"), dialog.dismiss()),
         }
         for event, handler in page_handlers.items():
             page.on(event, handler)
+
+        def fresh_page():
+            # Stop observing the old tab before closing it: closing cancels its background reads on purpose.
+            nonlocal page
+            for name, listener in page_handlers.items():
+                page.remove_listener(name, listener)
+            page.close()
+            page = context.new_page()
+            for name, listener in page_handlers.items():
+                page.on(name, listener)
+            probe_session["cdp"] = attach_stall_probe(page)
+            return page
+
         request = context.request
         scene_url = server.url + "/api/parts-manual/MMLE-50D/documentation-scene"
 
@@ -480,8 +845,12 @@ def main():
                 && (!s.partsManualDocumentation || s.partsManualDocumentation.document.documentType === 'product_specification_sheet');
         }"""))
         page.screenshot(path=str(output / "switched.png"), full_page=True)
+        if args.phase == "P1b":
+            run_p1b(page, request, server, output, report, record, begin_edit, tool, fresh_page)
     except Exception as error:
         report["fatalError"] = f"{type(error).__name__}: {error}"
+        if type(error).__name__ == "TimeoutError" and page is not None and not page.is_closed() and probe_session:
+            stall_probe(page, probe_session["cdp"], report, on_blocked)
         failure_screenshot("fatalError")
     finally:
         try:

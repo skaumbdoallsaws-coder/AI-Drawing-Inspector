@@ -179,7 +179,9 @@ def test_assembly_ribbon_exposes_parts_manual_review_workflow() -> None:
     assert "leaderOverrides" in html
     assert "anchorSide" in html
     assert "documentation-scene/commands`" in html
-    assert "documentation-scene/${direction}`" in html
+    # P1b-3: one history call for the scene group (default) and the specification sheet's slot journal.
+    assert "_documentationMoveHistory(direction, historyGroup = 'documentation-scene')" in html
+    assert "${bound.apiBase}/${historyGroup}/${direction}`" in html
     assert "partsManualDocumentationSelection" in html
     assert "CAD-grounded composition" not in html
     assert "_partsManualButton(\n                'Documentation'" in html
@@ -211,7 +213,7 @@ def test_assembly_ribbon_exposes_parts_manual_review_workflow() -> None:
     assert html.count("_documentationBuildBom(page.bom || [], page)") == 2
     assert "const targetId = `part.${row.definitionId}.${editableFields[column]}`;" in html
     assert "targetType: 'page_element', targetId: `part.${row.definitionId}.${field}`, part: true," in html
-    assert "if (!cell.isContentEditable) _documentationTextPressed(targetId);" in html
+    assert "if (!cell.isContentEditable) _documentationTextPressed(targetId, event.timeStamp);" in html
     assert "if (event.target?.closest?.('[contenteditable=\"true\"]')) return;" in html
     assert "|| textChanged.includes('illustrated_parts_manual'))" in html
     # A section of identical copies draws one copy; its balloons still name every copy (their "2X").
@@ -556,3 +558,13 @@ def test_sage_context_bar_is_hidden_on_the_assembly_tab_and_in_documentation() -
     assert "state.activeTab === 'assembly'" in bar
     assert "state.activeTab === 'training' && trainingState.type === 'documentation'" in bar
     assert "const showBar = !barHiddenHere && !!(" in bar
+
+
+def test_documentation_refresh_waits_for_a_workspace_still_opening() -> None:
+    # A type switch closes the workspace and reopens it asynchronously; a Refresh clicked meanwhile must not be
+    # overtaken by that open, which would blank the pages the Refresh revealed.
+    html = (ROOT / "static" / "index.html").read_text("utf-8")
+    start = html.index("async function _documentationReloadWorkflow()")
+    head = html[start:html.index("_documentationSetBusy(true, 'Refreshing documentation...')", start)]
+    assert "const opening = state.partsManualDocumentationWorkspacePromise;" in head
+    assert "if (opening) await opening.catch(() => null);" in head

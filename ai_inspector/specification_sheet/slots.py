@@ -22,6 +22,11 @@ from ai_inspector.documentation.commands import (
     request_hash, prior_receipt, check_preconditions, make_receipt, retain_receipt,
 )
 
+from ai_inspector.documentation.changes import (
+    record as change_record, slot_paths, inverse as inverse_change, restore as restore_change,
+    find_change, inspect_change, history_choices, validate_record, MAX_CHANGES,
+)
+
 SLOT_SCHEMA_VERSION = 2
 # Storage metadata does not change the generated sheet's layout/source plan.
 SLOT_LAYOUT_VERSION = 1
@@ -235,10 +240,15 @@ class SlotStore:
             "units": payload.get("units") if payload.get("units") in UNITS else None,
             "updatedAt": payload.get("updatedAt"),
         }
-        for key in ("editRevision", "editEpoch", "fieldVersions", "fieldMeta", "receipts", "receiptOrder", "conflicts"):
+        for key in ("editRevision", "editEpoch", "fieldVersions", "fieldMeta", "receipts", "receiptOrder", "conflicts", "journal"):
             if key in payload:
                 result[key] = copy.deepcopy(payload[key])
         transaction_defaults(result)
+        result.setdefault("journal", [])
+        if not isinstance(result["journal"], list) or len(result["journal"]) > MAX_CHANGES:
+            raise DocumentEditError("unsupported_document_schema", "Invalid slot change history.")
+        for item in result["journal"]:
+            validate_record(item, {"values", "fieldMeta", "rows", "type", "units"})
         validate_transaction_metadata(result)
         return result
 
@@ -249,7 +259,8 @@ class SlotStore:
         return self.read()
 
     def transaction(self, change, *, expected_revision=None, request_id=None,
-                    expected_hashes=None, current_hashes=None, payload=None, actor="user"):
+                    expected_hashes=None, current_hashes=None, payload=None, actor="user",
+                    _restore_meta=False, _inverse_of=None):
         """Stage every nested row/value/settings change and replace slots once."""
         with _SLOT_LOCK:
             if self._candidate is not None:
@@ -273,19 +284,36 @@ class SlotStore:
                 structural = any(before[key] != candidate[key] for key in ("rows", "type", "units"))
                 if structural:
                     changed.append("@sheet")
+                changed.extend(key for key in set(before["fieldMeta"]) | set(candidate["fieldMeta"])
+                    if before["fieldMeta"].get(key) != candidate["fieldMeta"].get(key) and key not in changed)
                 changed.sort()
+                if changed and payload_hash is None:
+                    request_id = "slot-" + uuid.uuid4().hex
+                    expected_revision = before["editRevision"]
+                    payload_hash = request_hash(request_id, {"changed": changed, "actor": actor})
                 if payload_hash is not None:
                     self.last_receipt = make_receipt(before, request_id=request_id, payload_hash=payload_hash,
                         document=document_id("product_specification_sheet", self.assembly_number),
-                        expected_revision=expected_revision, changed=changed, undoable=False)
+                        expected_revision=expected_revision, changed=changed, undoable=True)
                 if not changed and payload_hash is None:
                     return result
                 if changed:
                     from ai_inspector.documentation.provenance import slot_mutation_meta
-                    import secrets
-
-                    slot_mutation_meta(before, candidate, self.provenance_defaults, effective_values=self.provenance_values, actor=actor,
-                        change_id=self.last_receipt["changeId"] if self.last_receipt else secrets.token_hex(16))
+                    if not _restore_meta:
+                        slot_mutation_meta(before, candidate, self.provenance_defaults, effective_values=self.provenance_values, actor=actor,
+                            change_id=self.last_receipt["changeId"])
+                    for key in changed:
+                        meta = candidate["fieldMeta"].get(key)
+                        if _restore_meta and not _inverse_of and meta and meta.get("confirmation"):
+                            meta.update(changeId=self.last_receipt["changeId"], actor=actor)
+                            meta["confirmation"].update(changeId=self.last_receipt["changeId"], at=now())
+                    item = change_record(before, candidate, slot_paths(before, candidate),
+                        change_id=self.last_receipt["changeId"], actor=actor, created_at=now(),
+                        version_keys=changed, inverse_of=_inverse_of)
+                    item["binding"] = copy.deepcopy(getattr(self, "binding", {}))
+                    candidate["journal"].append(item)
+                    if len(candidate["journal"]) > MAX_CHANGES:
+                        raise DocumentEditError("document_history_full", "The slot change history is full.")
                     candidate["editRevision"] = before["editRevision"] + 1
                     for key in set(changed) | {"@sheet"}:
                         candidate["fieldVersions"][key] = before["fieldVersions"].get(key, 0) + 1
@@ -293,6 +321,8 @@ class SlotStore:
                 if self.last_receipt is not None:
                     retain_receipt(candidate, self.last_receipt)
                 validate_transaction_metadata(candidate)
+                if len(json.dumps(candidate, ensure_ascii=False).encode("utf-8")) > 16 * 1024 * 1024:
+                    raise DocumentEditError("document_history_full", "The slot change history exceeds its storage limit.")
                 if self.path.is_file():
                     original = self.path.read_bytes()
                     if json.loads(original).get("schemaVersion", 1) == 1:
@@ -310,6 +340,57 @@ class SlotStore:
                 return result
             finally:
                 self._candidate = None
+
+    def inspect_change(self, change_id):
+        with _SLOT_LOCK:
+            return inspect_change(self.read()["journal"], change_id,
+                document_id("product_specification_sheet", self.assembly_number))
+
+    def undo_change(self, change_id, *, expected_revision, request_id, actor="sage"):
+        with _SLOT_LOCK:
+            before = self.read()
+            payload = {"changeId": change_id, "expectedRevision": expected_revision}
+            prior = prior_receipt(before, request_id, request_hash(request_id, {"payload": payload, "actor": actor}))
+            if prior is not None:
+                self.last_receipt = prior
+                return {"receipt": prior}
+            if type(expected_revision) is not int or not 0 <= expected_revision <= before["editRevision"]:
+                raise DocumentEditError("stale_revision", "Read the current document revision.")
+            chosen = find_change(before["journal"], change_id)
+            if chosen.get("binding") and chosen["binding"] != getattr(self, "binding", {}):
+                raise DocumentEditError("undo_conflict", "The sheet's source binding changed.", changeId=change_id)
+            item = inverse_change(before, chosen, change_id="pending", actor=actor, created_at=now())
+            def apply(store):
+                candidate = store.read()
+                restore_change(candidate, item["changes"])
+                return store._save(candidate)
+            self.transaction(apply, expected_revision=expected_revision, request_id=request_id,
+                expected_hashes={"change": "matched"}, current_hashes={"change": "matched"},
+                payload=payload, actor=actor, _restore_meta=True, _inverse_of=change_id)
+            return {"receipt": self.last_receipt}
+
+    def confirm_values(self, targets, *, by, expected_revision, request_id, expected_hashes, current_hashes, payload):
+        from ai_inspector.documentation.provenance import confirmation_command
+        def confirm(store):
+            candidate = store.read()
+            for target in targets:
+                candidate["fieldMeta"].update(confirmation_command(target, by=by)["fieldMeta"])
+            return store._save(candidate)
+        return self.transaction(confirm, expected_revision=expected_revision, request_id=request_id,
+            expected_hashes=expected_hashes, current_hashes=current_hashes, payload=payload,
+            actor="user", _restore_meta=True)
+
+    def move_history(self, *, expected_revision, direction):
+        with _SLOT_LOCK:
+            before = self.read()
+            if expected_revision != before["editRevision"]:
+                raise DocumentEditError("stale_revision", "Read the current document revision.")
+            undo, redo = history_choices(before["journal"])
+            choices = undo if direction == "undo" else redo if direction == "redo" else []
+            if not choices:
+                raise DocumentEditError("change_not_found", "There is no slot change to " + direction + ".")
+            return self.undo_change(choices[-1], expected_revision=expected_revision,
+                request_id="slot-history-" + uuid.uuid4().hex, actor="user")
 
     def apply_batch(self, items, source, *, expected_revision, request_id, expected_hashes,
                     current_hashes, payload=None, actor="sage"):

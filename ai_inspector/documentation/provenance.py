@@ -29,6 +29,10 @@ def _leaves(commands):
 def replay_field_meta(commands):
     result = {}
     for command in _leaves(commands):
+        if command.get("operation") == "restore_change":
+            from .changes import restore
+            restore(result, command["change"]["changes"], root="fieldMeta")
+            continue
         page_id, alias = command.get("pageId"), command.get("targetId")
         if command.get("operation") in {"reset_page", "reset"}:
             result = {key: value for key, value in result.items() if not (
@@ -41,7 +45,8 @@ def replay_field_meta(commands):
 
 def _text_history(scene, page_id, aliases):
     history = []
-    for command in _leaves((scene.get("commands") or [])[:int(scene.get("historyCursor") or 0)]):
+    from .changes import effective_commands
+    for command in _leaves(effective_commands((scene.get("commands") or [])[:int(scene.get("historyCursor") or 0)])):
         if command.get("pageId") != page_id:
             continue
         operation, target = command.get("operation"), command.get("targetId")

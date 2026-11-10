@@ -86,6 +86,10 @@ def test_local_documentation_baseline_matches_recorded_expectations():
         pytest.skip("skipped: local inputs absent")
     expected = json.loads(baseline.EXPECTED_LOCAL.read_text(encoding="ascii"))
     baseline.compare(result, expected)
+    undo = result["reviewedSpecification"]["undo"]
+    assert undo["canUndoAfterEdit"] and undo["httpStatus"] == 200
+    assert undo["restoresSlotValue"] and undo["redoRestoresSlotValue"]
+    assert undo["restoresScenePages"] and undo["redoRestoresScenePages"]
 
 
 def _compiled_citation_fixture():

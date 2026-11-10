@@ -22,7 +22,10 @@ import threading
 import time
 from typing import Any, Dict, Iterable, Mapping, Optional
 
-
+from ai_inspector.documentation.changes import (
+    record as change_record, restore as restore_change, inverse as inverse_change,
+    scene_paths, legacy_id, find_change, inspect_change, history_choices, validate_record,
+)
 from ai_inspector.documentation.commands import (
     DocumentEditError, transaction_defaults, validate_transaction_metadata,
     request_hash, prior_receipt, check_preconditions, make_receipt, retain_receipt,
@@ -1029,6 +1032,35 @@ def _replay_target_command(
     _remove_empty_target_override(collection, target_id)
 
 
+def _scene_records(scene):
+    records, prefix = [], []
+    for index, command in enumerate(scene["commands"][:scene["historyCursor"]]):
+        item = command.get("change")
+        if item is None:
+            # Old logs have no snapshots. Derive them purely in memory; never
+            # enrich the saved command on read (its historical hash stays valid).
+            previous = {"pages": replay_documentation_commands(prefix), "fieldMeta": replay_field_meta(prefix)}
+            previous["theme"], previous["pageMasters"] = replay_documentation_theme(prefix)
+            active = [*prefix, command]
+            current = {"pages": replay_documentation_commands(active), "fieldMeta": replay_field_meta(active)}
+            current["theme"], current["pageMasters"] = replay_documentation_theme(active)
+            leaves = list(_leaf_commands([command]))
+            paths = scene_paths(previous, current, leaves)
+            if paths:
+                item = change_record(previous, current, paths, change_id=legacy_id(command, index),
+                    actor=command.get("actor", "user"), created_at=command.get("createdAt"),
+                    version_keys=[scene_field_key(str(c.get("pageId") or ""), str(c.get("targetType") or ""),
+                        str(c.get("targetId") or "")) for c in leaves])
+                receipt = scene.get("receipts", {}).get(command.get("requestId"), {}).get("receipt", {})
+                if receipt.get("changeId"):
+                    item["legacyId"] = item["changeId"]
+                    item["changeId"] = receipt["changeId"]
+        if item:
+            records.append(copy.deepcopy(item))
+        prefix.append(command)
+    return records
+
+
 def _leaf_commands(commands):
     for command in commands:
         if command.get("operation") == "batch":
@@ -1047,6 +1079,10 @@ def _leaf_commands(commands):
 def _advance_edit_versions(scene, commands):
     keys = set()
     for command in _leaf_commands(commands):
+        if command.get("operation") == "restore_change":
+            keys.update(command["change"].get("versionKeys", []))
+            scene["editEpoch"] += 1
+            continue
         operation, page = command.get("operation"), str(command.get("pageId") or "")
         if operation in {"set_theme", "apply_template"}:
             scene["editEpoch"] += 1
@@ -1074,6 +1110,9 @@ def replay_documentation_commands(commands: Iterable[Mapping[str, Any]]) -> Dict
         target_type = str(command.get("targetType") or "")
         target_id = str(command.get("targetId") or "")
         operation = str(command.get("operation") or "")
+        if operation == "restore_change":
+            restore_change(pages, command["change"]["changes"], root="pages")
+            continue
         page = _page_override(pages, page_id)
         if operation == "reset_page":
             pages.pop(page_id, None)
@@ -1158,7 +1197,12 @@ def replay_documentation_theme(
     page_masters = copy.deepcopy(DEFAULT_PAGE_MASTERS)
     for source_command in _leaf_commands(commands):
         operation = str(source_command.get("operation") or "")
-        if operation == "set_theme":
+        if operation == "restore_change":
+            state = {"theme": theme, "pageMasters": page_masters}
+            restore_change(state, [c for c in source_command["change"]["changes"]
+                                   if c["path"][0] in {"theme", "pageMasters"}])
+            theme, page_masters = state["theme"], state["pageMasters"]
+        elif operation == "set_theme":
             patch = source_command.get("theme")
             if not isinstance(patch, Mapping):
                 raise DocumentationSceneError("theme command requires a theme")
@@ -1254,9 +1298,15 @@ def validate_documentation_scene(scene: Mapping[str, Any]) -> None:
     cursor = scene.get("historyCursor")
     if not isinstance(cursor, int) or isinstance(cursor, bool) or not 0 <= cursor <= len(commands):
         raise DocumentationSceneError("documentation history cursor is invalid")
+    for entry in commands:
+        if isinstance(entry, Mapping) and "change" in entry:
+            validate_record(entry["change"], {"pages", "fieldMeta", "theme", "pageMasters"})
     for command in _leaf_commands(commands):
         if not isinstance(command, Mapping):
             raise DocumentationSceneError("documentation command must be an object")
+        if command.get("operation") == "restore_change":
+            validate_record(command.get("change"), {"pages", "fieldMeta", "theme", "pageMasters"})
+            continue
         if command.get("operation") not in DOCUMENTATION_COMMAND_OPERATIONS:
             raise DocumentationSceneError("unsupported documentation command")
         if command.get("targetType") not in DOCUMENTATION_TARGET_TYPES:
@@ -1543,14 +1593,18 @@ class DocumentationSceneRepository:
         source_current = str(scene.get("sourceRevision")) == str(source_revision)
         plan_current = str(scene.get("manualPlanRevision")) == str(manual_plan_revision)
         cursor = int(scene.get("historyCursor") or 0)
+        records = _scene_records(scene)
+        undo, redo = history_choices(records)
         return {
             "scene": copy.deepcopy(scene),
             "revision": documentation_scene_revision(scene),
             "persisted": path.is_file(),
             "sourceCurrent": source_current,
             "manualPlanCurrent": plan_current,
-            "canUndo": cursor > 0,
-            "canRedo": cursor < len(scene.get("commands") or []),
+            "canUndo": bool(undo),
+            "canRedo": bool(redo) or cursor < len(scene.get("commands") or []),
+            "changes": [{key: item.get(key) for key in ("changeId", "actor", "createdAt", "inverseOf")}
+                        for item in records[-50:]],
         }
 
     def rebaseline(
@@ -1590,17 +1644,9 @@ class DocumentationSceneRepository:
             scene["updatedAt"] = now
             validate_documentation_scene(scene)
             self._save(assembly_number, scene)
-            return {
-                "scene": copy.deepcopy(scene),
-                "revision": documentation_scene_revision(scene),
-                "persisted": True,
-                "sourceCurrent": True,
-                "manualPlanCurrent": True,
-                "canUndo": False,
-                "canRedo": False,
-                "rebaselined": True,
-                "previousRevision": documentation_scene_revision(previous),
-            }
+            # The same projection as read() (history choices, change list), so a write never returns another shape.
+            return {**self.read(assembly_number, source_revision, manual_plan_revision),
+                    "rebaselined": True, "previousRevision": documentation_scene_revision(previous)}
 
     def rebind_manual_plan(
         self,
@@ -1698,19 +1744,19 @@ class DocumentationSceneRepository:
             if any(meta.get("confirmation") for meta in (command.get("fieldMeta") or {}).values()):
                 raise DocumentationSceneError("Use the human confirmation endpoint.")
             candidate = apply_documentation_command_candidate(scene, command, page_targets)
+            before = scene
             scene, persisted_command = candidate["scene"], candidate["command"]
+            paths = scene_paths(before, scene, [persisted_command])
+            if paths:
+                persisted_command["change"] = change_record(before, scene, paths,
+                    change_id=persisted_command["commandId"], actor=persisted_command["actor"],
+                    created_at=persisted_command["createdAt"],
+                    version_keys=[scene_field_key(persisted_command["pageId"], persisted_command["targetType"], persisted_command["targetId"])])
             _advance_edit_versions(scene, [persisted_command])
             self._save(assembly_number, scene)
-            return {
-                "scene": copy.deepcopy(scene),
-                "command": copy.deepcopy(persisted_command),
-                "revision": documentation_scene_revision(scene),
-                "persisted": True,
-                "sourceCurrent": True,
-                "manualPlanCurrent": True,
-                "canUndo": True,
-                "canRedo": False,
-            }
+            # The same projection as read() (history choices, change list), so a write never returns another shape.
+            return {**self.read(assembly_number, source_revision, manual_plan_revision),
+                    "command": copy.deepcopy(persisted_command)}
 
     def apply_batch(self, assembly_number, source_revision, manual_plan_revision, *,
                     base_revision, expected_revision, request_id, commands, page_targets,
@@ -1777,57 +1823,97 @@ class DocumentationSceneRepository:
             candidate["commands"] = list(scene["commands"][:cursor]) + [{
                 "operation": "batch", "commands": persisted, "requestId": request_id, "actor": actor}]
             candidate["historyCursor"] = cursor + 1
+            candidate["commands"][-1]["change"] = change_record(scene, candidate,
+                scene_paths(scene, candidate, persisted), change_id=receipt["changeId"], actor=actor,
+                created_at=_utc_now(), version_keys=[scene_field_key(c["pageId"], c["targetType"], c["targetId"]) for c in persisted])
             _advance_edit_versions(candidate, persisted)
             retain_receipt(candidate, receipt)
             self._save(assembly_number, candidate)
             return {**self.read(assembly_number, source_revision, manual_plan_revision),
                     "receipt": receipt, "changed": changed}
 
-    def move_history(
-        self,
-        assembly_number: str,
-        source_revision: str,
-        manual_plan_revision: str,
-        *,
-        base_revision: str,
-        direction: str,
-    ) -> Dict[str, Any]:
+    def inspect_change(self, assembly_number, source_revision, manual_plan_revision, change_id):
+        with _WRITE_LOCK:
+            loaded = self.read(assembly_number, source_revision, manual_plan_revision)
+            self._assert_binding(loaded["scene"], source_revision, manual_plan_revision)
+            return inspect_change(_scene_records(loaded["scene"]), change_id,
+                                  document_id(self.document_type, assembly_number))
+
+    def undo_change(self, assembly_number, source_revision, manual_plan_revision, *,
+                    change_id, expected_revision, request_id, actor="sage"):
+        payload_hash = request_hash(request_id, {"changeId": change_id, "expectedRevision": expected_revision,
+            "actor": actor, "sourceRevision": source_revision, "manualPlanRevision": manual_plan_revision})
+        with _WRITE_LOCK:
+            loaded = self.read(assembly_number, source_revision, manual_plan_revision)
+            scene = loaded["scene"]
+            self._assert_binding(scene, source_revision, manual_plan_revision)
+            previous = prior_receipt(scene, request_id, payload_hash)
+            if previous is not None:
+                return {**loaded, "receipt": previous}
+            if type(expected_revision) is not int or not 0 <= expected_revision <= scene["editRevision"]:
+                raise DocumentEditError("stale_revision", "Read the current document revision.")
+            chosen = find_change(_scene_records(scene), change_id)
+            changed = chosen.get("versionKeys") or ["/".join(c["path"]) for c in chosen["changes"]]
+            receipt = make_receipt(scene, request_id=request_id, payload_hash=payload_hash,
+                document=document_id(self.document_type, assembly_number), expected_revision=expected_revision,
+                changed=changed, undoable=True)
+            item = inverse_change(scene, chosen, change_id=receipt["changeId"], actor=actor, created_at=_utc_now())
+            candidate = copy.deepcopy(scene)
+            entry = {"operation": "restore_change", "actor": actor, "change": item}
+            candidate["commands"] = scene["commands"][:scene["historyCursor"]] + [entry]
+            candidate["historyCursor"] = len(candidate["commands"])
+            restore_change(candidate, item["changes"])
+            _advance_edit_versions(candidate, [entry])
+            candidate["updatedAt"] = _utc_now()
+            retain_receipt(candidate, receipt)
+            # Replay normalizes empty page containers just like ordinary commands.
+            candidate = _upgrade_documentation_scene(candidate)
+            validate_documentation_scene(candidate)
+            self._save(assembly_number, candidate)
+            return {**self.read(assembly_number, source_revision, manual_plan_revision), "receipt": receipt}
+
+    def move_history(self, assembly_number, source_revision, manual_plan_revision, *, base_revision, direction):
         if direction not in {"undo", "redo"}:
             raise DocumentationSceneError("unsupported documentation history operation")
         with _WRITE_LOCK:
-            loaded = self.read(
-                assembly_number,
-                source_revision,
-                manual_plan_revision,
-            )
+            loaded = self.read(assembly_number, source_revision, manual_plan_revision)
             scene = loaded["scene"]
             self._assert_revision(scene, base_revision)
             self._assert_binding(scene, source_revision, manual_plan_revision)
-            commands = list(scene.get("commands") or [])
-            cursor = int(scene.get("historyCursor") or 0)
-            next_cursor = cursor - 1 if direction == "undo" else cursor + 1
-            if next_cursor < 0 or next_cursor > len(commands):
-                raise DocumentationSceneError(f"nothing to {direction}")
-            _advance_edit_versions(scene, [commands[next_cursor if direction == "undo" else cursor]])
-            scene["historyCursor"] = next_cursor
-            active_commands = commands[:next_cursor]
-            scene["fieldMeta"] = replay_field_meta(active_commands)
-            scene["pages"] = replay_documentation_commands(active_commands)
-            scene["theme"], scene["pageMasters"] = replay_documentation_theme(
-                active_commands
-            )
-            scene["updatedAt"] = _utc_now()
-            validate_documentation_scene(scene)
-            self._save(assembly_number, scene)
-            return {
-                "scene": copy.deepcopy(scene),
-                "revision": documentation_scene_revision(scene),
-                "persisted": True,
-                "sourceCurrent": True,
-                "manualPlanCurrent": True,
-                "canUndo": next_cursor > 0,
-                "canRedo": next_cursor < len(commands),
-            }
+            undo, redo = history_choices(_scene_records(scene))
+            choices = undo if direction == "undo" else redo
+            if not choices:
+                # A pre-journal cursor may still have an unapplied command. Adopt
+                # that old redo as a guarded transaction on its first mutation.
+                cursor = scene["historyCursor"]
+                if direction != "redo" or cursor >= len(scene["commands"]):
+                    raise DocumentationSceneError(f"nothing to {direction}")
+                future = copy.deepcopy(scene)
+                future["historyCursor"] = cursor + 1
+                chosen = _scene_records(future)[-1]
+                reverse = {**chosen, "changes": [{**c, "before": c["after"], "after": c["before"]}
+                                                for c in chosen["changes"]]}
+                inverse_change(scene, reverse, change_id="check", actor="user", created_at=_utc_now())
+                request_id = "legacy-redo-" + secrets.token_hex(16)
+                payload_hash = request_hash(request_id, {"changeId": chosen["changeId"], "direction": "redo"})
+                receipt = make_receipt(scene, request_id=request_id, payload_hash=payload_hash,
+                    document=document_id(self.document_type, assembly_number), expected_revision=scene["editRevision"],
+                    changed=chosen["versionKeys"], undoable=True)
+                chosen["changeId"] = receipt["changeId"]
+                entry = copy.deepcopy(scene["commands"][cursor])
+                entry["change"] = chosen
+                candidate = copy.deepcopy(scene)
+                candidate["commands"] = scene["commands"][:cursor] + [entry] + scene["commands"][cursor + 1:]
+                candidate["historyCursor"] = cursor + 1
+                candidate = _upgrade_documentation_scene(candidate)
+                _advance_edit_versions(candidate, [entry])
+                candidate["updatedAt"] = _utc_now()
+                retain_receipt(candidate, receipt)
+                self._save(assembly_number, candidate)
+                return {**self.read(assembly_number, source_revision, manual_plan_revision), "receipt": receipt}
+            return self.undo_change(assembly_number, source_revision, manual_plan_revision,
+                change_id=choices[-1], expected_revision=scene["editRevision"],
+                request_id="history-" + secrets.token_hex(16), actor="user")
 
 
 def apply_documentation_command_candidate(

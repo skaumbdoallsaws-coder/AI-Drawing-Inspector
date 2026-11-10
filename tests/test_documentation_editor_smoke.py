@@ -98,15 +98,19 @@ def test_unlocated_console_errors_and_network_failures_are_not_hidden():
     assert not classify_failures(report)
 
 
-def test_only_an_aborted_bridge_status_poll_is_known():
+def test_only_reload_aborted_reads_are_known():
     report = empty_report()
-    poll = "http://127.0.0.1:1/api/bridge/status"
-    report["networkFailures"] = [{"url": poll, "error": "net::ERR_ABORTED"}]
+    known = ["http://127.0.0.1:1/api/bridge/status",
+             "http://127.0.0.1:1/static/assets/view-toolbar-icons/view-front.png",
+             "http://127.0.0.1:1/api/operations-manual/MMLE-50D/renders/" + "a" * 64 + "/page-operations-cover"]
+    report["networkFailures"] = [{"url": url, "method": "GET", "error": "net::ERR_ABORTED"} for url in known]
     assert classify_failures(report)
-    assert report["knownFixtureFailures"][0]["kind"] == "network"
-    for url, error in ((poll, "net::ERR_CONNECTION_RESET"),
-                       ("http://127.0.0.1:1/api/parts-manual/MMLE-50D/documentation-scene", "net::ERR_ABORTED"),
-                       (poll + "/extra", "net::ERR_ABORTED")):
+    assert [item["kind"] for item in report["knownFixtureFailures"]] == ["network"] * 3
+    for url, method, error in ((known[0], "GET", "net::ERR_CONNECTION_RESET"),
+                               (known[2], "POST", "net::ERR_ABORTED"),
+                               ("http://127.0.0.1:1/api/parts-manual/MMLE-50D/documentation-scene", "GET", "net::ERR_ABORTED"),
+                               ("http://127.0.0.1:1/api/operations-manual/MMLE-50D/documentation-scene/commands", "POST", "net::ERR_ABORTED"),
+                               (known[0] + "/extra", "GET", "net::ERR_ABORTED")):
         report = empty_report()
-        report["networkFailures"] = [{"url": url, "error": error}]
-        assert not classify_failures(report)
+        report["networkFailures"] = [{"url": url, "method": method, "error": error}]
+        assert not classify_failures(report), url

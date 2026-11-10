@@ -56,7 +56,6 @@
         }
     }
     function confirmationControl(container, model, reload, isCurrent) {
-        if (model?.documentType === 'product_specification_sheet') return;
         const edited = (model?.provenanceTargets || []).filter(row =>
             row.provenance?.evidenceStatus === 'edited_unverified');
         if (!edited.length) return;

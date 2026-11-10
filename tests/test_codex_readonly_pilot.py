@@ -511,6 +511,8 @@ def test_mcp_auth_schemas_and_actual_tool_calls(host):
                 assert {tool["name"] for tool in result.json()["result"]["tools"]} == {s["name"] for s in tool_specs()}
                 assert "apply_document_edits" not in {tool["name"] for tool in result.json()["result"]["tools"]}
                 assert "propose_document_value_confirmation" not in {tool["name"] for tool in result.json()["result"]["tools"]}
+                assert "inspect_document_change" not in {tool["name"] for tool in result.json()["result"]["tools"]}
+                assert "undo_document_change" not in {tool["name"] for tool in result.json()["result"]["tools"]}
                 body.update(method="tools/call", params={"name": "inspect_facility_context", "arguments": {}})
                 result = await client.post("/mcp", json=body, headers=headers)
                 assert result.json()["result"]["structuredContent"]["ok"], result.text

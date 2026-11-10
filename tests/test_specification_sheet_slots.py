@@ -308,7 +308,7 @@ def test_the_viewport_treats_every_text_as_a_slot():
                  "_specSheetRenderInspector", "_specSheetAfterRender", "_specSheetSlotPressed"):
         assert f"function {name}(" in source
     # A press that did not drag selects the slot (the page re-renders, so click never fires).
-    assert "if (drag.specSlot) _specSheetSlotPressed(drag.specSlot);" in source
+    assert "if (drag.specSlot) _specSheetSlotPressed(drag.specSlot, event.timeStamp);" in source
     # An open editor is committed by a press anywhere else; saves wait for each other.
     assert "active.finish('leave')" in source and "state.specSheetSaving" in source
     # The capture is stored against the figure, not the text.

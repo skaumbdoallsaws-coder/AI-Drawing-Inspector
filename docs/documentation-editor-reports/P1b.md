@@ -394,3 +394,220 @@ that separate source-backed prose is a later feature.
   its \?\ form and the containment check raised (test_two_threads_cannot_overwrite_one_read[slots] failed 11/15).
   It now resolves the assembly folder, like the scene store (0/15).
 - Decision: specification slot confirmation moves to P1b-3 with the slot undo journal.
+
+
+## P1b-3
+
+### CHANGED
+
+- **ai_inspector/documentation/changes.py (new), parts_manual/documentation.py,
+  documentation/provenance.py:** named changes use content/provenance pre-images
+  in the existing scene command log. Undo appends one guarded inverse transaction;
+  redo inverts that transaction. It does not jump a cursor over later human edits.
+  Changed fields and dependency fields must all match the selected after-state or
+  the entire request fails with undo_conflict. Row provenance watches every alias
+  in the bound scope. Page deletion/reset, authored object contents, callouts and
+  theme changes keep their corresponding dependencies. Value and provenance replay
+  together, including legacy text-history projections. Old leaf/batch histories
+  receive deterministic inspection identities in memory; reading does not enrich
+  the stored commands or change their historical scene hash. A legacy redo tail is
+  adopted on its first mutation. Scene schema remains 3; there is no envelope or
+  second scene undo log. The internal restore_change entry is authored only by the
+  repository, and is not an accepted external scene command.
+- **specification_sheet/slots.py:** an additive journal in slots schema 2 records
+  each atomic transaction, including multi-value batches, compound row renames,
+  row/settings changes, acceptance and confirmation. A structural inverse checks
+  the sheet dependency set; value inverses check the values and their metadata.
+  Named undo/redo returns bounded, idempotent receipts and preserves unrelated
+  subsequent fields. Journal limits are 2,000 records and 16 MiB of store JSON;
+  failures occur before replacement. The existing schema-1 first-write byte backup
+  remains. No journal file or long store name was introduced. **Claude's constructor
+  fix is retained: resolve the assembly directory, then append slots.json.**
+- **server.py:** the existing UI-only confirm-values route now handles slots under
+  both owner locks, with the same trusted origin check, fresh scope hashes, exact
+  expected revision and one receipt. It uses the existing in-process principal
+  resolver (whose unconfigured fallback is local-user); no identity files are
+  consulted. Confirmation does not accept research facts or modify the existing
+  research/sage_draft acceptance flag. Slot inverse operations have their own
+  /slots/undo and /slots/redo routes. The document host exposes named inspection
+  and undo for the owning store; scene undo routes also retain structured conflict
+  codes. Unchanged operations/work-instruction captures carry through named undo.
+- **codex_runtime/documentation_tools.py:** adds inspect_document_change and
+  undo_document_change, preserving all prior tools/inputs. Inspection returns
+  aligned before/after field summaries, actor, change ID and a digest, without
+  filesystem locations. To honor the existing 64 KiB tool-result bound it previews
+  long values at 256 characters, includes their full length/hash, and explicitly
+  reports when more than 32 fields are summarized. Undo always checks the complete
+  stored dependency set. Redo uses the undo receipt's changeId with the same tool.
+  Inspection forms/signatures are excluded. The read-only confirmation proposal
+  now supports slots and still cannot mutate anything.
+- **static/documentation_commands.js, static/index.html:** the same visible
+  trusted-click confirmation dialog now covers slots and displays their values
+  and former sources. Its single POST callsite remains outside both tool
+  registries. Scene Undo/Redo stay one scene group; the sheet adds separate
+  Undo Values/Redo Values controls, and a focused native slot uses its own journal
+  shortcuts. Active contenteditable elements retain their editor's undo.
+  Inspector attribution and undo/conflict messages resolve AGENTS[currentAgent].name.
+  The helper URL is bumped to ?v=20261109-p1b-3. LF, server BOM and ASCII additions
+  are retained.
+- **tests/test_documentation_change_undo.py (new):** all five named plan tests,
+  parameterized scene/slot conflict and unrelated-edit cases, inverse retry/redo,
+  legacy scene/slot reads, legacy redo adoption, authored-object dependency checks,
+  compound row operations, and real MMLE slot confirmation/export/acceptance cases.
+  Tests cover stale confirmation, hostile origin, proposal nonmutation, confirmed
+  export, edit-clears-confirmation and undo/redo of confirmation.
+  **tests/test_documentation_provenance.py** extends the existing registry scan to
+  forbid indirect .confirm_values calls from registered tools/the document host.
+  All four requested pinned tool inventories include the new tools' capabilities.
+- **tests/smoke_documentation_editor.py, documentation_editor_smoke_server.py:**
+  --phase P1b runs the existing P1a proof and the added operations/WI steps using
+  the real isolated server. It uses Refresh, scoped publication-surface targets,
+  begin_edit's two presses, real Capture All/View controls, real review export,
+  the real tool gateway, and trusted Playwright clicks for confirmation. Customer
+  export refusals/success are checked through the production HTTP route. The proof
+  records exact blocked targets, unaffected rows' sources, inverse conflicts and
+  restored provenance. It saves p1b-review-capacity.png,
+  p1b-customer-capacity.png and p1b-work-instructions.png under .runtime/de/ and
+  records their paths/page numbers in report.json when Claude runs it. No PNG or
+  passing report was fabricated. The existing engineering input manifest already
+  copies the operations source/evidence/plan JSON, MMLE process-map JSON, semantic
+  JSON and generated/training/mmle-50d-497533f6 JSON into the scratch snapshot;
+  p1bInputs records the exact copied paths. No additional source-store copy was
+  needed. Claude's aborted /api/bridge/status poll classifier and its test remain.
+- **tools/documentation_baseline.py, tests/test_documentation_baseline.py:** the
+  local specification undo probe now calls the slot journal, using its integer
+  revision, instead of expecting a scene undo to undo a slot. The integration test
+  requires successful value undo/redo with unchanged scene composition. New
+  receipt UUIDs are fixed by a separate deterministic counter in both collectors;
+  clocks/IDs/evidence are not stripped to conceal differences. No baseline JSON
+  was edited. The work-instruction DOCX cover-status assertion remains absent,
+  preserving Claude's P1b-1 test correction.
+
+### TESTS
+
+Builder checks, with no application imports or runtime pass inferred:
+
+- Python ast.parse on all 16 changed/new Python files: passed. Invoked directly
+  through C:/Python314/pythonw.exe tools/run_hidden.pyw C:/Python314/python.exe
+  with redirected pipes and hidden parent processes.
+- node --input-type=module --check through stdin: all four executable inline
+  scripts and static/documentation_commands.js passed. The import map was checked
+  as JSON separately.
+- git diff --check: passed.
+- In-process byte/diff checks: all written files use LF; server.py retains efbbbf;
+  additions to server.py and static/index.html are ASCII. No baseline JSON diff.
+
+### NOT RUN
+
+Claude must run these outside the builder sandbox with the authorized MMLE inputs
+and isolated stores. pytest, numpy, Pillow, PyMuPDF and a browser were not installed
+or substituted. These are authored tests/proofs, not claimed runtime passes.
+
+~~~text
+python -m pytest -q tests/test_documentation_change_undo.py tests/test_documentation_provenance.py tests/test_documentation_transactions.py tests/test_specification_sheet_slots.py tests/test_codex_documentation_tools.py tests/test_codex_specification_sheet_tools.py tests/test_codex_readonly_pilot.py tests/test_codex_assisted_tools.py
+python tools/documentation_baseline.py --check
+python tools/documentation_baseline.py --local --check
+python tests/smoke_documentation_editor.py --phase P1a
+python tests/smoke_documentation_editor.py --phase P1b
+~~~
+
+Full documentation and wider suites:
+
+~~~text
+python -m pytest -q tests/test_operations_manual*.py tests/test_specification_sheet*.py tests/test_work_instruction_workflow.py
+python -m pytest -q tests/test_documentation_store_chokepoint.py tests/test_documentation_editor_smoke.py tests/test_codex_mcp_schema_types.py
+python -m pytest -q tests/test_documentation_baseline.py tests/test_parts_manual.py tests/test_inspection_sheet.py
+python -m pytest -q tests/test_documentation_form_fields.py tests/test_documentation_library_assembly.py tests/test_parts_manual_ui_contract.py tests/test_parts_manual_callout_quality.py tests/test_operations_manual_precoding_contracts.py
+python -m pytest -q tests/test_codex*.py tests/test_facility*.py tests/test_authored*.py tests/test_sage*.py tests/test_industrial*.py
+~~~
+
+Retain the known failure separately:
+tests/test_operations_manual_precoding_contracts.py::test_source_ids_references_and_local_hashes_are_closed.
+Compare wider failures to Claude's committed base. Review the three generated PNGs
+and confirmed specification PDF/DOCX, then re-record baselines twice and promote
+only after reviewing their differences. No commits or index/history changes were made.
+
+### DEVIATIONS
+
+- The requested smoke sequence combines two independently undoable transactions:
+  the value edit and the subsequent human confirmation. Immediately undoing the
+  edit after confirmation must conflict under the mandated provenance comparison.
+  The smoke explicitly checks that conflict, undoes the confirmation, then restores
+  the original text and source support with one named edit undo. It does not bypass
+  the provenance guard or silently combine the two transactions.
+- The inspector provides explicitly bounded summaries to fit the gateway response
+  limit; complete values remain available through read_document_pages. The inverse
+  itself is never truncated.
+- No provenance, export-marker, figure-identity or schema work outside P1b-3 was
+  started. Inspection undo and cross-document wording consistency remain out of scope.
+
+Expected baseline changes for Claude's review (no hashes invented):
+
+| Location/fact | Expected result |
+| --- | --- |
+| local reviewedSpecification/undo/canUndoAfterEdit | true for the slot journal |
+| local reviewedSpecification/undo/httpStatus | 200 |
+| local reviewedSpecification/undo/restoresSlotValue, redoRestoresSlotValue | true |
+| local reviewedSpecification/undo/restoresScenePages, redoRestoresScenePages | true |
+| old slot undo error / slotValueSurvivesUndoAttempt facts | replaced by successful slot inverse facts |
+| affected scene/document semantic fingerprints | change for inverse history snapshots and receipt-backed provenance IDs |
+| synthetic table scene fingerprint | changes for additive scene change records |
+| operations citationDefect facts and review marker semantics | remain at the promoted P1b-2 expectations |
+| workInstructions capture facts | remain false, [], 200, [] |
+| schema versions, unchanged figure identities, export text/layout and specification golden text | no intended change |
+
+UUID normalization now covers new transaction receipts without removing their
+identity from fingerprints. Confirm exact hash-only differences by the two fresh
+recordings; any changed export wording/geometry beyond these expectations needs
+investigation. Page-6 sourced 1,100 lb wording remains untouched.
+
+### OPEN QUESTIONS
+
+No implementation authorization is pending; slot confirmation is included as the
+user directed. Claude still needs to validate the runtime behavior, real trusted
+UI flow, legacy migration, concurrent slot writes and visual exports. The smoke
+sequence clarification above is documented for review; strict provenance conflict
+checks take precedence over combining confirmation with its earlier edit.
+
+### P1b-3 supervisor gate (Claude, 2026-11-10)
+
+- Targeted undo/provenance/transaction/slot/Sage tool tests: 243 passed. Documentation suites: 488 passed + the
+  known pre-existing failure; JS 5/5. Wider suites: 3849 passed, 170 failed, 9 errors, all in the base failing set;
+  no new failure.
+- Baselines re-recorded twice (identical) and promoted; --check and --local --check match after the fixes below.
+  Local differences as expected above: slot undo/redo answer 200 and restore the value and the scene pages; the old
+  slot-undo error facts are replaced; scene/document fingerprints change for change records and receipt-backed
+  provenance IDs; operations citation-defect and work-instruction capture facts are unchanged; no export wording or
+  geometry changed. documentation_commands.js is served as ?v=20261109-p1b-3.
+- Browser smoke --phase P1a: 27/27. --phase P1b: 46/46 (operations edit, marker, customer block on the exact
+  target, proposal does not confirm, trusted confirmation, clean customer copy, inspect, undo conflict after
+  confirmation, named undo restoring text and sources; work-instruction text edit keeps ready figures and exports
+  without a recapture; a real figure change requires only the cover). No unexpected browser, HTTP or network event.
+- Visual check: operations page 10 review copy (marker under the edited value, legend under the table) and its
+  confirmed customer copy (clean); work-instruction cover (edited note, figure kept); specification sheet review
+  copy (marker and legend), customer export before confirmation refused with slot:spec.rated_capacity.value, and
+  the confirmed customer copy (clean).
+- Supervisor fixes:
+  - DocumentationSceneRepository.apply_command and rebaseline return the same projection as read() (history
+    choices, change list). The synthetic baseline failed because write responses lacked the change list and the
+    computed canUndo/canRedo.
+  - Tests brought in line with this slice: a slot batch receipt is now undoable; the UI contract pins the single
+    history call _documentationMoveHistory(direction, historyGroup = 'documentation-scene').
+  - Inline-edit presses are timed by event.timeStamp, not by the clock after the synchronous redraw: on the heavy
+    operations page a quick double press measured as slow and never started an edit.
+  - Pre-existing race (code from 2026-06 to 2026-08): a type switch reopens the workspace asynchronously, and a
+    Refresh clicked meanwhile was overtaken by that open, which blanked the pages Refresh had revealed (the
+    operations manual sat open with 0 pages). Refresh now waits for a workspace still opening; pinned in
+    tests/test_parts_manual_ui_contract.py.
+  - Smoke: copies the ignored semantic-knowledge prototype contract (engineering data, no credentials) into the
+    scratch snapshot, so work instructions run in prototype mode (they answered 422, planning-ready package
+    required); runs full Chromium headless on the GPU (Direct3D 11), falling back to the headless shell, and
+    records the renderer (the SwiftShader shell froze under low memory); opens each P1b reopen in a new tab;
+    retries the page click; uses no_wait_after on Capture All and Publish; sends DevTools-timestamped double presses
+    after an idle wait, up to three attempts; reaches the Inspector through More when it is folded; classifies
+    reload-aborted GETs of static assets and figure renders as known (GET only, tested); records dialogs and
+    renderer crashes; and runs a stall probe (V8 pause, frame test, watchdog) on any timeout.
+- Notes for later phases: customer-mode exports show the document status in the footer (REVIEW/DRAFT), release
+  labelling for P4; the specification marker sits close to the row rule (P4); the work-instruction DOCX lacks the
+  cover status line (P4); the specification feature card still reads "1,100 lb" (cross-document consistency);
+  P5a should measure scene-file growth from the stored change images.

@@ -16197,6 +16197,9 @@ def _operations_manual_editable_page_targets(
 def _operations_manual_error_response(
     error: Exception, *, operation: str
 ) -> JSONResponse:
+    if isinstance(error, DocumentEditError):
+        return JSONResponse(status_code=409, content={"success": False, "error": error.code,
+            "message": str(error), "details": error.details})
     if isinstance(error, DocumentationSceneConflictError):
         return JSONResponse(
             status_code=409,
@@ -16364,6 +16367,10 @@ def _specification_sheet_build_document_with_scene(
         documentation_scene_revision=str(loaded_scene["revision"]),
     )
     snapshot = _documentation_snapshot_payload({**loaded_scene, "document": document}, "product_specification_sheet")
+    from ai_inspector.documentation.changes import history_choices
+    slot_journal = SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, str(catalog["assemblyNumber"])).read()["journal"]
+    slot_undo, slot_redo = history_choices(slot_journal)
+    loaded_scene["slotHistory"] = {"canUndo": bool(slot_undo), "canRedo": bool(slot_redo)}
     loaded_scene["slotBinding"] = {**documentation_binding_data(snapshot["state"]), "hashes": snapshot["hashes"]}
     return document, loaded_scene
 
@@ -16567,6 +16574,9 @@ def _work_instruction_build_document_with_scene(
 def _work_instruction_error_response(
     error: Exception, *, operation: str
 ) -> JSONResponse:
+    if isinstance(error, DocumentEditError):
+        return JSONResponse(status_code=409, content={"success": False, "error": error.code,
+            "message": str(error), "details": error.details})
     if isinstance(error, DocumentationSceneConflictError):
         return JSONResponse(
             status_code=409,
@@ -16674,6 +16684,9 @@ def _parts_manual_process_map_evidence(assembly_number: str) -> Optional[Dict[st
 
 
 def _parts_manual_error_response(error: Exception, *, operation: str) -> JSONResponse:
+    if isinstance(error, DocumentEditError):
+        return JSONResponse(status_code=409, content={"success": False, "error": error.code,
+            "message": str(error), "details": error.details})
     status_code = 400
     code = "parts_manual_error"
     payload: Dict[str, Any] = {"success": False, "error": code, "message": str(error)}
@@ -18550,6 +18563,24 @@ _SPECIFICATION_SHEET_SLOT_ERRORS = (
 _DOCUMENTATION_READ_BINDINGS: Dict[str, Tuple[str, str]] = {}
 
 
+@app.post("/api/specification-sheet/{assembly_number}/slots/{direction}")
+def specification_slot_history(assembly_number: str, direction: str, body: Dict[str, Any]):
+    try:
+        with DocumentationSceneRepository.transaction_lock, SpecificationSlotStore.transaction_lock:
+            host = _DocumentationAgentHost()
+            snapshot = host.document_snapshot(assembly_number, "product_specification_sheet")
+            state = snapshot["state"]
+            if any(body.get(key) != state[key] for key in ("sourceRevision", "manualPlanRevision")):
+                raise DocumentEditError("document_binding_changed", "The sheet source changed.")
+            store = SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, assembly_number)
+            store.binding = {key: state[key] for key in ("sourceRevision", "manualPlanRevision")}
+            result = store.move_history(expected_revision=body.get("expectedRevision"), direction=direction)
+            response = specification_sheet_documentation_scene_get(assembly_number)
+            return {**response, "receipt": result["receipt"]}
+    except DocumentEditError as error:
+        return _documentation_value_error(error)
+
+
 @app.get("/api/documentation/{document_type}/{assembly_number}/confirmation-targets")
 def documentation_confirmation_read(document_type: str, assembly_number: str):
     try:
@@ -18582,20 +18613,20 @@ def documentation_confirm_values(document_id: str, body: Dict[str, Any], request
         if binding is None:
             raise DocumentEditError("document_read_required", "Open the confirmation values before confirming.")
         number, kind = binding
-        if kind == "product_specification_sheet":
-            raise DocumentEditError("invalid_document_operation", "Use the specification value review controls.")
         # Reuse the already configured in-process principal resolver, without the
         # facility host's bootstrap side effects or reading any identity file.
         by = _FACILITY_PRINCIPAL_RESOLVER(request).principal_id
         payload = {**body, "documentId": document_id, "by": by}
         host = _DocumentationAgentHost()
         repository = host._edit_repository(kind)
-        with repository.transaction_lock:
+        with repository.transaction_lock, SpecificationSlotStore.transaction_lock:
             snapshot = host.document_snapshot(number, kind)
             state, document = snapshot["state"], snapshot["document"]
-            scene = state["scene"]
+            store = SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, number) if kind == "product_specification_sheet" else None
+            scene = store.read() if store else state["scene"]
+            receipt_payload = {"payload": payload, "actor": "user"} if store else payload
             previous = documentation_prior_receipt(scene, body["requestId"],
-                documentation_request_hash(body["requestId"], payload))
+                documentation_request_hash(body["requestId"], receipt_payload))
             if previous is not None:
                 return {"success": True, "receipt": previous}
             items = body["targets"]
@@ -18618,6 +18649,12 @@ def documentation_confirm_values(document_id: str, body: Dict[str, Any], request
                 expected[item["targetId"]] = item["expectedContentHash"]
                 command = documentation_confirmation_command(target, by=by)
                 commands.append(command)
+            if store:
+                store.binding = {key: state[key] for key in ("sourceRevision", "manualPlanRevision")}
+                store.confirm_values([available[key] for key in expected], by=by,
+                    expected_revision=body["expectedRevision"], request_id=body["requestId"],
+                    expected_hashes=expected, current_hashes={key: row["contentHash"] for key, row in available.items()}, payload=payload)
+                return {"success": True, "receipt": store.last_receipt}
             result = repository.apply_batch(number, state["sourceRevision"], state["manualPlanRevision"],
                 base_revision=state["sceneRevision"], expected_revision=body["expectedRevision"],
                 request_id=body["requestId"], commands=commands, page_targets=page_targets,
@@ -18675,9 +18712,10 @@ def _specification_sheet_slot_change(assembly_number: str, change, *, observed=N
                     assembly_data=assembly_data, catalog=catalog)
             except DocumentationSceneBindingError:
                 pass
+        store.binding = {key: provenance_document[key] for key in ("sourceRevision", "manualPlanRevision")}
         store.provenance_defaults = copy.deepcopy(provenance_document.get("fieldMeta") or {})
         store.provenance_values = {key: item.get("value") for key, item in provenance_document.get("slots", {}).items()}
-        options = {}
+        options = {"actor": actor}
         if observed is not None:
             snapshot = _documentation_snapshot_payload({**loaded_scene, "document": base}, "product_specification_sheet")
             _documentation_check_binding(observed, snapshot["state"])
@@ -40962,6 +41000,34 @@ class _DocumentationAgentHost:
         "product_specification_sheet": "specification_sheet_get",
         "work_instructions": "work_instructions_get",
     }
+
+    def inspect_document_change(self, assembly_number, document_type, change_id):
+        with DocumentationSceneRepository.transaction_lock, SpecificationSlotStore.transaction_lock:
+            snapshot = self.document_snapshot(assembly_number, document_type)
+            state = snapshot["state"]
+            if document_type == "product_specification_sheet":
+                return SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, assembly_number).inspect_change(change_id)
+            return self._edit_repository(document_type).inspect_change(assembly_number,
+                state["sourceRevision"], state["manualPlanRevision"], change_id)
+
+    def undo_document_change(self, assembly_number, document_type, arguments):
+        with DocumentationSceneRepository.transaction_lock, SpecificationSlotStore.transaction_lock:
+            snapshot = self.document_snapshot(assembly_number, document_type)
+            state, document = snapshot["state"], snapshot["document"]
+            options = {"change_id": arguments["changeId"], "expected_revision": arguments["expectedRevision"],
+                       "request_id": arguments["requestId"], "actor": "sage"}
+            if document_type == "product_specification_sheet":
+                store = SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, assembly_number)
+                store.binding = {key: state[key] for key in ("sourceRevision", "manualPlanRevision")}
+                result = store.undo_change(**options)
+            else:
+                result = self._edit_repository(document_type).undo_change(assembly_number,
+                    state["sourceRevision"], state["manualPlanRevision"], **options)
+            after = self.document_snapshot(assembly_number, document_type)["document"]
+            if document_type in {"operations_and_maintenance_manual", "work_instructions"}:
+                carry_draft_render_artifacts(OPERATIONS_MANUAL_ROOT if document_type == "operations_and_maintenance_manual"
+                    else WORK_INSTRUCTION_ROOT, assembly_number, document, after)
+            return {"receipt": result["receipt"]}
 
     @staticmethod
     def _short(value, limit=300):

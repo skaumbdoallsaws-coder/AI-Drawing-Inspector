@@ -220,7 +220,7 @@
       "rowBindingsPresent": true,
       "targetId": "spec-table-1.r0.c1"
     },
-    "edited": "fefa83caa6be3e9d24f834ca7728772b9db5a9d56b80489efde339215fe8e24b",
+    "edited": "e4a953348eda8ebfa74c8bf0d14c9976b4f798c6743bdac88569cc620055cb3b",
     "exports": {
       "before": {
         "docx": {
@@ -775,7 +775,7 @@
     },
     "readDidNotWrite": true,
     "reopenUnchanged": true,
-    "reopened": "fefa83caa6be3e9d24f834ca7728772b9db5a9d56b80489efde339215fe8e24b",
+    "reopened": "e4a953348eda8ebfa74c8bf0d14c9976b4f798c6743bdac88569cc620055cb3b",
     "undo": {
       "canUndoAfterEdit": true,
       "httpStatus": 200,
@@ -786,7 +786,7 @@
   "reviewedSpecification": {
     "before": "f60c0cd5c51ad3e942d3fb2c571c4716070bf20c417011641a9171e8c225c0e2",
     "beforeMatchesTrackedGolden": true,
-    "edited": "b9619cbc0927fbca8a4969ebd5bb9f3b2763b675f60b85f0adbffa2d2ea25211",
+    "edited": "ad38d08f014039f75f3a439e88404897e921b283da8b050a8b3703df3e1a1bf9",
     "exports": {
       "before": {
         "docx": {
@@ -829,20 +829,22 @@
     },
     "readDidNotWrite": true,
     "reopenUnchanged": true,
-    "reopened": "b9619cbc0927fbca8a4969ebd5bb9f3b2763b675f60b85f0adbffa2d2ea25211",
+    "reopened": "ad38d08f014039f75f3a439e88404897e921b283da8b050a8b3703df3e1a1bf9",
     "trackedGoldenTextSha256": "d1544f49712142be6ee240d3917cf301c30f3d1265e9693afc3df30168c93423",
     "undo": {
-      "canUndoAfterEdit": false,
-      "error": "specification_sheet_validation",
-      "httpStatus": 422,
-      "slotValueSurvivesUndoAttempt": true
+      "canUndoAfterEdit": true,
+      "httpStatus": 200,
+      "redoRestoresScenePages": true,
+      "redoRestoresSlotValue": true,
+      "restoresScenePages": true,
+      "restoresSlotValue": true
     }
   },
   "schemaVersion": 1,
   "status": "captured",
   "workInstructions": {
     "before": "f430e4f1a82f8ddb690ce08c099caaa6950b50ce9c95123750ee0a16b4551a38",
-    "edited": "1463d18694903e1c5a54b936757647c306e80845290f57454314922ae34b59c4",
+    "edited": "788c34140062d61b65c4473e9bf76780847de0976a6ba032cfa6883993c512d2",
     "exports": {
       "before": {
         "docx": {
@@ -1191,7 +1193,7 @@
     "readDidNotWrite": true,
     "recapturedPageIds": [],
     "reopenUnchanged": true,
-    "reopened": "1463d18694903e1c5a54b936757647c306e80845290f57454314922ae34b59c4",
+    "reopened": "788c34140062d61b65c4473e9bf76780847de0976a6ba032cfa6883993c512d2",
     "textEditExportHttpStatus": 200,
     "textEditInvalidatesPageCapture": false,
     "undo": {

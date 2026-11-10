@@ -22,6 +22,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import uuid
 from unittest.mock import patch
 import xml.etree.ElementTree as ET
 import zipfile
@@ -409,8 +410,10 @@ def collect():
     runtime.mkdir(exist_ok=True)
     # Short names keep existing <revision>/<page>.json paths under MAX_PATH.
     counter = iter(range(1, 10000))
+    receipt_counter = iter(range(1, 100000))
     with tempfile.TemporaryDirectory(prefix="db-", dir=runtime) as directory, \
             patch("secrets.token_hex", side_effect=lambda n=6: f"{next(counter):0{n * 2}x}"), \
+            patch("uuid.uuid4", side_effect=lambda: uuid.UUID(int=next(receipt_counter))), \
             patch("ai_inspector.parts_manual.repository._utc_now", return_value=FIXED_TIME), \
             patch("ai_inspector.parts_manual.documentation._utc_now", return_value=FIXED_TIME), \
             patch("ai_inspector.specification_sheet.slots.now", return_value=FIXED_TIME), \
@@ -647,8 +650,12 @@ def local_document_baseline(client, route, store, capture):
                                "edited": local_citation_export(edited, shown, after_texts)}
     undo_body = {"baseRevision": edited_state["revision"], "sourceRevision": edited["sourceRevision"],
                  "manualPlanRevision": edited["manualPlanRevision"]}
-    undo_response = client.post(base + "/documentation-scene/undo", json=undo_body)
-    undo = {"canUndoAfterEdit": edited_state["canUndo"], "httpStatus": undo_response.status_code}
+    history_group = "slots" if route == "specification-sheet" else "documentation-scene"
+    if history_group == "slots":
+        undo_body["expectedRevision"] = edited_state["slotBinding"]["revision"]
+    undo_response = client.post(base + "/" + history_group + "/undo", json=undo_body)
+    history_state = edited_state["slotHistory"] if history_group == "slots" else edited_state
+    undo = {"canUndoAfterEdit": history_state["canUndo"], "httpStatus": undo_response.status_code}
     if undo_response.status_code == 200:
         undone = undo_response.json()
         # Scene undo changes revision/history metadata, so compare effective text
@@ -656,8 +663,10 @@ def local_document_baseline(client, route, store, capture):
         undo["restoresScenePages"] = undone["scene"]["pages"] == state["scene"]["pages"]
         if route == "specification-sheet":
             undo["restoresSlotValue"] = undone["document"]["slots"][target_id]["value"] == before["slots"][target_id]["value"]
-        redone = api_json(client, "POST", base + "/documentation-scene/redo",
-                          json={**undo_body, "baseRevision": undone["revision"]})
+        redo_body = {**undo_body, "baseRevision": undone["revision"]}
+        if history_group == "slots":
+            redo_body["expectedRevision"] = undone["slotBinding"]["revision"]
+        redone = api_json(client, "POST", base + "/" + history_group + "/redo", json=redo_body)
         undo["redoRestoresScenePages"] = redone["scene"]["pages"] == edited_state["scene"]["pages"]
         if route == "specification-sheet":
             undo["redoRestoresSlotValue"] = redone["document"]["slots"][target_id]["value"] == "1,000 lb"
@@ -721,6 +730,8 @@ def collect_local():
             stack.enter_context(patch.object(server, name, {}))
         stack.enter_context(patch.object(server, "_INSPECTION_SHEET_STORE", None))
         counter = iter(range(1, 100000))
+        receipt_counter = iter(range(1, 100000))
+        stack.enter_context(patch("uuid.uuid4", side_effect=lambda: uuid.UUID(int=next(receipt_counter))))
         stack.enter_context(patch("secrets.token_hex", side_effect=lambda n=6: f"{next(counter):0{n * 2}x}"))
         for clock in ("ai_inspector.parts_manual.documentation._utc_now", "ai_inspector.specification_sheet.slots.now"):
             stack.enter_context(patch(clock, return_value=FIXED_TIME))

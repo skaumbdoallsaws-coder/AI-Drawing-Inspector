@@ -10,7 +10,7 @@
     <title>InspectorPro</title>
     <link rel="stylesheet" href="/static/cad_viewport.css">
     <link rel="stylesheet" href="/static/packaging_ribbon_icons.css">
-    <script src="/static/documentation_commands.js?v=20261109-p1b-2"></script>
+    <script src="/static/documentation_commands.js?v=20261109-p1b-3"></script>
     <script src="/static/cad_viewport.js"></script>
     <script>
         // Theme bootstrap — set data-theme BEFORE the stylesheet is parsed
@@ -35427,6 +35427,10 @@
         async function _documentationReloadWorkflow() {
             const assemblyNumber = assemblyContext?.assembly_number;
             if (!assemblyNumber) return;
+            // A workspace still opening (just after a type switch) would finish after this refresh and blank the
+            // pages it reveals: let that open finish first.
+            const opening = state.partsManualDocumentationWorkspacePromise;
+            if (opening) await opening.catch(() => null);
             _documentationSetBusy(true, 'Refreshing documentation...');
             try {
                 if (_documentationIsOperationsManual()) {
@@ -36467,6 +36471,8 @@
             ));
             setDisabled('documentationUndoRibbon', !payload?.canUndo);
             setDisabled('documentationRedoRibbon', !payload?.canRedo);
+            setDisabled('documentationSlotUndoRibbon', !payload?.slotHistory?.canUndo);
+            setDisabled('documentationSlotRedoRibbon', !payload?.slotHistory?.canRedo);
             setDisabled(
                 'documentationResetRibbon',
                 !selection
@@ -39080,7 +39086,7 @@
                     if (!current()) return;
                 }
             }
-            _documentationSetStatus(DocumentationCommands.message(error), 'error');
+            _documentationSetStatus(AGENTS[currentAgent].name + ': ' + DocumentationCommands.message(error), 'error');
         }
 
         async function _documentationDispatchCommand(operation, translation = null, options = {}) {
@@ -39693,7 +39699,7 @@
             }
         }
 
-        async function _documentationMoveHistory(direction) {
+        async function _documentationMoveHistory(direction, historyGroup = 'documentation-scene') {
             const payload = _documentationPayload();
             if (!payload) return;
             const bound = DocumentationCommands.capture(payload, _documentationActivePage(), _documentationApiBase());
@@ -39706,12 +39712,13 @@
             _documentationSetBusy(true, direction === 'undo' ? 'Undoing...' : 'Redoing...');
             try {
                 const result = await _partsManualApi(
-                    `${bound.apiBase}/documentation-scene/${direction}`,
+                    `${bound.apiBase}/${historyGroup}/${direction}`,
                     {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             baseRevision: payload.revision,
+                            expectedRevision: payload.slotBinding?.revision,
                             sourceRevision: payload.scene.sourceRevision,
                             manualPlanRevision: payload.scene.manualPlanRevision,
                         }),
@@ -39732,7 +39739,8 @@
                     )
                     : null;
                 _documentationSelectTarget(restored, { silent: true });
-                _documentationSetStatus(direction === 'undo' ? 'Undid the last edit.' : 'Redid the edit.', 'success');
+                _documentationSetStatus(AGENTS[currentAgent].name + ': ' +
+                    (direction === 'undo' ? 'Undid the document change.' : 'Redid the document change.'), 'success');
             } catch (error) {
                 await _documentationReportSaveError(bound, error);
             } finally {
@@ -40896,6 +40904,7 @@
                 for (const meta of pageEvidence) {
                     const label = document.createElement('p');
                     label.textContent = (meta.displayName || meta.alias || meta.targetId) + ': Edited - source does not verify this value';
+                    if (meta.actor === 'sage') label.textContent += ' (Edited by ' + AGENTS[currentAgent].name + ')';
                     evidence.appendChild(label);
                     const original = document.createElement('p');
                     original.textContent = 'Original source: ' + (meta.originalEvidence?.sourceIds || [])
@@ -41459,8 +41468,9 @@
                     if (drag.target?.targetType !== 'document_object') {
                         _documentationRenderPublicationPage(_documentationActivePage());
                     }
-                    if (drag.specSlot) _specSheetSlotPressed(drag.specSlot);
-                    else if (drag.textPart) _documentationTextPressed(drag.textPart);
+                    // Time each press by when it happened, not after the redraw above (slow on heavy pages).
+                    if (drag.specSlot) _specSheetSlotPressed(drag.specSlot, event.timeStamp);
+                    else if (drag.textPart) _documentationTextPressed(drag.textPart, event.timeStamp);
                     return;
                 }
                 const saved = await _documentationDispatchCommand('translate', drag.delta);
@@ -41741,6 +41751,7 @@
             };
             const onKeyDown = event => {
                 if (!document.getElementById('documentationWorkspace')) return;
+                if (event.defaultPrevented || event.target?.closest('input, textarea, select, [contenteditable="true"]')) return;
                 if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
                     event.preventDefault();
                     _documentationMoveHistory(event.shiftKey ? 'redo' : 'undo');
@@ -41990,8 +42001,8 @@
                         // A figure page's table is pressed through its sidecar; a parts-list page has no press
                         // handler of its own.
                         if (page.pageType === 'manual_section_parts_list') {
-                            cell.addEventListener('click', () => {
-                                if (!cell.isContentEditable) _documentationTextPressed(targetId);
+                            cell.addEventListener('click', event => {
+                                if (!cell.isContentEditable) _documentationTextPressed(targetId, event.timeStamp);
                             });
                         }
                     }
@@ -42170,11 +42181,12 @@
             element.dataset.documentationEditTarget = targetId;
         }
 
-        function _documentationTextPressed(targetId) {
+        function _documentationTextPressed(targetId, at = performance.now()) {
             // Each press on a manual's page redraws it (the press selects the block), so the browser never sees a
             // double-click there: two presses on the same text within half a second start its edit, as the
-            // Specification Sheet's slots do (_specSheetSlotPressed).
-            const now = Date.now();
+            // Specification Sheet's slots do (_specSheetSlotPressed). `at` is the press's event.timeStamp (the
+            // performance.now() clock), so a slow redraw between the presses cannot push them apart.
+            const now = Number.isFinite(at) ? at : performance.now();
             const last = state.documentationLastTextPress;
             state.documentationLastTextPress = { targetId, at: now };
             if (!last || last.targetId !== targetId || now - last.at >= 500) return;
@@ -42422,8 +42434,9 @@
             element.addEventListener('keydown', event => _specSheetSlotKeydown(event, slot, element));
         }
 
-        function _specSheetSlotPressed(slot) {
-            const now = Date.now();
+        function _specSheetSlotPressed(slot, at = performance.now()) {
+            // `at` is the press's event.timeStamp, as in _documentationTextPressed.
+            const now = Number.isFinite(at) ? at : performance.now();
             const last = state.specSheetLastPress;
             state.specSheetLastPress = { slot, at: now };
             if (last && last.slot === slot && now - last.at < 500) {
@@ -42446,6 +42459,12 @@
 
         function _specSheetSlotKeydown(event, slot, element) {
             if (element.isContentEditable) return;
+            if ((event.ctrlKey || event.metaKey) && ['z', 'y'].includes(event.key.toLowerCase())) {
+                event.preventDefault();
+                event.stopPropagation();
+                _documentationMoveHistory(event.shiftKey || event.key.toLowerCase() === 'y' ? 'redo' : 'undo', 'slots');
+                return;
+            }
             if (event.key === 'Enter' || event.key === 'F2') {
                 event.preventDefault();
                 _specSheetBeginSlotEdit(slot);
@@ -44425,7 +44444,7 @@
                 fitWidth?.addEventListener('click', () => _documentationSetZoomMode('fit_width'));
 
                 const onDocumentationKeyDown = event => {
-                    if (!document.body.classList.contains('documentation-workspace-active')) return;
+                    if (!document.body.classList.contains('documentation-workspace-active') || event.defaultPrevented) return;
                     const target = event.target;
                     const typing = target?.tagName === 'INPUT'
                         || target?.tagName === 'TEXTAREA'
@@ -46672,6 +46691,16 @@
                     undo(),
                     redo(),
                     _documentationResetMenu({ size: 'compact' }),
+                ]),
+            ]);
+            if (specification) appendGroup('values-history', 'Values', [
+                _documentationRibbonStack([
+                    _documentationRibbonButton('undo', 'Undo Values', 'Undo the previous slot value group',
+                        'documentationSlotUndoRibbon', () => _documentationMoveHistory('undo', 'slots'),
+                        { compact: true, size: 'compact' }),
+                    _documentationRibbonButton('redo', 'Redo Values', 'Redo the slot value group',
+                        'documentationSlotRedoRibbon', () => _documentationMoveHistory('redo', 'slots'),
+                        { compact: true, size: 'compact' }),
                 ]),
             ]);
             appendGroup('figure', 'Figure', [

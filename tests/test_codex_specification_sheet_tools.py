@@ -238,5 +238,7 @@ def test_confirmation_proposal_does_not_add_a_specification_acceptance_tool():
 
     tools = {tool["name"]: tool for tool in tool_specs()}
     assert tools["propose_document_value_confirmation"]["read_only"] is True
+    assert tools["inspect_document_change"]["read_only"] is True
+    assert tools["undo_document_change"]["read_only"] is False
     assert tools["accept_specification_values"]["read_only"] is False
     assert "confirm_document_values" not in tools

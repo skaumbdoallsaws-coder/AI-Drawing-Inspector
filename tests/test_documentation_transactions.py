@@ -527,7 +527,8 @@ def test_slot_apply_batch_api_returns_persisted_receipt(tmp_path):
         current_hashes={"slot:" + key: value for key, value in hashes.items()})
     items = [{"slot": "title", "value": "first"}, {"slot": "caption", "value": "second"}]
     result = harness.repo.apply_batch(items, "chat", **arguments)
-    assert result["receipt"]["revision"] == 1 and not result["receipt"]["undoable"]
+    # P1b-3's slot undo journal makes a slot batch one undoable change (P1a had no slot undo).
+    assert result["receipt"]["revision"] == 1 and result["receipt"]["undoable"]
     assert result["changed"] == ["slot:caption", "slot:title"]
     before = disk(harness)
     assert SlotStore(tmp_path, NUMBER).apply_batch(items, "chat", **arguments) == result

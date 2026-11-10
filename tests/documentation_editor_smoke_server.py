@@ -78,14 +78,15 @@ def main():
     gateway = DocumentationGateway(server._DOCUMENTATION_AGENT_HOST,
         SimpleNamespace(tenant_id="isolated-proof", principal_id="reviewer", roles=(), allowed_site_ids=()),
         {"assemblyNumber": "MMLE-50D", "documentType": "illustrated_parts_manual"},
-        turn_id="p1a-browser-proof", max_calls=40, timeout=900,
+        turn_id="documentation-browser-proof", max_calls=80, timeout=1800,
         user_message="Change the selected description in this temporary proof document.")
 
     async def tool(request: Request):
         if request.client.host not in {"127.0.0.1", "::1"}:
             return JSONResponse(status_code=403, content={"error": "loopback only"})
         data = await request.json()
-        if data.get("name") not in {"read_document_pages", "edit_document_text", "apply_document_edits"}:
+        if data.get("name") not in {"read_document_pages", "edit_document_text", "apply_document_edits",
+                                    "propose_document_value_confirmation", "inspect_document_change", "undo_document_change"}:
             return JSONResponse(status_code=403, content={"error": "proof tool denied"})
         return await gateway.call(data["name"], data.get("arguments") or {})
 

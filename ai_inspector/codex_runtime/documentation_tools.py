@@ -176,6 +176,7 @@ APPEARANCE_TOOLS = ("list_appearances", "list_part_faces", "set_assembly_appeara
                     "set_assembly_scene", "place_assembly_signs", "remove_assembly_signs")
 # The text on an operations manual's or work instructions' pages, read and changed as the user edits it there.
 DOCUMENT_TEXT_TOOLS = ("read_document_pages", "edit_document_text", "propose_document_value_confirmation",
+                       "inspect_document_change", "undo_document_change",
                        "apply_document_edits")
 TEXT_TYPES = ("operations_and_maintenance_manual", "work_instructions", "illustrated_parts_manual")
 # The parts manual's sections: parts moved between them on the server, during the turn.
@@ -774,6 +775,21 @@ def _document_text_tool_specs():
                  "type": "object", "properties": {"targetId": identifier, "expectedContentHash": _HASH_SCHEMA},
                  "required": ["targetId", "expectedContentHash"], "additionalProperties": False}}},
              "required": ["documentId", "targets"], "additionalProperties": False}},
+        {"name": "inspect_document_change", "description":
+            "Inspect bounded before/after content and provenance summaries for one named change. Read the document first. "
+            "Inspection measurements and signatures use their guarded form path and have no document undo.",
+         "read_only": True,
+         "input_schema": {"type": "object", "properties": {
+             "documentId": _EDIT_PRECONDITIONS["documentId"], "changeId": identifier},
+             "required": ["documentId", "changeId"], "additionalProperties": False}},
+        {"name": "undo_document_change", "description":
+            "Undo one named change atomically, preserving unrelated later edits. Current content AND provenance "
+            "must match its after-state or the whole undo fails with undo_conflict. To redo, undo the undo receipt's changeId.",
+         "read_only": False,
+         "input_schema": {"type": "object", "properties": {
+             "documentId": _EDIT_PRECONDITIONS["documentId"], "changeId": identifier,
+             "expectedRevision": _EDIT_PRECONDITIONS["expectedRevision"], "requestId": _EDIT_PRECONDITIONS["requestId"]},
+             "required": ["documentId", "changeId", "expectedRevision", "requestId"], "additionalProperties": False}},
         {"name": "apply_document_edits", "description":
             "Apply 1-12 read-bound replacements atomically within one store. Send text and value edits as separate "
             "requests. Slot values must be stated by the user; this tool cannot supply source or approval authority. "
@@ -1243,8 +1259,6 @@ class DocumentationGateway:
         kind = self.document_reads.get(arguments["documentId"])
         if kind is None:
             raise DocumentEditError("document_read_required", "Read the document before proposing confirmation.")
-        if kind == SPEC:
-            raise DocumentEditError("invalid_document_operation", "Use the specification value review controls.")
         snapshot = self.host.document_snapshot(self._require_assembly(), kind)
         available = confirmation_targets(snapshot["state"], snapshot["document"])
         for item in arguments["targets"]:
@@ -1252,6 +1266,24 @@ class DocumentationGateway:
                 raise DocumentEditError("content_hash_mismatch", "Read the current confirmation scope.", targetId=item["targetId"])
         return {"proposalId": digest(arguments), "documentId": arguments["documentId"],
                 "targets": deepcopy(arguments["targets"]), "status": "awaiting_user"}
+
+    def _inspect_document_change(self, arguments):
+        kind = self.document_reads.get(arguments["documentId"])
+        if kind is None:
+            raise DocumentEditError("document_read_required", "Read the document before inspecting a change.")
+        return self.host.inspect_document_change(self._require_assembly(), kind, arguments["changeId"])
+
+    def _undo_document_change(self, arguments):
+        kind = self.document_reads.get(arguments["documentId"])
+        if kind is None:
+            raise DocumentEditError("document_read_required", "Read the document before undoing a change.")
+        result = self.host.undo_document_change(self._require_assembly(), kind, arguments)
+        self.states.clear()
+        if kind == SPEC:
+            self.sheet_changes.append("undid a named value change")
+        elif kind not in self.text_changes:
+            self.text_changes.append(kind)
+        return result
 
     def _apply_document_edits(self, arguments):
         destination = operation_store(arguments["operations"])

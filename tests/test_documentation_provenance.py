@@ -365,7 +365,7 @@ def test_sage_cannot_confirm_value(operations):
     assert next(spec for spec in tool_specs() if spec["name"] == "propose_document_value_confirmation")["read_only"]
     # Both registered server tool modules and the browser executor must stay outside
     # the human mutation path. This fails even for an indirect call to the handler.
-    forbidden = ("/confirm-values", "documentation_confirm_values", "confirmation_command(", "allow_confirmation=True")
+    forbidden = ("/confirm-values", "documentation_confirm_values", "confirmation_command(", "allow_confirmation=True", ".confirm_values(")
     paths = list((ROOT / "ai_inspector/codex_runtime").glob("*tools.py")) + [ROOT / "ai_inspector/documentation/agent_tools.py"]
     for path in paths:
         source = path.read_text(encoding="utf-8")

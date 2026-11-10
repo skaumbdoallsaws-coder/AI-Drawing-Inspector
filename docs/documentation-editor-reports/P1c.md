@@ -820,3 +820,108 @@ passed. After the fixes below, the targeted run gave 110 passed, and the full ga
   - Refresh receipts are capped at 100.
   - The two-owner parts refresh (plan, then scene) uses compensation rather than a joint transaction. An
     interruption between the two owners may need another explicit refresh; manual payloads are retained.
+
+
+## P1c-2b
+
+### CHANGED
+
+- Read the P1c-2a supervisor gate first and re-read plan sections 3.3 and 3.5. Kept all four supervisor runtime fixes: no helper-name collision in batches, None-safe command fields, refresh-only tombstone guards, and occurrence IDs on parts-plan reads. Versions remain scene 4 and slots 3. No P1c-3 UI or static assets changed.
+- ai_inspector/documentation/refresh.py: C == N now wins even without B and for revision-scoped identities; evidence-only changes preserve C and advance B. New refreshes no longer create evidence conflicts. Conflict/orphan hashes are pure read projections for old stores and persist on refresh/resolution writes. Non-text orphan kinds support explicit same-kind restoration.
+- New ai_inspector/documentation/resolution.py: shared pure candidate builder for keep_manual, use_generated, merge_text, detach and restore. Requests require exact owner revision, request ID and each conflict hash; restore also checks the explicit destination's content hash and kind. A deleted conflict linked to an orphan closes with that orphan's hashed detach/restore transaction.
+- parts_manual/documentation.py, specification_sheet/slots.py and documentation/changes.py: locked atomic writes, original-receipt retries, named/history undo and redo, and per-entry conflict/orphan/audit before/after images. Undo reopens the same B/C/N while preserving unrelated resolutions. Resolution history is capped at **100 entries** per owner; existing caps remain **1,000** edit receipts, **100** refresh receipts and **2,000** retained changes. Store size guards remain.
+- Native use_generated selections suppress older viewport fallback text and use the current default and its evidence status. They are not manual values or confirmations. Merge/restore stay manual; keep_manual retains manual status. documentation/provenance.py recomputes support through the existing projection and effective history.
+- server.py: GET /api/documentation/{document_type}/{assembly_number}/conflicts (zero-based from, limit) and POST .../conflicts/resolve share host methods with Sage. POST records actor user; Sage records actor sage. Responses include receipt, revisions, conflict/orphan/audit exposure and reload: true. Reads include owner/revision per entry, exact B/C/N text and payloads, evidence changes, hashes, counts, pagination totals and restore destinations/hashes. Specification slot and legacy scene owners resolve separately, using each entry's reported revision. Named inspection/undo selects the actual owner.
+- codex_runtime/documentation_tools.py: added read_document_conflicts and resolve_document_conflicts, including restore target/hash fields and "Read conflicts and resolve only the requested targets." Existing tools keep their inputs; confirmation and reset stay UI-only.
+- New documentation/conflict_exports.py, operations/specification exporters, parts PDF exporter, specification compiler and provenance projection: review/draft exports mark targets and give conflict/orphan counts. Work instructions reuse the operations renderer. Customer/controlled exports fail with manual_edit_conflict and open conflictIds before existing evidence gates. Parts PDF accepts additive mode query input. Orphans alone do not block.
+- tests/test_documentation_refresh.py covers corrected policy, all choices in both owners, stale hashes/revisions, atomic failure, retries, named/history inverses, independent resolutions, detach/restore, deleted-conflict links, audit bounds, restart/old-shape reads, parts HTTP/Sage twin stores, native specification routes and four-document export paths. Updated test_codex_documentation_tools.py, test_codex_readonly_pilot.py, test_codex_assisted_tools.py, test_codex_specification_sheet_tools.py and the isolated smoke server's tool allowlist.
+- **Baseline expectation:** neither promoted baseline should move. Current probes exercise no conflict resolutions; no-conflict export text/geometry and ordinary text-edit stores retain their paths. New conflict/audit and non-text restoration-kind metadata affect stores using those paths. Expected baseline JSON was not edited.
+
+### TESTS
+
+- Ran git diff --check: passed.
+- Node file checks: changed/new files use LF; server.py retains its UTF-8 BOM; all added server.py lines are ASCII. Its eight pre-existing non-ASCII characters outside the BOM remain unchanged.
+- Manually traced HTTP/Sage dispatch, explicit scene-free identity baselines, owner locks, retries, candidate persistence, inverse records, specification default/viewport precedence and renderer calls. This found and fixed a DOCX row-variable error before handoff.
+- **No Python was run**, including imports or syntax/AST checks. No runtime or visual-export pass is claimed. No browser, network, installation, commit, branch or index mutation occurred.
+
+### NOT RUN
+
+Claude must run outside the sandbox, including the additional touched specification tool tests:
+
+    python -m pytest -q tests/test_documentation_refresh.py tests/test_documentation_provenance.py tests/test_documentation_change_undo.py tests/test_documentation_transactions.py tests/test_operations_manual_workspace.py tests/test_specification_sheet_workflow.py tests/test_parts_manual.py tests/test_work_instruction_workflow.py tests/test_codex_documentation_tools.py tests/test_codex_readonly_pilot.py tests/test_codex_assisted_tools.py tests/test_codex_specification_sheet_tools.py tests/test_documentation_baseline.py tests/test_documentation_store_chokepoint.py
+    python tools/documentation_baseline.py --check
+    python tools/documentation_baseline.py --local --check
+    python tests/smoke_documentation_editor.py --phase P1a
+    python tests/smoke_documentation_editor.py --phase P1b
+    python -c "import glob,sys,pytest; sys.exit(pytest.main(['-q']+sorted({p for pattern in ('tests/test_documentation*.py','tests/test_parts_manual*.py','tests/test_operations_manual*.py','tests/test_specification_sheet*.py','tests/test_work_instruction*.py','tests/test_inspection_sheet*.py') for p in glob.glob(pattern)})))"
+    python -c "import glob,sys,pytest; sys.exit(pytest.main(['-q']+sorted({p for pattern in ('tests/test_codex*.py','tests/test_facility*.py','tests/test_authored*.py','tests/test_sage*.py','tests/test_industrial*.py') for p in glob.glob(pattern)})))"
+
+The pre-existing test_operations_manual_precoding_contracts.py::test_source_ids_references_and_local_hashes_are_closed failure was left untouched. Please visually review conflict notices in PDF/DOCX during the gate; their placement has not been rendered here.
+
+### DEVIATIONS
+
+- No phase-scope deviation. Validators accept obsolete evidence conflicts only to read P1c-2a-shaped saved records; no new refresh emits them. They remain reviewable/resolvable without a silent save on read.
+- Added owner revision/destination metadata because specification retains native slots and legacy scene content. Mixed-owner batches are refused under the existing one-store transaction contract.
+- Native generated selection uses an internal selectedGenerated marker to suppress old scene fallback. Neither public tool accepts it, and it grants no source approval.
+
+### OPEN QUESTIONS
+
+None requiring a product decision. Runtime, baseline, smoke and rendered-export validation remain pending Claude's gate.
+
+## P1c-2b supervisor gate (Claude, 2026-11-10)
+
+Result: PASSED after supervisor fixes; committed together with this section.
+
+Codex's round took 31 minutes, with static checks only. My first run of the focused suites gave 536 passed and
+5 failed. After the fixes below, the focused run gave 542 passed and the full gate chain followed.
+
+### Supervisor fixes (Claude)
+
+- provenance.project_document, a latent P1b-2 defect exposed by the new resolution tests. A bound block can mix
+  rows that carry claimIds with rows that do not. When the unbound remainder was not source-backed, its cleanup
+  loop ran over every row and cleared the cited rows' own citations and provenance. It now skips rows processed as
+  bound in the same projection.
+  - The whole-block fallback (an unknown row edited) still clears every row, as before.
+  - The real MMLE documents have 13 bound blocks and none mixed, so no export or baseline changes.
+  - Regression test: test_documentation_provenance.py::test_mixed_block_remainder_keeps_bound_row_citations.
+- Tests:
+  - The request-ID reuse check now drops mergedText when it switches the choice to detach. Request validation
+    otherwise refuses the reused payload before the reuse check.
+  - The parts export test now uses the parts capture fixture, which has line geometry. It also spreads the
+    synthetic balloons over y 0.08-0.92: the fixture's single column overlaps above 13 callouts, and MMLE pages
+    carry up to 16.
+
+### Visual review (review exports rendered to PNG)
+
+- Inline markers are visible on all four documents:
+  - Parts: under the BOM description cell.
+  - Specification sheet: under the title.
+  - Operations and work instructions: in the cover kicker.
+  The footer summary ("Open manual edit conflicts: N; unplaced manual content: M") is legible on every page.
+- For P4:
+  - The top-left per-page conflict list is drawn over the dark header bands of parts and specification pages,
+    where it is nearly illegible.
+  - The operations and work-instructions marker shares its line with the edited-values legend.
+  - The specification marker sits tight against the subtitle.
+
+### Numbers
+
+- Focused suites: 542 passed.
+- Baseline checks (synthetic and local): both pass unchanged, as Codex predicted.
+- Smokes: P1a 27/27, P1b 46/46.
+- Documentation suites: 639 passed, plus the pre-existing failure test_source_ids_references_and_local_hashes_are_closed; JS 5/5.
+- Wide suites: 3851 passed, 170 failed, 9 errors; no new failure against the base set.
+- Checked:
+  - Sage's resolve_document_conflicts schema matches validate_request exactly (documentId, expectedRevision,
+    requestId, resolutions).
+  - The resolve route takes a JSON body and records actor "user". Like the other edit routes it has no origin
+    boundary, since Sage may resolve too. Confirmation and reset keep their origin boundary.
+
+### For P1c-3
+
+- read_document_conflicts also returns restoreTargets: same-kind destinations with their content hashes,
+  paginated.
+- Resolve responses carry reload: true plus the refreshed exposure.
+- Specification scene conflicts and slot conflicts resolve in separate requests.
+- Undo re-appends a reopened conflict at the end of its list, so the UI should order conflicts by page and target,
+  not by storage order.

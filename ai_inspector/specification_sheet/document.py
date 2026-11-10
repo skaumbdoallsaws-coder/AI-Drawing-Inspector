@@ -741,5 +741,7 @@ def build_specification_sheet_document(
     document, documentation_scene = bind_document(document, documentation_scene)
     sync_identity_overrides(document)
     document = project_slots(document, stored)
+    from ai_inspector.documentation.conflict_exports import project_review
+    document = project_review(document, stored, documentation_scene)
     document["documentRevision"] = _stable_revision(document)
     return document

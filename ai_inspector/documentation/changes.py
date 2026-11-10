@@ -7,9 +7,17 @@ from copy import deepcopy
 from .commands import DocumentEditError, digest, canonical_bytes
 
 MAX_CHANGES = 2000
+_LIST_ROOTS = {"conflicts", "orphans", "resolutionHistory"}
+
+
+def _entry_id(item):
+    return item.get("conflictId") or item.get("orphanId")
 
 
 def image(state, path):
+    if len(path) == 2 and path[0] in _LIST_ROOTS and isinstance(state.get(path[0], []), list):
+        found = next((item for item in state.get(path[0], []) if _entry_id(item) == path[1]), None)
+        return {"present": True, "value": deepcopy(found)} if found is not None else {"present": False}
     node = state
     for key in path:
         if not isinstance(node, dict) or key not in node:
@@ -21,6 +29,18 @@ def image(state, path):
 def restore(state, changes, *, side="after", root=None):
     for item in changes:
         path = item["path"]
+        if root is None and len(path) == 2 and path[0] in _LIST_ROOTS and isinstance(state.get(path[0], []), list):
+            collection = state.setdefault(path[0], [])
+            index = next((i for i, entry in enumerate(collection) if _entry_id(entry) == path[1]), None)
+            value = item[side]
+            if value["present"]:
+                if index is None:
+                    collection.append(deepcopy(value["value"]))
+                else:
+                    collection[index] = deepcopy(value["value"])
+            elif index is not None:
+                collection.pop(index)
+            continue
         if root is not None:
             if path[0] != root:
                 continue

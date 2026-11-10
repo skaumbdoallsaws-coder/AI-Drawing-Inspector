@@ -28,6 +28,8 @@ def test_contract_has_no_commit_approval_or_shell_capability(setup):
     assert "propose_document_value_confirmation" not in {spec["name"] for spec in gateway.specs}
     assert "inspect_document_change" not in {spec["name"] for spec in gateway.specs}
     assert "undo_document_change" not in {spec["name"] for spec in gateway.specs}
+    assert "read_document_conflicts" not in {spec["name"] for spec in gateway.specs}
+    assert "resolve_document_conflicts" not in {spec["name"] for spec in gateway.specs}
     for spec in gateway.specs:
         Draft202012Validator.check_schema(spec["input_schema"])
 

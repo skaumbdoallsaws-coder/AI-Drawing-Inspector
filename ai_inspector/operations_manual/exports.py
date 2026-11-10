@@ -16,6 +16,7 @@ import uuid
 
 from ai_inspector.parts_manual.pdf import draw_balloon_manifest
 
+from ai_inspector.documentation.conflict_exports import marker as conflict_marker, mark_pdf, mark_docx
 from ai_inspector.documentation.provenance import EDITED_MARKER, EDITED_LEGEND, check_export, export_document
 from .artifacts import document_draft_render_path
 from .flow import wrap_text
@@ -317,7 +318,7 @@ def _draw_header_footer(fitz: Any, page: Any, descriptor: Mapping[str, Any], doc
 
 
 def _marked(owner):
-    return (owner.get("provenance") or {}).get("evidenceStatus") == "edited_unverified"
+    return bool(owner.get("manualConflicts")) or (owner.get("provenance") or {}).get("evidenceStatus") == "edited_unverified"
 
 
 def _has_marked(block):
@@ -357,7 +358,7 @@ def _draw_table(fitz: Any, page: Any, block: Mapping[str, Any], rect: Any) -> No
             page.insert_textbox(cell, value, fontsize=6.7, fontname="helv", color=(0.10, 0.14, 0.17), lineheight=1.15)
         if _marked(row):
             page.insert_text(fitz.Point(rect.x0 + column_width * (len(columns) - 1) + 5, bottom - 2),
-                             EDITED_MARKER, fontsize=5.5, fontname="helv", color=(0.6, 0.22, 0.02))
+                             conflict_marker(row, EDITED_MARKER), fontsize=5.5, fontname="helv", color=(0.6, 0.22, 0.02))
         page.draw_line(fitz.Point(rect.x0, bottom), fitz.Point(rect.x1, bottom), color=light, width=0.35)
         y = bottom
     for index in range(1, len(columns)):
@@ -545,7 +546,7 @@ def _draw_list(fitz: Any, page: Any, block: Mapping[str, Any], rect: Any) -> Non
             )
             if _marked(item):
                 page.insert_text(fitz.Point(x + marker_width + 3, y + row_height - 1),
-                                 EDITED_MARKER, fontsize=5.5, fontname="helv", color=(0.6, 0.22, 0.02))
+                                 conflict_marker(item, EDITED_MARKER), fontsize=5.5, fontname="helv", color=(0.6, 0.22, 0.02))
             item_index += 1
         y += row_height
 
@@ -607,7 +608,7 @@ def _draw_block(
     block_type = str(block.get("blockType") or "")
     text = _block_text(descriptor, block)
     if _review_marks(document) and _has_marked(block):
-        label = (EDITED_MARKER + ". " if _marked(block) else "") + EDITED_LEGEND
+        label = (conflict_marker(block, EDITED_MARKER) + ". " if _marked(block) else "") + EDITED_LEGEND
         page.insert_text(fitz.Point(rect.x0, rect.y1 + 6), label, fontsize=5.5,
                          fontname="helv", color=(0.6, 0.22, 0.02))
     style = dict(block.get("style") or {})
@@ -768,6 +769,7 @@ def build_prototype_pdf_bytes(
         "subject": subject,
         "keywords": keywords,
     })
+    mark_pdf(pdf, document)
     payload = pdf.tobytes(garbage=4, deflate=True)
     pdf.close()
     return payload
@@ -1163,7 +1165,7 @@ def build_prototype_docx_bytes(
             block_type = str(block.get("blockType") or "")
             text = _block_text(descriptor, block)
             if _review_marks(document) and _has_marked(block):
-                notice = output.add_paragraph((EDITED_MARKER + ". " if _marked(block) else "") + EDITED_LEGEND)
+                notice = output.add_paragraph((conflict_marker(block, EDITED_MARKER) + ". " if _marked(block) else "") + EDITED_LEGEND)
                 for run in notice.runs:
                     run.font.size = Pt(7)
             if block_type in {"heading", "continuation_heading"}:
@@ -1218,7 +1220,7 @@ def build_prototype_docx_bytes(
                     if item.get("text"):
                         paragraph.add_run(str(item.get("text")))
                     if _marked(item):
-                        paragraph.add_run("\n" + EDITED_MARKER)
+                        paragraph.add_run("\n" + conflict_marker(item, EDITED_MARKER))
                     if int(item.get("quantity") or 1) > 1:
                         quantity = paragraph.add_run(
                             f"  ({int(item.get('quantity') or 1)}X)"
@@ -1254,7 +1256,7 @@ def build_prototype_docx_bytes(
                     for index in range(len(columns)):
                         cells[index].text = values[index] if index < len(values) else ""
                     if _marked(row):
-                        cells[-1].add_paragraph(EDITED_MARKER)
+                        cells[-1].add_paragraph(conflict_marker(row, EDITED_MARKER))
             elif block_type == "cad_figure":
                 image_path = document_draft_render_path(root, assembly_number, document, descriptor)
                 request = descriptor.get("renderRequest") or {}
@@ -1277,6 +1279,7 @@ def build_prototype_docx_bytes(
                 caption.runs[0].font.italic = True
 
     buffer = io.BytesIO()
+    mark_docx(output, document)
     output.save(buffer)
     return buffer.getvalue()
 

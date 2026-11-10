@@ -851,6 +851,9 @@ def _draw_bom_table(
             color=light_rule_color,
             width=0.3,
         )
+        if row.get("manualConflicts"):
+            from ai_inspector.documentation.conflict_exports import marker
+            page.insert_text((x_positions[2] + 3, bottom - 1), marker(row), fontsize=4.5, color=(0.6, 0.22, 0.02))
         current_y = bottom
     for x in x_positions[1:-1]:
         page.draw_line(
@@ -1063,6 +1066,9 @@ def build_manual_pdf_bytes(
     except ImportError as exc:
         raise PartsManualPdfError("PyMuPDF is required to generate parts manuals") from exc
 
+    from ai_inspector.documentation.provenance import check_export, export_document
+    document = export_document(document)
+    check_export(document, document.get("exportMode", "review"))
     _validate_document(document)
     render_paths = _required_render_paths(root, assembly_number, document)
     pdf = fitz.open()
@@ -1378,6 +1384,8 @@ def build_manual_pdf_bytes(
             "keywords": "illustrated parts manual, BOM, exploded view, parts index",
         }
     )
+    from ai_inspector.documentation.conflict_exports import mark_pdf
+    mark_pdf(pdf, document)
     payload = pdf.tobytes(garbage=4, deflate=True)
     pdf.close()
     return payload

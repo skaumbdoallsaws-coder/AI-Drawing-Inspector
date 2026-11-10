@@ -54,7 +54,7 @@ def _text_history(scene, page_id, aliases):
     history = []
     from .changes import effective_commands
     for command in _leaves(effective_commands((scene.get("commands") or [])[:int(scene.get("historyCursor") or 0)])):
-        if command.get("refreshCheckpoint"):
+        if command.get("refreshCheckpoint") or command.get("adoptedTargets"):
             adopted = set(command.get("adoptedTargets", []))
             history = [item for item in history if item.get("targetId") not in adopted]
             continue
@@ -135,8 +135,10 @@ def project_document(document, scene=None, *, generated_parts=None):
         result["schemaVersion"] = supported
     scene = {"fieldMeta": result.get("fieldMeta") or {}} if scene is None else scene
     stored = scene.get("fieldMeta") or {}
-    field_meta, targets = {}, []
+    field_meta, targets, bound_children = {}, [], set()
     for page, block, owner, alias, fields, claims, sources, bound, watched in _scopes(result, scene):
+        if bound:
+            bound_children.add(id(owner))
         sid = scope_id(result, page["pageId"], alias)
         generated = {key: value for key, value in fields}
         effective = {key: _value(page, key, value) for key, value in fields}
@@ -181,6 +183,9 @@ def project_document(document, scene=None, *, generated_parts=None):
         owner["activeSourceIds"] = meta["activeSourceIds"]
         if not bound and not active:
             for child in block.get("rows") or block.get("items") or []:
+                # The unbound remainder of a mixed block must not clear rows that carry their own citations.
+                if id(child) in bound_children:
+                    continue
                 child.pop("provenance", None)
                 if "claimIds" in child or "sourceIds" in child:
                     child.setdefault("originalEvidence", {"claimIds": list(child.get("claimIds") or []),
@@ -242,7 +247,8 @@ def project_document(document, scene=None, *, generated_parts=None):
     result["sourceSupport"] = [{"targetId": row["targetId"], "claimIds": row["provenance"]["activeClaimIds"],
         "sourceIds": row["provenance"]["activeSourceIds"], "evidenceStatus": row["provenance"]["evidenceStatus"]}
         for row in targets if row["provenance"]["claimIds"] or row["provenance"]["sourceIds"]]
-    return result
+    from .conflict_exports import project_review
+    return project_review(result, scene)
 
 
 def support_summary(targets):
@@ -331,6 +337,11 @@ def export_document(document):
 def check_export(document, mode="review"):
     if mode not in {"review", "draft", "customer", "controlled"}:
         raise DocumentEditError("invalid_document_operation", "Unknown document export mode.")
+    from .refresh import open_conflicts
+    conflicts = open_conflicts(document)
+    if mode in {"customer", "controlled"} and conflicts:
+        raise DocumentEditError("manual_edit_conflict", "Resolve open manual edit conflicts before export.",
+                                conflictIds=[c.get("conflictId") for c in conflicts])
     pending = unconfirmed_targets(export_document(document))
     if mode in {"customer", "controlled"} and pending:
         raise DocumentEditError("unconfirmed_cited_values", "Confirm or undo the edited cited values before export.", targets=pending)
@@ -364,7 +375,7 @@ def project_slots(document, stored):
         changed = bool(item.get("overrides"))
         meta = deepcopy((stored.get("fieldMeta") or {}).get(sid) or {})
         if not meta:
-            meta = {"origin": "manual" if changed or slot in stored.get("values", {}) or item.get("source") in
+            meta = {"origin": "manual" if changed or (slot in stored.get("values", {}) and not stored["values"][slot].get("selectedGenerated")) or item.get("source") in
                     {"workspace", "chat", "research", "sage_draft", "returned_pdf"} else "generated",
                     "evidenceStatus": "edited_unverified" if changed and claims else "source_backed" if claims else "unbound",
                     "generatedValue": original.get("value"), "generatedHash": digest(original.get("value")),
@@ -401,7 +412,8 @@ def project_slots(document, stored):
             slot = block.get("slot")
             if slot and "slot:" + slot in meta_by_id:
                 block["provenance"] = deepcopy(meta_by_id["slot:" + slot])
-    return result
+    from .conflict_exports import project_review
+    return project_review(result, stored)
 
 
 def slot_mutation_meta(before, candidate, defaults, *, actor, change_id, effective_values=None):

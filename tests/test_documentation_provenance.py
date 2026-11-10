@@ -202,6 +202,24 @@ def test_old_compiled_block_uses_conservative_fallback(tmp_path):
     assert rejected.value.details["targets"] == unconfirmed_targets(projected)
 
 
+def test_mixed_block_remainder_keeps_bound_row_citations():
+    # Supervisor regression (P1c-2b gate): a bound block may mix cited rows with rows that carry no claimIds.
+    # The unbound remainder must not clear the cited rows' own citations.
+    old = old_document()
+    old["pages"][0]["layoutBlocks"] = [{"blockId": "mixed", "blockType": "table", "evidenceBindingVersion": 1,
+        "rows": [{"cells": ["Capacity", "1,100 lb"], "claimIds": ["capacity"], "sourceIds": ["source-oem"]},
+                 {"cells": ["Travel", "20 in"]}]}]
+    rows = project_document(deepcopy(old))["pages"][0]["layoutBlocks"][0]["rows"]
+    assert rows[0]["claimIds"] == ["capacity"] and rows[0]["activeEvidenceClaimIds"] == ["capacity"]
+    assert rows[0]["provenance"]["evidenceStatus"] == "source_backed"
+    assert "provenance" not in rows[1] and not rows[1].get("claimIds")
+    # Editing the cited row still marks only that row.
+    old["pages"][0]["documentationComposition"] = {"pageElementOverrides": {"mixed.r0.c1": {"text": "1,000 lb"}}}
+    rows = project_document(deepcopy(old))["pages"][0]["layoutBlocks"][0]["rows"]
+    assert rows[0]["provenance"]["evidenceStatus"] == "edited_unverified" and rows[0]["claimIds"] == []
+    assert "provenance" not in rows[1]
+
+
 def test_legacy_override_marked_edited(tmp_path):
     from ai_inspector.documentation.identity import bind_document, compile_identities
 

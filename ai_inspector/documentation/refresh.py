@@ -19,10 +19,12 @@ def open_conflicts(state):
 
 
 def exposure(state):
+    from .resolution import with_hash, orphan_review
     return {"openConflictCount": len(open_conflicts(state)),
-            "conflicts": deepcopy(list((state.get("conflicts") or {}).values())
-                if isinstance(state.get("conflicts"), dict) else state.get("conflicts") or []),
-            "orphans": deepcopy(state.get("orphans") or [])}
+            "conflicts": [with_hash(c) for c in (list((state.get("conflicts") or {}).values())
+                if isinstance(state.get("conflicts"), dict) else state.get("conflicts") or [])],
+            "orphans": [orphan_review(o, state) for o in state.get("orphans") or []],
+            "resolutionHistory": deepcopy(state.get("resolutionHistory") or [])}
 
 
 def assert_writable(state, targets=(), *, pages=(), whole=False):
@@ -67,12 +69,14 @@ def guard_change(state, change):
                 pages.append(path[1])
             else:
                 targets.append(path[3])
-    assert_writable(state, targets, pages=pages, whole=whole)
+    resolving = set(change.get("resolutionIds") or [])
+    guarded = {**state, "conflicts": [c for c in open_conflicts(state) if c.get("conflictId") not in resolving]}
+    assert_writable(guarded, targets, pages=pages, whole=whole)
     for target in targets:
         identity = state.get("identities", {}).get(target, {})
         # Only a refresh unplaces a generated identity. A row the user renamed or deleted in the same binding
         # is tombstoned too (P1c-1), and undoing that change must still restore it.
-        if (identity.get("state") == "tombstone" and identity.get("tombstonedBy") == "refresh"
+        if (not resolving and identity.get("state") == "tombstone" and identity.get("tombstonedBy") == "refresh"
                 and identity.get("ownership") != "authored"):
             raise DocumentEditError("undo_conflict", "This generated target is now unplaced.", targetId=target)
 
@@ -99,6 +103,7 @@ def validate_refresh_metadata(state):
         # Accept the small pre-P1c conflict guard shape without rewriting it.
         if "conflictId" not in item:
             continue
+        # "evidence" is accepted only for stores written by P1c-2a; no new refresh creates it.
         if (item.get("kind") not in {"value", "evidence", "missing_baseline", "revision_scoped"}
                 or not all(key in item for key in ("B", "C", "N", "oldSourceRefs", "newSourceRefs",
                     "createdRevision", "status", "resolutionReceipt", "pageId", "alias"))
@@ -117,6 +122,8 @@ def validate_refresh_metadata(state):
             invalid()
         if "C" in item and (not isinstance(item["C"], dict) or item["C"].get("hash") != digest(item["C"].get("payload"))):
             invalid()
+    from .resolution import validate_resolution_metadata
+    validate_resolution_metadata(state)
     receipts = state.get("refreshReceipts", [])
     if not isinstance(receipts, list) or len(receipts) > REFRESH_RECEIPT_LIMIT:
         invalid()
@@ -180,7 +187,7 @@ def inventory(document):
                     key = scene_field_key(page["pageId"], "page_element", alias)
                     result[key] = {"payload": deepcopy(payload), "hash": digest(payload), "binding": binding(document),
                         "evidence": {}, "pageId": page["pageId"], "alias": alias, "storageId": alias,
-                        "label": alias, "scopeId": key, "identity": {"scope": "source"}}
+                        "label": alias, "scopeId": key, "identity": {"scope": "source"}, "targetKind": "presentation"}
         request = page.get("renderRequest")
         if request:
             groups = set(request.get("manualGroupNames", [])) | {row["sectionId"]
@@ -196,11 +203,11 @@ def inventory(document):
                     payload = {"override": None, "sourceTarget": relation}
                     result[key] = {"payload": payload, "hash": digest(payload), "binding": binding(document),
                         "evidence": {}, "pageId": page["pageId"], "alias": alias, "label": alias, "scopeId": key,
-                        "identity": {"scope": "source"}}
+                        "identity": {"scope": "source"}, "targetKind": target_type}
             payload = {k: deepcopy(v) for k, v in request.items() if k not in {"image", "composition"}}
             result[page["pageId"]] = {"payload": payload, "hash": digest(payload), "binding": binding(document),
                 "evidence": {}, "pageId": page["pageId"], "alias": page["pageId"], "label": page.get("title", "Figure"),
-                "scopeId": page["pageId"], "identity": {"scope": "source"}}
+                "scopeId": page["pageId"], "identity": {"scope": "source"}, "targetKind": "figure"}
     return result
 
 
@@ -245,16 +252,16 @@ def capture_baselines(state, document, targets):
 def three_way(B, C, N, *, revision_scoped=False):
     if N is None:
         return "orphan"
+    if C == N["payload"]:
+        return "kept"
     if B is None:
         return "missing_baseline"
     if revision_scoped:
         return "preserved" if B["payload"] == N["payload"] else "revision_scoped"
-    if C == N["payload"]:
-        return "kept"
     if C == B["payload"]:
         return "adopted"
     if B["payload"] == N["payload"]:
-        return "preserved" if B["evidence"] == N["evidence"] else "evidence"
+        return "preserved"
     return "value"
 
 
@@ -289,9 +296,11 @@ def refresh(state, document, *, refresh_id, actor, at, slots=False):
     new_scoped = {address: keys[0] for address, keys in scoped_candidates.items() if len(keys) == 1}
 
     def orphan(key, value, reason, page, previous=None):
+        from .resolution import target_kind
         known = previous or baselines.get(key) or {}
         item = {"orphanId": "o-" + digest([key, page, value, reason])[:20], "targetId": key,
                 "pageId": page, "alias": known.get("alias", key), "label": known.get("label", key),
+                "targetKind": known.get("targetKind") or target_kind(key, value),
                 "C": {"payload": deepcopy(value), "hash": digest(value),
                       "fieldMeta": deepcopy(state.get("fieldMeta", {}).get(known.get("scopeId", key), {}))}, "reason": reason,
                 "link": {"status": "stale", "binding": old_binding}, "B": deepcopy(baselines.get(key))}
@@ -306,6 +315,11 @@ def refresh(state, document, *, refresh_id, actor, at, slots=False):
         processed.add(key)
         B = baselines.get(key)
         ident = (B or {}).get("identity") or state.get("identities", {}).get(key, {})
+        if slots and override.get("selectedGenerated") and key in generated:
+            baselines[key] = deepcopy(generated[key])
+            counts["adopted"] += 1
+            return key, {"value": generated[key]["payload"]["value"],
+                         "source": generated[key]["evidence"].get("source"), "selectedGenerated": True}
         if slots and state.get("identities", {}).get(key, {}).get("ownership") == "authored":
             counts["kept"] += 1
             if key in generated:
@@ -333,7 +347,7 @@ def refresh(state, document, *, refresh_id, actor, at, slots=False):
             existing.update(N=deepcopy(N), newSourceRefs=deepcopy(N["evidence"]), targetId=new_key,
                             pageId=N["pageId"], alias=N["alias"])
             counts["conflicts"] += 1
-        elif policy in {"value", "evidence", "missing_baseline", "revision_scoped"}:
+        elif policy in {"value", "missing_baseline", "revision_scoped"}:
             conflicts.append({"conflictId": "c-" + digest([refresh_id, key])[:20],
                 "targetId": new_key, "previousTargetId": key, "pageId": N["pageId"], "alias": N["alias"],
                 "scopeId": N["scopeId"], "kind": policy, "B": deepcopy(B),
@@ -478,6 +492,9 @@ def refresh(state, document, *, refresh_id, actor, at, slots=False):
     result["editRevision"] = state.get("editRevision", 0) + 1
     result["editEpoch"] = state.get("editEpoch", 0) + 1
     result["updatedAt"] = at
+    from .resolution import with_hash
+    result["conflicts"] = [with_hash(c) for c in result["conflicts"]]
+    result["orphans"] = [with_hash(o) for o in result["orphans"]]
     validate_refresh_metadata(result)
     return result, receipt
 

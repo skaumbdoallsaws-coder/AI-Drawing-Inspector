@@ -135,7 +135,9 @@ def test_the_tool_set_is_exact_typed_and_closed():
     assert next(s for s in specs if s["name"] == "propose_document_value_confirmation")["read_only"] is True
     assert next(s for s in specs if s["name"] == "inspect_document_change")["read_only"] is True
     assert next(s for s in specs if s["name"] == "undo_document_change")["read_only"] is False
-    assert not {"confirm_document_values", "reset_document", "read_document_conflicts", "resolve_document_conflicts"} & {s["name"] for s in specs}
+    assert next(s for s in specs if s["name"] == "resolve_document_conflicts")["read_only"] is False
+    assert next(s for s in specs if s["name"] == "read_document_conflicts")["read_only"] is True
+    assert not {"confirm_document_values", "reset_document"} & {s["name"] for s in specs}
     for spec in specs:
         schema = spec["input_schema"]
         assert schema["type"] == "object" and schema["additionalProperties"] is False, spec["name"]
@@ -145,7 +147,7 @@ def test_the_tool_set_is_exact_typed_and_closed():
     assert {spec["name"] for spec in specs if spec.get("read_only", True)} == {
         "inspect_documentation_context", "inspect_documentation_type", "inspect_parts_manual_bom",
         "find_library_machines", "list_appearances", "list_part_faces", "list_signs_and_scenes",
-        "read_document_pages", "propose_document_value_confirmation", "inspect_document_change"}
+        "read_document_pages", "propose_document_value_confirmation", "inspect_document_change", "read_document_conflicts"}
 
 
 def test_public_research_joins_the_tools_behind_its_flag(monkeypatch):
@@ -803,3 +805,20 @@ def test_page_reads_mark_open_conflicts_without_new_tools():
     target = result["data"]["targets"][0]
     assert target["text"] == "Manual value" and target["hasOpenConflict"] is True
     assert target["conflictIds"] == ["c-test"]
+
+
+
+def test_conflict_tool_schemas_and_guidance():
+    from ai_inspector.codex_runtime.documentation_tools import SERVER_INSTRUCTIONS
+    specs = {item["name"]: item for item in tool_specs()}
+    read = specs["read_document_conflicts"]["input_schema"]
+    assert set(read["properties"]) == {"documentId", "from", "limit"}
+    assert read["required"] == ["documentId"]
+    resolve = specs["resolve_document_conflicts"]["input_schema"]
+    assert set(resolve["required"]) == {"documentId", "expectedRevision", "requestId", "resolutions"}
+    item = resolve["properties"]["resolutions"]["items"]
+    assert set(item["required"]) == {"conflictId", "expectedConflictHash", "choice"}
+    assert set(item["properties"]) == {"conflictId", "expectedConflictHash", "choice", "mergedText", "targetId", "expectedContentHash"}
+    assert set(item["properties"]["choice"]["enum"]) == {"keep_manual", "use_generated", "merge_text", "detach", "restore"}
+    assert "Read conflicts and resolve only the requested targets." in SERVER_INSTRUCTIONS
+    assert not {"actor", "accepted", "confirmation"} & set(item["properties"])

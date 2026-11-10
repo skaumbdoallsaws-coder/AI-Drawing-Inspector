@@ -724,6 +724,7 @@ def generated(value, evidence=None):
     ("B", "C", "N", "value"),
     ("B", "B", "B", "kept"),
     (None, "C", "N", "missing_baseline"),
+    (None, "N", "N", "kept"),
     ("B", "C", None, "orphan"),
 ])
 def test_three_way_policy(old, current, new, policy):
@@ -733,7 +734,7 @@ def test_three_way_policy(old, current, new, policy):
 
 def test_three_way_evidence_change_is_not_source_acceptance():
     assert three_way(generated("B", {"claimIds": ["old"]}), {"text": "C"},
-                     generated("B", {"claimIds": ["new"]})) == "evidence"
+                     generated("B", {"claimIds": ["new"]})) == "preserved"
 
 
 def write_text(repo, doc, alias="table.r0.c1", text="Manual value"):
@@ -1034,7 +1035,7 @@ def workspace_edit(client, url, state, page, target, text):
     return result.json()
 
 
-def test_parts_route_refresh_keeps_note_and_persists_description_conflict(mmle_client, monkeypatch):
+def _parts_route_conflict(mmle_client, monkeypatch):
     import server
     if not (server.PARTS_MANUAL_ROOT / "mmle-50d" / "manual-plan.json").is_file():
         pytest.skip("needs the local approved MMLE manual plan")
@@ -1084,6 +1085,10 @@ def test_parts_route_refresh_keeps_note_and_persists_description_conflict(mmle_c
     repeat = mmle_client.post(url + "/refresh", json={k: again[k] for k in binding})
     assert repeat.status_code == 200 and repeat.json()["refreshReceipt"] is None
     assert (server.PARTS_MANUAL_ROOT / "mmle-50d" / "documentation-scene.json").read_bytes() == raw
+
+
+def test_parts_route_refresh_keeps_note_and_persists_description_conflict(mmle_client, monkeypatch):
+    _parts_route_conflict(mmle_client, monkeypatch)
 
 
 def test_parts_plan_carry_refuses_missing_occurrences_without_partial_write(mmle_client, monkeypatch):
@@ -1326,3 +1331,533 @@ def test_authored_slot_rows_keep_values_and_order_without_generated_baseline(tmp
     after = store.read()
     assert after["rows"] == before["rows"] and after["values"] == before["values"]
     assert not after["conflicts"] and after["identities"]["slot:spec.note.value"]["ownership"] == "authored"
+
+
+# P1c-2b: one resolution transaction, shared by HTTP and Sage, with guarded inverses.
+from types import SimpleNamespace
+from ai_inspector.documentation.resolution import conflict_hash, with_hash, RESOLUTION_HISTORY_LIMIT
+
+
+@pytest.fixture(params=["scene", "slots"])
+def resolution_case(tmp_path, request):
+    slots = request.param == "slots"
+    if slots:
+        old = slot_document()
+        old["slots"]["title"]["claimIds"] = ["claim-title"]
+        new = slot_document("New generated title", "source-b")
+        new["slots"]["title"]["claimIds"] = ["claim-title-new"]
+        owner = SlotStore(tmp_path, NUMBER)
+        owner.identity_document, owner.binding = old, {"sourceRevision": SOURCE, "manualPlanRevision": PLAN}
+        owner.set_values([{"slot": "title", "value": "Manual value"}], "workspace")
+        owner.refresh(new, expected_revision=owner.read()["editRevision"])
+        owner.identity_document, owner.binding = new, {"sourceRevision": "source-b", "manualPlanRevision": PLAN}
+        key, kind, path = "slot:title", "product_specification_sheet", owner.path
+    else:
+        old = source_document()
+        old["pages"][0]["layoutBlocks"][0]["evidenceBindingVersion"] = 1
+        old["pages"][0]["layoutBlocks"][0]["rows"][0].update(claimIds=["capacity"], sourceIds=["source"])
+        old = project_document(compile_identities(old), {"pages": {}})
+        new = next_source(old)
+        owner = DocumentationSceneRepository(tmp_path, KIND)
+        write_text(owner, old)
+        refresh_repo(owner, new)
+        key, kind, path = compiled_target(old, "table.r0.c1"), KIND, owner._scene_path(NUMBER)
+    def state():
+        stored = owner.read() if slots else load(owner, new)["scene"]
+        return {**stored, "scene": stored, "documentId": document_id(kind, NUMBER), "revision": stored["editRevision"]}
+    def projected():
+        current = state()
+        if slots:
+            from ai_inspector.specification_sheet.slots import resolve as slot_values
+            from ai_inspector.documentation.provenance import project_slots
+            document = deepcopy(new)
+            document["slots"] = slot_values({slot: value["default"] | {"claimIds": value.get("claimIds", [])}
+                                            for slot, value in new["slots"].items()}, current["values"], new["slots"])
+            return project_slots(document, current)
+        document, view = bind_document(new, current)
+        return project_document(document, view)
+    def resolve_request(arguments):
+        current, document = state(), projected()
+        targets = text_targets(current, document)
+        hashes = {k: content_hash(current, k, v) for k, v in hash_values(targets).items()}
+        if slots:
+            return owner.resolve_conflicts(arguments, targets=targets, hashes=hashes)
+        return owner.resolve_conflicts(NUMBER, new["sourceRevision"], PLAN, arguments=arguments,
+            targets=targets, hashes=hashes, identity_document=new)
+    def undo(change, request_id="resolution-undo"):
+        options = {"change_id": change, "expected_revision": state()["revision"], "request_id": request_id, "actor": "user"}
+        return owner.undo_change(**options) if slots else owner.undo_change(NUMBER, new["sourceRevision"], PLAN,
+            identity_document=new, **options)
+    def history(direction):
+        if slots:
+            return owner.move_history(expected_revision=state()["revision"], direction=direction)
+        return owner.move_history(NUMBER, new["sourceRevision"], PLAN,
+            base_revision=load(owner, new)["revision"], direction=direction, identity_document=new)
+    return SimpleNamespace(owner=owner, state=state, projected=projected, resolve=resolve_request, undo=undo,
+        history=history, path=path, key=key, kind=kind, old=old, new=new, slots=slots)
+
+
+def resolution_request(case, choice="keep_manual", *, request_id="resolve-test", **extra):
+    state = case.state()
+    item = exposure(state)["conflicts"][0]
+    return {"documentId": state["documentId"], "expectedRevision": state["revision"], "requestId": request_id,
+            "resolutions": [{"conflictId": item["conflictId"], "expectedConflictHash": item["conflictHash"],
+                             "choice": choice, **extra}]}
+
+
+def test_resolution_requires_current_hash(resolution_case):
+    case = resolution_case
+    before = case.path.read_bytes()
+    request = resolution_request(case)
+    request["resolutions"][0]["expectedConflictHash"] = "0" * 64
+    with pytest.raises(DocumentEditError) as error:
+        case.resolve(request)
+    assert error.value.code == "manual_edit_conflict"
+    assert case.path.read_bytes() == before
+    request = resolution_request(case)
+    request["expectedRevision"] -= 1
+    with pytest.raises(DocumentEditError) as error:
+        case.resolve(request)
+    assert error.value.code == "stale_revision" and case.path.read_bytes() == before
+    current = exposure(case.state())["conflicts"][0]
+    assert conflict_hash(current) == current["conflictHash"]
+    assert exposure(case.state())["conflicts"][0]["conflictHash"] == current["conflictHash"]
+
+
+@pytest.mark.parametrize("choice", ["keep_manual", "use_generated", "merge_text"])
+def test_resolution_choices_and_retry(resolution_case, choice):
+    case = resolution_case
+    conflict = deepcopy(exposure(case.state())["conflicts"][0])
+    arguments = resolution_request(case, choice, **({"mergedText": "Merged manual value"} if choice == "merge_text" else {}))
+    result = case.resolve(arguments)
+    current = case.state()
+    assert not exposure(current)["conflicts"]
+    audit = current["resolutionHistory"][-1]
+    assert audit["status"] == "resolved" and audit["resolution"]["choice"] == choice
+    assert audit["resolutionReceipt"] == result["receipt"]
+    assert current["generatedBaseline"][case.key]["payload"] == conflict["N"]["payload"]
+    assert [audit[k] for k in ("B", "C", "N")] == [conflict[k] for k in ("B", "C", "N")]
+    expected = (conflict["N"]["payload"].get("value", conflict["N"]["payload"].get("text")) if choice == "use_generated"
+                else "Merged manual value" if choice == "merge_text" else "Manual value")
+    targets = text_targets(current, case.projected())
+    assert targets[case.key]["text"] == expected
+    meta = targets[case.key]["attributes"]["provenance"]
+    assert meta["origin"] == ("generated" if choice == "use_generated" else "manual")
+    assert meta["evidenceStatus"] == ("source_backed" if choice == "use_generated" else "edited_unverified")
+    assert "confirmation" not in meta
+    raw = case.path.read_bytes()
+    assert case.resolve(arguments)["receipt"] == result["receipt"]
+    assert case.path.read_bytes() == raw
+    reused = deepcopy(arguments)
+    reused["resolutions"][0]["choice"] = "detach"
+    reused["resolutions"][0].pop("mergedText", None)
+    with pytest.raises(DocumentEditError) as error:
+        case.resolve(reused)
+    assert error.value.code == "request_id_reused" and case.path.read_bytes() == raw
+    # Reopen with a fresh owner, not a process catalogue.
+    identity._CATALOGS.clear()
+    reopened = (SlotStore(case.path.parent.parent, NUMBER).read() if case.slots else
+                load(DocumentationSceneRepository(case.path.parent.parent, case.kind), case.new)["scene"])
+    assert reopened["resolutionHistory"] == current["resolutionHistory"]
+    # A later refresh with the same generated payload does not re-raise this conflict.
+    later = {**case.new, "sourceRevision": "source-c"}
+    refreshed, _ = refresh(current, later, refresh_id="after-resolution", actor="user", at="later", slots=case.slots)
+    assert not exposure(refreshed)["conflicts"]
+
+
+@pytest.mark.parametrize("history", [False, True], ids=["named", "history"])
+@pytest.mark.parametrize("choice", ["keep_manual", "use_generated", "merge_text"])
+def test_resolution_undo(resolution_case, history, choice):
+    case = resolution_case
+    before = exposure(case.state())["conflicts"][0]
+    result = case.resolve(resolution_request(case, choice, **({"mergedText": "Merged value"} if choice == "merge_text" else {})))
+    undone = case.history("undo") if history else case.undo(result["receipt"]["changeId"])
+    restored = exposure(case.state())["conflicts"][0]
+    assert restored == before
+    assert not case.state().get("resolutionHistory")
+    if history:
+        case.history("redo")
+    else:
+        case.undo(undone["receipt"]["changeId"], "resolution-redo")
+    assert not exposure(case.state())["conflicts"]
+    assert case.state()["resolutionHistory"][-1]["resolution"]["choice"] == choice
+
+
+def test_resolution_batch_failure_is_atomic(resolution_case):
+    case = resolution_case
+    request = resolution_request(case)
+    request["resolutions"].append({"conflictId": "missing", "expectedConflictHash": "0" * 64, "choice": "keep_manual"})
+    raw = case.path.read_bytes()
+    with pytest.raises(DocumentEditError):
+        case.resolve(request)
+    assert case.path.read_bytes() == raw
+
+
+def test_merge_requires_text(resolution_case):
+    with pytest.raises(DocumentEditError) as error:
+        resolution_case.resolve(resolution_request(resolution_case, "merge_text"))
+    assert error.value.code == "invalid_document_operation"
+
+
+@pytest.mark.parametrize("scoped", [False, True])
+@pytest.mark.parametrize("baseline", [None, "B"])
+def test_equal_generated_value_keeps_manual_status_without_baseline(scoped, baseline):
+    assert three_way(generated(baseline) if baseline else None, {"text": "N"}, generated("N"),
+                     revision_scoped=scoped) == "kept"
+
+
+def test_evidence_only_refresh_preserves_current_and_advances_baseline(tmp_path):
+    doc = source_document()
+    row = doc["pages"][0]["layoutBlocks"][0]["rows"][0]
+    row.update(claimIds=["old-claim"], sourceIds=["old-source"])
+    repo = DocumentationSceneRepository(tmp_path, KIND)
+    old = write_text(repo, doc)
+    key = compiled_target(doc, "table.r0.c1")
+    new = next_source(doc, "100")
+    new["pages"][0]["layoutBlocks"][0]["rows"][1].update(claimIds=["new-claim"], sourceIds=["new-source"])
+    current = refresh_repo(repo, new)
+    assert not current["conflicts"]
+    assert current["scene"]["pages"][PAGE]["pageElementOverrides"][key] == old["scene"]["pages"][PAGE]["pageElementOverrides"][key]
+    assert current["scene"]["generatedBaseline"][key]["evidence"]["claimIds"] == ["new-claim"]
+
+
+@pytest.mark.parametrize("slots", [False, True])
+@pytest.mark.parametrize("choice", ["detach", "restore"])
+def test_orphan_resolution_and_undo(tmp_path, slots, choice):
+    if slots:
+        old = slot_document()
+        new = slot_document("Caption", "source-b")
+        new["slots"] = {"caption": {"value": "Caption", "source": "layout", "default": {"value": "Caption", "source": "layout"}}}
+        new["pages"][0]["layoutBlocks"] = [{"blockId": "caption", "blockType": "paragraph", "slot": "caption", "text": "Caption"}]
+        owner = SlotStore(tmp_path, NUMBER)
+        owner.identity_document, owner.binding = old, {"sourceRevision": SOURCE, "manualPlanRevision": PLAN}
+        owner.set_values([{"slot": "title", "value": "Orphaned value"}], "workspace")
+        owner.refresh(new, expected_revision=owner.read()["editRevision"])
+        owner.identity_document, owner.binding = new, {"sourceRevision": "source-b", "manualPlanRevision": PLAN}
+        state, destination, kind = owner.read(), "slot:caption", "product_specification_sheet"
+    else:
+        old = source_document()
+        owner = DocumentationSceneRepository(tmp_path, KIND)
+        write_text(owner, old, text="Orphaned value")
+        new = next_source(old)
+        new["pages"][0]["layoutBlocks"][0]["rows"] = new["pages"][0]["layoutBlocks"][0]["rows"][:1]
+        state = refresh_repo(owner, new)["scene"]
+        destination, kind = compiled_target(new, "table.r0.c1"), KIND
+    orphan = exposure(state)["orphans"][0]
+    body = {"documentId": document_id(kind, NUMBER), "expectedRevision": state["editRevision"], "requestId": "orphan-resolution",
+        "resolutions": [{"conflictId": orphan["orphanId"], "expectedConflictHash": orphan["conflictHash"], "choice": choice,
+                         **({"targetId": destination, "expectedContentHash": "observed"} if choice == "restore" else {})}]}
+    targets = text_targets({"documentId": body["documentId"], "scene": state}, new)
+    def submit(arguments):
+        if slots:
+            return owner.resolve_conflicts(arguments, targets=targets, hashes={destination: "observed"})
+        return owner.resolve_conflicts(NUMBER, new["sourceRevision"], PLAN, arguments=arguments,
+            targets=targets, hashes={destination: "observed"}, identity_document=new)
+    path = owner.path if slots else owner._scene_path(NUMBER)
+    raw = path.read_bytes()
+    if choice == "restore":
+        stale = deepcopy(body)
+        stale["resolutions"][0]["expectedContentHash"] = "stale"
+        with pytest.raises(DocumentEditError) as error:
+            submit(stale)
+        assert error.value.code == "content_hash_mismatch" and path.read_bytes() == raw
+        if not slots:
+            wrong = deepcopy(body)
+            wrong["resolutions"][0].update(targetId=compiled_target(new, "steps.i0"), expectedContentHash="different-kind")
+            with pytest.raises(DocumentEditError) as error:
+                owner.resolve_conflicts(NUMBER, new["sourceRevision"], PLAN, arguments=wrong,
+                    targets=targets, hashes={wrong["resolutions"][0]["targetId"]: "different-kind"}, identity_document=new)
+            assert error.value.code == "invalid_document_operation" and path.read_bytes() == raw
+    result = submit(body)
+    current = owner.read() if slots else load(owner, new)["scene"]
+    assert not current["orphans"]
+    assert current["resolutionHistory"][-1]["status"] == ("restored" if choice == "restore" else "detached")
+    if choice == "restore":
+        assert (current["values"]["caption"]["value"] if slots else current["pages"][PAGE]["pageElementOverrides"][destination]["text"]) == "Orphaned value"
+    options = dict(change_id=result["receipt"]["changeId"], expected_revision=current["editRevision"], request_id="undo-orphan", actor="user")
+    if slots:
+        owner.undo_change(**options)
+        restored = owner.read()
+    else:
+        restored = owner.undo_change(NUMBER, new["sourceRevision"], PLAN, identity_document=new, **options)["scene"]
+    assert exposure(restored)["orphans"] == [orphan]
+
+
+@pytest.mark.parametrize("choice", ["keep_manual", "use_generated", "merge_text"])
+def test_parts_resolution_route_and_sage_agree_on_twin_store(mmle_client, monkeypatch, choice):
+    import asyncio
+    import server
+    from ai_inspector.codex_runtime.documentation_tools import DocumentationGateway
+    _parts_route_conflict(mmle_client, monkeypatch)
+    kind = "illustrated_parts_manual"
+    url = "/api/documentation/" + kind + "/MMLE-50D/conflicts"
+    review = mmle_client.get(url).json()
+    assert review["success"] and review["openConflictCount"] == 1
+    conflict = review["conflicts"][0]
+    body = {"documentId": review["documentId"], "expectedRevision": conflict["revision"], "requestId": "route-resolution",
+            "resolutions": [{"conflictId": conflict["conflictId"], "expectedConflictHash": conflict["conflictHash"], "choice": choice,
+                             **({"mergedText": "Merged service description"} if choice == "merge_text" else {})}]}
+    path = server._DocumentationAgentHost()._edit_repository(kind)._scene_path("MMLE-50D")
+    original = path.read_bytes()
+    response = mmle_client.post(url + "/resolve", json=body)
+    assert response.status_code == 200, response.text
+    result = response.json()
+    first = json.loads(path.read_bytes())
+    assert result["reload"] and not result["openConflictCount"]
+    assert first["resolutionHistory"][-1]["resolution"]["actor"] == "user"
+    saved = path.read_bytes()
+    assert mmle_client.post(url + "/resolve", json=body).json()["receipt"] == result["receipt"]
+    assert path.read_bytes() == saved
+    # The twin starts from exactly the same isolated store, with a new gateway and cleared catalogue.
+    path.write_bytes(original)
+    identity._CATALOGS.clear()
+    gateway = DocumentationGateway(server._DocumentationAgentHost(),
+        SimpleNamespace(tenant_id="test", principal_id="sage-test", roles=(), allowed_site_ids=()),
+        {"assemblyNumber": "MMLE-50D", "documentType": kind}, turn_id="conflict-resolution", user_message="Resolve this description: " + choice)
+    def call(name, arguments):
+        payload = asyncio.run(gateway.call(name, arguments))
+        assert payload["ok"], payload
+        return payload["data"]
+    call("read_document_pages", {"documentType": kind, "targets": [{"targetId": conflict["targetId"]}]})
+    seen = call("read_document_conflicts", {"documentId": review["documentId"]})
+    assert seen["conflicts"][0]["conflictHash"] == conflict["conflictHash"]
+    call("resolve_document_conflicts", body)
+    second = json.loads(path.read_bytes())
+    assert second["resolutionHistory"][-1]["resolution"]["actor"] == "sage"
+    assert second["pages"] == first["pages"] and second["generatedBaseline"] == first["generatedBaseline"]
+    assert second["conflicts"] == first["conflicts"] == []
+    for side in ("B", "C", "N"):
+        assert second["resolutionHistory"][-1][side] == first["resolutionHistory"][-1][side]
+    identity._CATALOGS.clear()
+    reopened = mmle_client.get(url).json()
+    assert reopened["openConflictCount"] == 0 and reopened["resolutionHistory"][-1]["status"] == "resolved"
+    assert json.loads(path.read_bytes()) == second
+
+
+@pytest.mark.parametrize("choice", ["keep_manual", "use_generated", "merge_text"])
+def test_native_specification_resolution_route(mmle_client, monkeypatch, choice):
+    import server
+    test_real_specification_slot_refresh_and_sage_batch_refusal(mmle_client, monkeypatch)
+    kind = "product_specification_sheet"
+    url = "/api/documentation/" + kind + "/MMLE-50D/conflicts"
+    review = mmle_client.get(url).json()
+    conflict = next(c for c in review["conflicts"] if c["targetId"] == "slot:feature.1.text")
+    assert conflict["owner"] == "slots"
+    arguments = {"documentId": review["documentId"], "expectedRevision": conflict["revision"], "requestId": "slot-route-resolve",
+        "resolutions": [{"conflictId": conflict["conflictId"], "expectedConflictHash": conflict["conflictHash"], "choice": choice,
+                         **({"mergedText": "Merged feature"} if choice == "merge_text" else {})}]}
+    result = mmle_client.post(url + "/resolve", json=arguments)
+    assert result.status_code == 200, result.text
+    snapshot = server._DocumentationAgentHost().document_snapshot("MMLE-50D", kind)
+    expected = "Manual feature value" if choice == "keep_manual" else "New generated feature value" if choice == "use_generated" else "Merged feature"
+    assert snapshot["document"]["slots"]["feature.1.text"]["value"] == expected
+    assert snapshot["state"]["openConflictCount"] == 0
+    undo = mmle_client.post("/api/specification-sheet/MMLE-50D/slots/undo", json={
+        "expectedRevision": snapshot["state"]["revision"], "sourceRevision": snapshot["state"]["sourceRevision"],
+        "manualPlanRevision": snapshot["state"]["manualPlanRevision"]})
+    assert undo.status_code == 200, undo.text
+    assert mmle_client.get(url).json()["openConflictCount"] == 1
+
+
+def _spread_balloons(valid_balloon, items):
+    """The parts fixture stacks balloons in one column over y 0.20-0.80, which overlaps above 13 callouts
+    (MMLE pages carry up to 16). Shift each balloon's geometry as one piece onto y 0.08-0.92."""
+    balloons = []
+    for index, item in enumerate(items):
+        balloon = valid_balloon(item, index, len(items))
+        assert not balloon["branches"]
+        dy = (0.08 + index * 0.84 / (len(items) - 1) if len(items) > 1 else 0.50) - balloon["balloon"]["y"]
+        seen = set()
+        def shift(node, keys):
+            if id(node) not in seen:
+                seen.add(id(node))
+                for key in keys:
+                    node[key] += dy
+        for point in (balloon["target"], balloon["balloon"], *balloon["leaderPath"],
+                      *(anchor["target"] for anchor in balloon["anchors"])):
+            shift(point, ("y",))
+        for bounds in (balloon["targetBounds"], *(anchor["targetBounds"] for anchor in balloon["anchors"]),
+                       *(region["bounds"] for region in balloon["projectedRegions"])):
+            shift(bounds, ("top", "bottom"))
+        balloons.append(balloon)
+    return balloons
+
+
+@pytest.mark.parametrize("kind,route", MMLE_ROUTES)
+def test_conflict_review_export_and_customer_blocking(mmle_client, tmp_path, kind, route):
+    import fitz
+    import server
+    from ai_inspector.documentation.conflict_exports import project_review, CONFLICT_MARKER
+    from ai_inspector.documentation.provenance import check_export
+    from ai_inspector.operations_manual.artifacts import store_draft_render_artifact, attach_draft_render_artifacts
+    from ai_inspector.operations_manual.exports import build_prototype_pdf_bytes, build_prototype_docx_bytes
+    from tests.test_operations_manual_workspace import _png
+    from tools.documentation_baseline import specification_capture, docx_paragraphs
+    if route == "parts-manual" and not (server.PARTS_MANUAL_ROOT / "mmle-50d" / "manual-plan.json").is_file():
+        pytest.skip("needs the local approved MMLE manual plan")
+    snapshot = server._DocumentationAgentHost().document_snapshot("MMLE-50D", kind)
+    document = snapshot["document"]
+    key = next(k for k in snapshot["targets"] if (k.endswith(".description") if route == "parts-manual" else
+               k == "slot:title" if route == "specification-sheet" else True))
+    target = snapshot["targets"][key]
+    conflict = {"conflictId": "c-export", "targetId": key, "pageId": target["pageId"], "alias": target["alias"], "status": "open"}
+    annotated = project_review(document, {"conflicts": [conflict], "orphans": [{"orphanId": "o-export"}]})
+    for mode in ("customer", "controlled"):
+        with pytest.raises(DocumentEditError) as error:
+            check_export(annotated, mode)
+        assert error.value.code == "manual_edit_conflict" and error.value.details["conflictIds"] == ["c-export"]
+    # No-conflict projection is an identity operation: existing export text stays unchanged.
+    assert project_review(document, {}) is document
+    check_export(project_review(document, {"orphans": [{"orphanId": "o-only"}]}), "customer")
+    root = tmp_path / "export"
+    if route == "parts-manual":
+        from ai_inspector.parts_manual.artifacts import store_render_artifact, attach_render_artifacts
+        from ai_inspector.parts_manual.pdf import build_manual_pdf_bytes
+        from tests.test_parts_manual import _png as _parts_png, _valid_balloon
+        for page in annotated["pages"]:
+            if page.get("renderRequest"):
+                items = page["renderRequest"].get("calloutItems", [])
+                balloons = _spread_balloons(_valid_balloon, items)
+                # Parts captures must contain visible line geometry (render validation).
+                store_render_artifact(root, "MMLE-50D", annotated, page["pageId"], _parts_png(), balloons=balloons)
+        annotated = attach_render_artifacts(root, "MMLE-50D", annotated)
+        pdf_bytes = build_manual_pdf_bytes(root, "MMLE-50D", annotated)
+        word = None
+    elif route == "specification-sheet":
+        from ai_inspector.specification_sheet.exports import build_specification_pdf_bytes, build_specification_docx_bytes
+        annotated = specification_capture(root, "MMLE-50D", annotated, _png(2200, 2200))
+        pdf_bytes = build_specification_pdf_bytes(annotated, render_root=root, assembly_number="MMLE-50D")
+        word = build_specification_docx_bytes(annotated, render_root=root, assembly_number="MMLE-50D")
+    else:
+        for page in annotated["pages"]:
+            if page.get("renderRequest"):
+                store_draft_render_artifact(root, "MMLE-50D", annotated, page["pageId"], _png(1920, 1080),
+                    source_revision=annotated["sourceRevision"], manual_plan_revision=annotated["manualPlanRevision"], api_route=route)
+        annotated = attach_draft_render_artifacts(root, "MMLE-50D", annotated)
+        pdf_bytes = build_prototype_pdf_bytes(root, "MMLE-50D", annotated)
+        word = build_prototype_docx_bytes(root, "MMLE-50D", annotated)
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as pdf:
+        text = "\n".join(page.get_text() for page in pdf)
+    assert CONFLICT_MARKER in text and "c-export" in text
+    assert "Open manual edit conflicts: 1; unplaced manual content: 1" in text
+    if word is not None:
+        text = "\n".join(docx_paragraphs(word))
+        assert CONFLICT_MARKER in text and "c-export" in text
+        assert "Open manual edit conflicts: 1; unplaced manual content: 1" in text
+
+
+
+def test_p1c2a_conflict_hash_is_derived_without_save(resolution_case):
+    case = resolution_case
+    old = json.loads(case.path.read_bytes())
+    for conflict in old["conflicts"]:
+        conflict.pop("conflictHash", None)
+    old.pop("resolutionHistory", None)
+    raw = (json.dumps(old, indent=2) + "\n").encode("ascii")
+    case.path.write_bytes(raw)
+    before = exposure(case.state())["conflicts"][0]
+    assert before["conflictHash"] == conflict_hash(before)
+    assert case.path.read_bytes() == raw
+    assert exposure(case.state())["conflicts"][0] == before
+    assert case.path.read_bytes() == raw
+
+
+def test_resolution_audit_is_bounded_and_keeps_detached_payloads():
+    from ai_inspector.documentation.resolution import resolve
+    doc = compile_identities(source_document())
+    state = DocumentationSceneRepository.new_scene(NUMBER, SOURCE, PLAN)
+    for index in range(RESOLUTION_HISTORY_LIMIT + 2):
+        payload = {"text": "Orphan " + str(index)}
+        orphan = with_hash({"orphanId": "o-" + str(index), "targetId": "removed-" + str(index),
+                           "C": {"payload": payload, "hash": digest(payload)}, "reason": "target_deleted"})
+        state.setdefault("orphans", []).append(orphan)
+        state, _, _ = resolve(state, doc, [{"conflictId": orphan["orphanId"], "expectedConflictHash": orphan["conflictHash"], "choice": "detach"}],
+            receipt={"requestId": "detach-" + str(index), "changeId": "change-" + str(index)}, actor="user", at="time", targets={}, hashes={})
+    assert len(state["resolutionHistory"]) == RESOLUTION_HISTORY_LIMIT
+    assert state["resolutionHistory"][0]["orphanId"] == "o-2"
+    assert state["resolutionHistory"][-1]["C"]["payload"] == {"text": "Orphan 101"}
+
+
+def test_use_generated_slot_suppresses_old_viewport_fallback(resolution_case):
+    case = resolution_case
+    if not case.slots:
+        return
+    case.resolve(resolution_request(case, "use_generated"))
+    from ai_inspector.specification_sheet.document import _legacy_text_values
+    page = {"layoutBlocks": [{"blockId": "spec-title", "slot": "title"}],
+            "documentationComposition": {"pageElementOverrides": {"spec-title": {"text": "Old viewport text"}}},
+            "renderRequest": {"composition": {}}}
+    assert _legacy_text_values(page, case.state()["values"]) == {}
+    assert case.projected()["slots"]["title"]["value"] == "New generated title"
+    assert case.projected()["slots"]["title"]["provenance"]["origin"] == "generated"
+
+
+def test_later_proposal_invalidates_resolution_hash(resolution_case):
+    case = resolution_case
+    request = resolution_request(case)
+    if case.slots:
+        later = slot_document("Later generated title", "source-c")
+        case.owner.refresh(later, expected_revision=case.state()["revision"])
+        case.owner.identity_document, case.owner.binding = later, {"sourceRevision": "source-c", "manualPlanRevision": PLAN}
+        state = case.owner.read()
+        targets = text_targets({"scene": state, "documentId": request["documentId"]}, later)
+        request["expectedRevision"] = state["editRevision"]
+        raw = case.path.read_bytes()
+        with pytest.raises(DocumentEditError) as error:
+            case.owner.resolve_conflicts(request, targets=targets, hashes={})
+    else:
+        later = next_source(case.old, "300")
+        later["sourceRevision"] = "source-c"
+        refreshed = refresh_repo(case.owner, later)
+        request["expectedRevision"] = refreshed["scene"]["editRevision"]
+        raw = case.path.read_bytes()
+        with pytest.raises(DocumentEditError) as error:
+            case.owner.resolve_conflicts(NUMBER, "source-c", PLAN, arguments=request, targets={}, hashes={}, identity_document=later)
+    assert error.value.code == "manual_edit_conflict" and case.path.read_bytes() == raw
+
+
+
+def test_named_resolution_undo_preserves_another_resolution(tmp_path):
+    repo = DocumentationSceneRepository(tmp_path, KIND)
+    old = source_document()
+    write_text(repo, old)
+    write_text(repo, old, alias="steps.i0", text="Manual action")
+    new = next_source(old)
+    new["pages"][0]["layoutBlocks"][1]["items"][0]["text"] = "New action"
+    refreshed = refresh_repo(repo, new)
+    conflicts = refreshed["conflicts"]
+    assert len(conflicts) == 2
+    receipts = []
+    for index, conflict in enumerate(conflicts):
+        state, document, targets = snapshot(repo, new)
+        body = {"documentId": state["documentId"], "expectedRevision": state["revision"], "requestId": "resolve-" + str(index),
+                "resolutions": [{"conflictId": conflict["conflictId"], "expectedConflictHash": conflict["conflictHash"], "choice": "keep_manual"}]}
+        result = repo.resolve_conflicts(NUMBER, new["sourceRevision"], PLAN, arguments=body,
+                                       targets=targets, hashes={}, identity_document=new)
+        receipts.append(result["receipt"])
+    repo.undo_change(NUMBER, new["sourceRevision"], PLAN, change_id=receipts[0]["changeId"],
+        expected_revision=load(repo, new)["scene"]["editRevision"], request_id="undo-first-resolution", identity_document=new)
+    current = load(repo, new)
+    assert [c["conflictId"] for c in current["conflicts"]] == [conflicts[0]["conflictId"]]
+    assert [c["conflictId"] for c in current["resolutionHistory"]] == [conflicts[1]["conflictId"]]
+
+
+def test_detach_deleted_conflict_closes_linked_blocker_and_undo_reopens(tmp_path):
+    repo = DocumentationSceneRepository(tmp_path, KIND)
+    old = source_document()
+    write_text(repo, old)
+    new = next_source(old)
+    refresh_repo(repo, new)
+    deleted = deepcopy(new)
+    deleted["sourceRevision"] = "source-c"
+    deleted["pages"][0]["layoutBlocks"][0]["rows"] = deleted["pages"][0]["layoutBlocks"][0]["rows"][:1]
+    current = refresh_repo(repo, deleted)
+    orphan = current["orphans"][0]
+    assert orphan["relatedConflicts"]
+    body = {"documentId": document_id(KIND, NUMBER), "expectedRevision": current["scene"]["editRevision"], "requestId": "detach-deleted",
+            "resolutions": [{"conflictId": orphan["orphanId"], "expectedConflictHash": orphan["conflictHash"], "choice": "detach"}]}
+    result = repo.resolve_conflicts(NUMBER, "source-c", PLAN, arguments=body, targets={}, hashes={}, identity_document=deleted)
+    assert not result["conflicts"] and not result["orphans"] and len(result["resolutionHistory"]) == 2
+    undone = repo.undo_change(NUMBER, "source-c", PLAN, change_id=result["receipt"]["changeId"],
+        expected_revision=result["scene"]["editRevision"], request_id="undo-deleted-detach", identity_document=deleted)
+    assert undone["conflicts"] == current["conflicts"] and undone["orphans"] == current["orphans"]

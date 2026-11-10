@@ -86,7 +86,8 @@ def main():
             return JSONResponse(status_code=403, content={"error": "loopback only"})
         data = await request.json()
         if data.get("name") not in {"read_document_pages", "edit_document_text", "apply_document_edits",
-                                    "propose_document_value_confirmation", "inspect_document_change", "undo_document_change"}:
+                                    "propose_document_value_confirmation", "inspect_document_change", "undo_document_change",
+                                    "read_document_conflicts", "resolve_document_conflicts"}:
             return JSONResponse(status_code=403, content={"error": "proof tool denied"})
         return await gateway.call(data["name"], data.get("arguments") or {})
 

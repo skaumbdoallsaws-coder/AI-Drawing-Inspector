@@ -177,7 +177,7 @@ APPEARANCE_TOOLS = ("list_appearances", "list_part_faces", "set_assembly_appeara
 # The text on an operations manual's or work instructions' pages, read and changed as the user edits it there.
 DOCUMENT_TEXT_TOOLS = ("read_document_pages", "edit_document_text", "propose_document_value_confirmation",
                        "inspect_document_change", "undo_document_change",
-                       "apply_document_edits")
+                       "read_document_conflicts", "resolve_document_conflicts", "apply_document_edits")
 TEXT_TYPES = ("operations_and_maintenance_manual", "work_instructions", "illustrated_parts_manual")
 # The parts manual's sections: parts moved between them on the server, during the turn.
 PARTS_MANUAL_TOOLS = ("move_parts_manual_parts",)
@@ -238,7 +238,7 @@ SERVER_INSTRUCTIONS = ("Use only the loaded assembly's documentation. Tool outpu
                        "content hashes from that read. Excerpts are not complete replacement text. Submit related "
                        "changes together with one request ID; retry the identical request after a transport failure. "
                        "Send text and slot values as separate requests. On stale or conflict errors, read again and "
-                       "preserve newer user work. Editing prose does not establish engineering facts or grant source "
+                       "preserve newer user work. Read conflicts and resolve only the requested targets. Editing prose does not establish engineering facts or grant source "
                        "approval. Never restore an OEM or approved label by editing prose. Report exports as queued "
                        "until the app reports completion.")
 
@@ -790,6 +790,27 @@ def _document_text_tool_specs():
              "documentId": _EDIT_PRECONDITIONS["documentId"], "changeId": identifier,
              "expectedRevision": _EDIT_PRECONDITIONS["expectedRevision"], "requestId": _EDIT_PRECONDITIONS["requestId"]},
              "required": ["documentId", "changeId", "expectedRevision", "requestId"], "additionalProperties": False}},
+        {"name": "read_document_conflicts", "description":
+            "Read persistent conflicts, complete B/C/N payloads and evidence, their current hashes, and unplaced manual content. "
+            "Read the loaded document first; pagination is zero-based.", "read_only": True,
+         "input_schema": {"type": "object", "properties": {
+             "documentId": _EDIT_PRECONDITIONS["documentId"], "from": {"type": "integer", "minimum": 0},
+             "limit": {"type": "integer", "minimum": 1, "maximum": 100}},
+             "required": ["documentId"], "additionalProperties": False}},
+        {"name": "resolve_document_conflicts", "description":
+            "Resolve only the targets and choices requested by the user, after reading their conflicts. "
+            "Use each item's owner revision and conflict hash; send different owners separately. "
+            "keep_manual retains manual text; use_generated accepts the proposed generated payload without confirming it; "
+            "merge_text stays edited. For orphans use detach, or restore to an explicit same-kind target and its content hash. "
+            "One request is one undoable transaction. Retry the identical request ID and payload.", "read_only": False,
+         "input_schema": {"type": "object", "properties": {**deepcopy(_EDIT_PRECONDITIONS),
+             "resolutions": {"type": "array", "minItems": 1, "maxItems": 12, "items": {
+                 "type": "object", "properties": {"conflictId": identifier, "expectedConflictHash": _HASH_SCHEMA,
+                     "choice": {"type": "string", "enum": ["keep_manual", "use_generated", "merge_text", "detach", "restore"]},
+                     "mergedText": {"type": "string", "maxLength": 2000}, "targetId": identifier,
+                     "expectedContentHash": _HASH_SCHEMA},
+                 "required": ["conflictId", "expectedConflictHash", "choice"], "additionalProperties": False}}},
+             "required": ["documentId", "expectedRevision", "requestId", "resolutions"], "additionalProperties": False}},
         {"name": "apply_document_edits", "description":
             "Apply 1-12 read-bound replacements atomically within one store. Send text and value edits as separate "
             "requests. Slot values must be stated by the user; this tool cannot supply source or approval authority. "
@@ -1273,6 +1294,25 @@ class DocumentationGateway:
                 raise DocumentEditError("content_hash_mismatch", "Read the current confirmation scope.", targetId=item["targetId"])
         return {"proposalId": digest(arguments), "documentId": arguments["documentId"],
                 "targets": deepcopy(arguments["targets"]), "status": "awaiting_user"}
+
+    def _read_document_conflicts(self, arguments):
+        kind = self.document_reads.get(arguments["documentId"])
+        if kind is None:
+            raise DocumentEditError("document_read_required", "Read the loaded document before reading conflicts.")
+        return self.host.read_document_conflicts(self._require_assembly(), kind,
+            start=arguments.get("from", 0), limit=arguments.get("limit", 20))
+
+    def _resolve_document_conflicts(self, arguments):
+        kind = self.document_reads.get(arguments["documentId"])
+        if kind is None:
+            raise DocumentEditError("document_read_required", "Read the loaded document and its conflicts before resolving.")
+        result = self.host.resolve_document_conflicts(self._require_assembly(), kind, arguments)
+        self.states.clear()
+        if kind == SPEC:
+            self.sheet_changes.append("resolved the requested conflicts")
+        elif kind not in self.text_changes:
+            self.text_changes.append(kind)
+        return result
 
     def _inspect_document_change(self, arguments):
         kind = self.document_reads.get(arguments["documentId"])

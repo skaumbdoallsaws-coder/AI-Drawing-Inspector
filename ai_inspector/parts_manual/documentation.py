@@ -1321,12 +1321,12 @@ def validate_documentation_scene(scene: Mapping[str, Any]) -> None:
         raise DocumentationSceneError("documentation history cursor is invalid")
     for entry in commands:
         if isinstance(entry, Mapping) and "change" in entry:
-            validate_record(entry["change"], {"pages", "fieldMeta", "theme", "pageMasters"})
+            validate_record(entry["change"], {"pages", "fieldMeta", "theme", "pageMasters", "conflicts", "orphans", "generatedBaseline", "resolutionHistory"})
     for command in _leaf_commands(commands):
         if not isinstance(command, Mapping):
             raise DocumentationSceneError("documentation command must be an object")
         if command.get("operation") == "restore_change":
-            validate_record(command.get("change"), {"pages", "fieldMeta", "theme", "pageMasters"})
+            validate_record(command.get("change"), {"pages", "fieldMeta", "theme", "pageMasters", "conflicts", "orphans", "generatedBaseline", "resolutionHistory"})
             continue
         if command.get("operation") not in DOCUMENTATION_COMMAND_OPERATIONS:
             raise DocumentationSceneError("unsupported documentation command")
@@ -1949,6 +1949,48 @@ class DocumentationSceneRepository:
             self._save(assembly_number, candidate)
             return {**self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document),
                     "receipt": receipt, "changed": changed}
+
+    def resolve_conflicts(self, assembly_number, source_revision, manual_plan_revision, *,
+                          arguments, targets, hashes, actor="user", identity_document=None):
+        from ai_inspector.documentation.resolution import validate_request, resolve, resolution_paths
+        validate_request(arguments)
+        if arguments["documentId"] != document_id(self.document_type, assembly_number):
+            raise DocumentEditError("document_binding_changed", "This resolution belongs to another document.")
+        payload_hash = request_hash(arguments["requestId"], {"resolution": arguments, "actor": actor})
+        with _WRITE_LOCK:
+            loaded = self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document)
+            scene = loaded["scene"]
+            self._assert_binding(scene, source_revision, manual_plan_revision)
+            prior = prior_receipt(scene, arguments["requestId"], payload_hash)
+            if prior is not None:
+                return {**loaded, "receipt": prior}
+            if type(arguments["expectedRevision"]) is not int or arguments["expectedRevision"] != scene["editRevision"]:
+                raise DocumentEditError("stale_revision", "Read the current conflicts before resolving.")
+            ids = [item["conflictId"] for item in arguments["resolutions"]]
+            receipt = make_receipt(scene, request_id=arguments["requestId"], payload_hash=payload_hash,
+                document=arguments["documentId"], expected_revision=arguments["expectedRevision"], changed=ids, undoable=True)
+            candidate, changed, adopted = resolve(scene, identity_document, arguments["resolutions"],
+                receipt=receipt, actor=actor, at=_utc_now(), targets=targets, hashes=hashes)
+            # Audit entries retain exactly the same receipt as an idempotent retry.
+            receipt["changedIds"] = changed
+            ids.extend(c["conflictId"] for c in refresh_exposure(scene)["conflicts"]
+                       if c.get("conflictId") and not any(after.get("conflictId") == c["conflictId"] for after in candidate["conflicts"])
+                       and c["conflictId"] not in ids)
+            for audit in candidate["resolutionHistory"]:
+                if audit["resolutionReceipt"]["requestId"] == receipt["requestId"]:
+                    audit["resolutionReceipt"] = copy.deepcopy(receipt)
+            item = change_record(scene, candidate, scene_paths(scene, candidate, []) | resolution_paths(scene, candidate),
+                change_id=receipt["changeId"], actor=actor, created_at=_utc_now(), version_keys=changed)
+            item["resolutionIds"] = ids
+            entry = {"operation": "restore_change", "actor": actor, "change": item, "adoptedTargets": adopted}
+            candidate["commands"] = scene["commands"][:scene["historyCursor"]] + [entry]
+            candidate["historyCursor"] = len(candidate["commands"])
+            _advance_edit_versions(candidate, [entry])
+            candidate["updatedAt"] = _utc_now()
+            retain_receipt(candidate, receipt)
+            candidate = _upgrade_documentation_scene(candidate)
+            self._save(assembly_number, candidate)
+            return {**self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document), "receipt": receipt}
 
     def inspect_change(self, assembly_number, source_revision, manual_plan_revision, change_id, *, identity_document=None):
         with _WRITE_LOCK:

@@ -16433,7 +16433,8 @@ def _specification_sheet_build_document_with_scene(
     slot_exposure = documentation_refresh_exposure(slot_state)
     loaded_scene.update(openConflictCount=scene_exposure["openConflictCount"] + slot_exposure["openConflictCount"],
         conflicts=scene_exposure["conflicts"] + slot_exposure["conflicts"],
-        orphans=scene_exposure["orphans"] + slot_exposure["orphans"])
+        orphans=scene_exposure["orphans"] + slot_exposure["orphans"],
+        resolutionHistory=scene_exposure["resolutionHistory"] + slot_exposure["resolutionHistory"])
     snapshot = _documentation_snapshot_payload({**loaded_scene, "document": document}, "product_specification_sheet",
                                                 identity_document=baseline)
     from ai_inspector.documentation.changes import history_choices
@@ -18671,6 +18672,29 @@ def specification_slot_history(assembly_number: str, direction: str, body: Dict[
         return _documentation_value_error(error)
 
 
+@app.get("/api/documentation/{document_type}/{assembly_number}/conflicts")
+def documentation_conflicts_get(document_type: str, assembly_number: str,
+                                start: int = Query(0, alias="from", ge=0), limit: int = Query(20, ge=1, le=100)):
+    try:
+        if document_type not in _DocumentationAgentHost._TEXT_ROUTES:
+            raise DocumentEditError("invalid_document_operation", "This document has no conflict review capability.")
+        return {"success": True, **_DocumentationAgentHost().read_document_conflicts(
+            assembly_number, document_type, start=start, limit=limit)}
+    except DocumentEditError as error:
+        return _documentation_value_error(error)
+
+
+@app.post("/api/documentation/{document_type}/{assembly_number}/conflicts/resolve")
+def documentation_conflicts_resolve(document_type: str, assembly_number: str, body: Dict[str, Any]):
+    try:
+        if document_type not in _DocumentationAgentHost._TEXT_ROUTES:
+            raise DocumentEditError("invalid_document_operation", "This document has no conflict review capability.")
+        return {"success": True, **_DocumentationAgentHost().resolve_document_conflicts(
+            assembly_number, document_type, body, actor="user")}
+    except DocumentEditError as error:
+        return _documentation_value_error(error)
+
+
 @app.get("/api/documentation/{document_type}/{assembly_number}/confirmation-targets")
 def documentation_confirmation_read(document_type: str, assembly_number: str):
     try:
@@ -18839,6 +18863,7 @@ def _documentation_snapshot_payload(payload, document_type, *, identity_document
         scene_review = documentation_refresh_exposure(scene)
         state["conflicts"] += scene_review["conflicts"]
         state["orphans"] += scene_review["orphans"]
+        state["resolutionHistory"] += scene_review["resolutionHistory"]
         state["openConflictCount"] += scene_review["openConflictCount"]
     targets = documentation_text_targets(state, document)
     hashes = {key: documentation_content_hash(state, key, value)
@@ -20352,7 +20377,7 @@ def parts_manual_page_render_get(
 
 
 @app.post("/api/parts-manual/{assembly_number}/pdf")
-def parts_manual_pdf_generate(assembly_number: str, body: PartsManualPdfBody):
+def parts_manual_pdf_generate(assembly_number: str, body: PartsManualPdfBody, mode: str = "review"):
     try:
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
         known_ids = [row["occurrenceId"] for row in catalog["occurrences"]]
@@ -20375,6 +20400,9 @@ def parts_manual_pdf_generate(assembly_number: str, body: PartsManualPdfBody):
             catalog["assemblyNumber"],
             document,
         )
+        documentation_check_export(document, mode)
+        if mode != "review":
+            document = {**document, "exportMode": mode}
         artifact = store_manual_pdf(
             PARTS_MANUAL_ROOT,
             catalog["assemblyNumber"],
@@ -20386,6 +20414,8 @@ def parts_manual_pdf_generate(assembly_number: str, body: PartsManualPdfBody):
         DocumentationSceneError,
     ) as error:
         return _parts_manual_error_response(error, operation="pdf")
+    except DocumentEditError as error:
+        return _documentation_value_error(error)
     except PartsManualPdfError as error:
         return JSONResponse(
             status_code=422,
@@ -41230,12 +41260,92 @@ class _DocumentationAgentHost:
         "work_instructions": "work_instructions_get",
     }
 
+    def read_document_conflicts(self, assembly_number, document_type, *, start=0, limit=20):
+        from ai_inspector.documentation.resolution import conflict_read, restore_catalog
+        with DocumentationSceneRepository.transaction_lock, SpecificationSlotStore.transaction_lock:
+            snapshot = self.document_snapshot(assembly_number, document_type)
+            state = snapshot["state"]
+            result = conflict_read(state, start=start, limit=limit)
+            result["sceneEditRevision"] = state["scene"]["editRevision"]
+            scene_ids = {item.get("conflictId", item.get("orphanId")) for key in ("conflicts", "orphans", "resolutionHistory")
+                         for item in documentation_refresh_exposure(state["scene"])[key]}
+            for key in ("conflicts", "orphans", "resolutionHistory"):
+                for item in result[key]:
+                    scene_owned = item.get("conflictId", item.get("orphanId")) in scene_ids
+                    item["owner"] = "scene" if scene_owned else "slots"
+                    item["revision"] = state["scene"]["editRevision"] if scene_owned else state["revision"]
+            # Full-value page reads already expose text hashes. This list also
+            # supplies explicit same-kind destinations for unplaced figures/objects.
+            owners = [("scene", state["scene"])]
+            if document_type == "product_specification_sheet":
+                owners.append(("slots", SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, assembly_number).read(
+                    identity_document=snapshot["identity_document"], binding_is_current=True)))
+            destinations = []
+            from ai_inspector.documentation.resolution import target_kind
+            for owner_name, owner in owners:
+                generated, _, restore_hashes = restore_catalog(owner, snapshot["identity_document"],
+                    snapshot["targets"], snapshot["hashes"])
+                kinds = {item.get("targetKind") or target_kind(item.get("targetId", ""), (item.get("C") or {}).get("payload"))
+                         for item in owner.get("orphans") or []}
+                destinations.extend({"targetId": key, "pageId": value["pageId"], "label": value["label"],
+                    "kind": value["targetKind"], "contentHash": restore_hashes[key], "owner": owner_name}
+                    for key, value in generated.items() if value["targetKind"] in kinds)
+            result["restoreTargets"] = destinations[start:start + limit]
+            result["totals"]["restoreTargets"] = len(destinations)
+            return result
+
+    def resolve_document_conflicts(self, assembly_number, document_type, arguments, *, actor="sage"):
+        from ai_inspector.documentation.resolution import validate_request
+        validate_request(arguments)
+        with DocumentationSceneRepository.transaction_lock, SpecificationSlotStore.transaction_lock:
+            snapshot = self.document_snapshot(assembly_number, document_type)
+            state = snapshot["state"]
+            if arguments["documentId"] != state["documentId"]:
+                raise DocumentEditError("document_binding_changed", "This resolution belongs to another document.")
+            repository = self._edit_repository(document_type)
+            use_slots = document_type == "product_specification_sheet"
+            if use_slots:
+                slot_store = SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, assembly_number)
+                slot_store.identity_document = snapshot["identity_document"]
+                slot_store.binding = {key: state[key] for key in ("sourceRevision", "manualPlanRevision")}
+                slot_store.other_conflicts = documentation_refresh_exposure(state["scene"])["conflicts"]
+                slot_state = slot_store.read()
+                # Keep owner selection stable for retries and resolved audit records.
+                def owned_ids(owner):
+                    review = documentation_refresh_exposure(owner)
+                    return {item.get("conflictId", item.get("orphanId")) for key in ("conflicts", "orphans", "resolutionHistory")
+                            for item in review[key]}
+                requested = {item["conflictId"] for item in arguments["resolutions"]}
+                scene_ids, slot_ids = owned_ids(state["scene"]), owned_ids(slot_state)
+                if requested & scene_ids and requested & slot_ids:
+                    raise DocumentEditError("invalid_document_operation", "Resolve scene and slot conflicts in separate requests.")
+                use_slots = not bool(requested & scene_ids)
+                if arguments["requestId"] in state["scene"].get("receipts", {}):
+                    use_slots = False
+                elif arguments["requestId"] in slot_state.get("receipts", {}):
+                    use_slots = True
+            if use_slots:
+                result = slot_store.resolve_conflicts(arguments, targets=snapshot["targets"], hashes=snapshot["hashes"], actor=actor)
+            else:
+                result = repository.resolve_conflicts(assembly_number, state["sourceRevision"], state["manualPlanRevision"],
+                    arguments=arguments, targets=snapshot["targets"], hashes=snapshot["hashes"], actor=actor,
+                    identity_document=snapshot["identity_document"])
+            after = self.document_snapshot(assembly_number, document_type)
+            if document_type in {"operations_and_maintenance_manual", "work_instructions"}:
+                carry_draft_render_artifacts(OPERATIONS_MANUAL_ROOT if document_type == "operations_and_maintenance_manual"
+                    else WORK_INSTRUCTION_ROOT, assembly_number, snapshot["document"], after["document"])
+            return {"receipt": result["receipt"], "documentId": state["documentId"],
+                    "revision": after["state"]["revision"], "sceneRevision": after["state"]["sceneRevision"],
+                    **documentation_refresh_exposure(after["state"]), "reload": True}
+
     def inspect_document_change(self, assembly_number, document_type, change_id):
         with DocumentationSceneRepository.transaction_lock, SpecificationSlotStore.transaction_lock:
             snapshot = self.document_snapshot(assembly_number, document_type)
             state = snapshot["state"]
             if document_type == "product_specification_sheet":
-                return SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, assembly_number).inspect_change(change_id)
+                store = SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, assembly_number)
+                if any(item["changeId"] == change_id for item in store.read()["journal"]):
+                    return store.inspect_change(change_id)
             return self._edit_repository(document_type).inspect_change(assembly_number,
                 state["sourceRevision"], state["manualPlanRevision"], change_id, identity_document=snapshot["identity_document"])
 
@@ -41245,8 +41355,11 @@ class _DocumentationAgentHost:
             state, document = snapshot["state"], snapshot["document"]
             options = {"change_id": arguments["changeId"], "expected_revision": arguments["expectedRevision"],
                        "request_id": arguments["requestId"], "actor": "sage"}
-            if document_type == "product_specification_sheet":
-                store = SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, assembly_number)
+            slot_store = SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, assembly_number) if document_type == "product_specification_sheet" else None
+            slot_owned = slot_store is not None and (any(item["changeId"] == arguments["changeId"] for item in slot_store.read()["journal"])
+                or arguments["requestId"] in slot_store.read()["receipts"])
+            if slot_owned:
+                store = slot_store
                 store.other_conflicts = documentation_refresh_exposure(state["scene"])["conflicts"]
                 store.identity_document = snapshot["identity_document"]
                 store.binding = {key: state[key] for key in ("sourceRevision", "manualPlanRevision")}

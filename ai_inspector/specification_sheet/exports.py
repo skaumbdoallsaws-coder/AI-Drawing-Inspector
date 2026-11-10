@@ -25,6 +25,7 @@ from ai_inspector.documentation.form_fields import (
     validate_form_fields,
 )
 from ai_inspector.operations_manual.artifacts import draft_render_path
+from ai_inspector.documentation.conflict_exports import marker as conflict_marker, mark_pdf, mark_docx
 from ai_inspector.documentation.provenance import EDITED_MARKER, EDITED_LEGEND, check_export, export_document
 
 FILLABLE_KEYWORD_PREFIX = "inspectorpro-specification-sheet-fillable"
@@ -234,8 +235,13 @@ def _insert_fitted(page: Any, rect: Any, text: str, *, name: str, fontsize: floa
 
 
 def _edited_slots(document, slots):
-    return [slot for slot in slots if (document.get("slots", {}).get(slot, {}).get("provenance") or {})
-            .get("evidenceStatus") == "edited_unverified"]
+    return [slot for slot in slots if document.get("slots", {}).get(slot, {}).get("manualConflicts")
+            or (document.get("slots", {}).get(slot, {}).get("provenance") or {}).get("evidenceStatus") == "edited_unverified"]
+
+
+def _slot_notice(document, slots):
+    conflicts = [c for slot in slots for c in document.get("slots", {}).get(slot, {}).get("manualConflicts", [])]
+    return conflict_marker({"manualConflicts": conflicts}, EDITED_MARKER)
 
 
 def build_specification_pdf_bytes(
@@ -443,7 +449,7 @@ def _build_specification_pdf(
                 fontsize=7.8 * table_scale, color=text_color, align=align,
             )
         if _edited_slots(document, row_slots):
-            page.insert_text((x, bottom - 1), EDITED_MARKER, fontsize=4.8, color=(0.60, 0.22, 0))
+            page.insert_text((x, bottom - 1), _slot_notice(document, row_slots), fontsize=4.8, color=(0.60, 0.22, 0))
         top = bottom
 
     previous_shown = False
@@ -488,7 +494,7 @@ def _build_specification_pdf(
             block.get("slots") or {}, Mapping) else [block.get("slot")]
         if _edited_slots(document, candidates):
             bounds = rect_of(block, (36, 700, 540, 20))
-            page.insert_text((bounds.x0, bounds.y1 + 5), EDITED_MARKER, fontsize=5, color=(0.60, 0.22, 0))
+            page.insert_text((bounds.x0, bounds.y1 + 5), _slot_notice(document, candidates), fontsize=5, color=(0.60, 0.22, 0))
     if _edited_slots(document, document.get("slots") or {}):
         page.insert_text((36, 746), EDITED_LEGEND, fontsize=5, color=(0.60, 0.22, 0))
 
@@ -525,6 +531,7 @@ def _build_specification_pdf(
             "keywords": keywords,
         }
     )
+    mark_pdf(pdf, document)
     payload = pdf.tobytes(garbage=4, deflate=True)
     pdf.close()
     return payload, fields
@@ -816,7 +823,7 @@ def build_specification_docx_bytes(
         _docx_format_paragraph(cells[0].paragraphs[0], color=text_color, size=7.7, bold=True)
         _docx_format_paragraph(cells[1].paragraphs[0], color=text_color, size=7.7)
         if _edited_slots(document, specification_rows[index].get("slots") or []):
-            note = cells[1].add_paragraph(EDITED_MARKER)
+            note = cells[1].add_paragraph(_slot_notice(document, specification_rows[index].get("slots") or []))
             _docx_format_paragraph(note, color="993900", size=5.5)
 
     def feature_flags(feature: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -866,7 +873,7 @@ def build_specification_docx_bytes(
     marked = _edited_slots(document, document.get("slots") or {})
     if marked:
         names = ", ".join(str(document["slots"][slot].get("name") or slot) for slot in marked)
-        note = output.add_paragraph(names + ": " + EDITED_MARKER + ". " + EDITED_LEGEND)
+        note = output.add_paragraph(names + ": " + _slot_notice(document, marked) + ". " + EDITED_LEGEND)
         _docx_format_paragraph(note, color="993900", size=6)
 
     output.core_properties.title = str(
@@ -878,6 +885,7 @@ def build_specification_docx_bytes(
         f"InspectorPro, {assembly_number}, product specification sheet"
     )
     buffer = io.BytesIO()
+    mark_docx(output, document)
     output.save(buffer)
     return buffer.getvalue()
 

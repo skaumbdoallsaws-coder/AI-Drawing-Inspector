@@ -279,7 +279,7 @@ class SlotStore:
             "updatedAt": payload.get("updatedAt"),
         }
         for key in ("editRevision", "editEpoch", "fieldVersions", "fieldMeta", "receipts", "receiptOrder", "conflicts", "journal", "identities",
-                    "sourceRevision", "manualPlanRevision", "generatedBaseline", "orphans", "refreshReceipts"):
+                    "sourceRevision", "manualPlanRevision", "generatedBaseline", "orphans", "refreshReceipts", "resolutionHistory"):
             if key in payload:
                 result[key] = copy.deepcopy(payload[key])
         transaction_defaults(result)
@@ -287,7 +287,7 @@ class SlotStore:
         if not isinstance(result["journal"], list) or len(result["journal"]) > MAX_CHANGES:
             raise DocumentEditError("unsupported_document_schema", "Invalid slot change history.")
         for item in result["journal"]:
-            validate_record(item, {"values", "fieldMeta", "rows", "type", "units"})
+            validate_record(item, {"values", "fieldMeta", "rows", "type", "units", "conflicts", "orphans", "generatedBaseline", "resolutionHistory"})
         validate_refresh_metadata(result)
         _slot_identities(result)
         baseline = identity_document if identity_document is not None else self.identity_document
@@ -463,7 +463,7 @@ class SlotStore:
                 raise DocumentEditError("stale_revision", "Preview the current reset before executing it.")
             candidate = copy.deepcopy(before)
             candidate.update(values={}, rows=None, type=None, units=None, fieldMeta={}, journal=[],
-                             generatedBaseline={}, conflicts=[], orphans=[], refreshReceipts=[])
+                             generatedBaseline={}, conflicts=[], orphans=[], refreshReceipts=[], resolutionHistory=[])
             candidate["editRevision"] += 1
             candidate["editEpoch"] += 1
             candidate["updatedAt"] = now()
@@ -474,6 +474,59 @@ class SlotStore:
             _write_bytes(backup, self.path.read_bytes() if self.path.is_file() else json.dumps(before).encode("utf-8"))
             self._persist(candidate)
             return {"recoveryId": recovery_id, "store": candidate}
+
+    def _commit_resolution(self, before, candidate, receipt, item):
+        candidate["journal"].append(item)
+        if len(candidate["journal"]) > MAX_CHANGES:
+            raise DocumentEditError("document_history_full", "The slot change history is full.")
+        candidate["editRevision"] = before["editRevision"] + 1
+        candidate["editEpoch"] = before["editEpoch"] + 1
+        candidate["updatedAt"] = now()
+        for key in set(item["versionKeys"]) | {"@sheet"}:
+            candidate["fieldVersions"][key] = before["fieldVersions"].get(key, 0) + 1
+        retain_receipt(candidate, receipt)
+        _slot_identities(candidate)
+        validate_transaction_metadata(candidate)
+        validate_refresh_metadata(candidate)
+        if len(json.dumps(candidate, ensure_ascii=False).encode("utf-8")) > 16 * 1024 * 1024:
+            raise DocumentEditError("document_history_full", "The slot change history exceeds its storage limit.")
+        self._persist(candidate)
+        self.last_receipt = receipt
+        return {"receipt": receipt}
+
+    def resolve_conflicts(self, arguments, *, targets, hashes, actor="user"):
+        from ai_inspector.documentation.resolution import validate_request, resolve, resolution_paths
+        validate_request(arguments)
+        if arguments["documentId"] != document_id("product_specification_sheet", self.assembly_number):
+            raise DocumentEditError("document_binding_changed", "This resolution belongs to another document.")
+        payload_hash = request_hash(arguments["requestId"], {"resolution": arguments, "actor": actor})
+        with _SLOT_LOCK:
+            before = self.read()
+            if refresh_binding(before) != getattr(self, "binding", {}):
+                raise DocumentEditError("document_binding_changed", "Refresh the sheet before resolving.")
+            prior = prior_receipt(before, arguments["requestId"], payload_hash)
+            if prior is not None:
+                self.last_receipt = prior
+                return {"receipt": prior}
+            if type(arguments["expectedRevision"]) is not int or arguments["expectedRevision"] != before["editRevision"]:
+                raise DocumentEditError("stale_revision", "Read the current conflicts before resolving.")
+            ids = [item["conflictId"] for item in arguments["resolutions"]]
+            receipt = make_receipt(before, request_id=arguments["requestId"], payload_hash=payload_hash,
+                document=arguments["documentId"], expected_revision=arguments["expectedRevision"], changed=ids, undoable=True)
+            candidate, changed, _ = resolve(before, self.identity_document, arguments["resolutions"],
+                receipt=receipt, actor=actor, at=now(), targets=targets, hashes=hashes, slots=True)
+            receipt["changedIds"] = changed
+            from ai_inspector.documentation.refresh import exposure
+            ids.extend(c["conflictId"] for c in exposure(before)["conflicts"]
+                       if c.get("conflictId") and not any(after.get("conflictId") == c["conflictId"] for after in candidate["conflicts"])
+                       and c["conflictId"] not in ids)
+            for audit in candidate["resolutionHistory"]:
+                if audit["resolutionReceipt"]["requestId"] == receipt["requestId"]:
+                    audit["resolutionReceipt"] = copy.deepcopy(receipt)
+            item = change_record(before, candidate, slot_paths(before, candidate) | resolution_paths(before, candidate),
+                change_id=receipt["changeId"], actor=actor, created_at=now(), version_keys=changed)
+            item.update(resolutionIds=ids, binding=copy.deepcopy(self.binding))
+            return self._commit_resolution(before, candidate, receipt, item)
 
     def inspect_change(self, change_id):
         with _SLOT_LOCK:
@@ -495,6 +548,15 @@ class SlotStore:
             if chosen.get("binding") and chosen["binding"] != getattr(self, "binding", {}):
                 raise DocumentEditError("undo_conflict", "The sheet's source binding changed.", changeId=change_id)
             item = inverse_change(before, chosen, change_id="pending", actor=actor, created_at=now())
+            if chosen.get("resolutionIds"):
+                receipt = make_receipt(before, request_id=request_id,
+                    payload_hash=request_hash(request_id, {"payload": payload, "actor": actor}),
+                    document=document_id("product_specification_sheet", self.assembly_number),
+                    expected_revision=expected_revision, changed=chosen["versionKeys"], undoable=True)
+                item["changeId"] = receipt["changeId"]
+                candidate = copy.deepcopy(before)
+                restore_change(candidate, item["changes"])
+                return self._commit_resolution(before, candidate, receipt, item)
             def apply(store):
                 candidate = store.read()
                 restore_change(candidate, item["changes"])
@@ -713,7 +775,9 @@ def resolve(defaults: Mapping[str, Mapping[str, Any]], stored: Mapping[str, Mapp
         default = defaults.get(slot) or {}
         entry = stored.get(slot)
         has_default = default.get("value") not in (None, "")
-        if entry and entry.get("value") not in (None, ""):
+        if entry and entry.get("selectedGenerated"):
+            item = {"value": default.get("value"), "source": default.get("source")}
+        elif entry and entry.get("value") not in (None, ""):
             item = {"value": entry["value"], "source": entry["source"], "at": entry.get("at")}
             for field in ("quote", "citation", "accepted", "legacy"):
                 if entry.get(field):

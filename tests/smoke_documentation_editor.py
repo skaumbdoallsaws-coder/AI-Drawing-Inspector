@@ -1297,7 +1297,8 @@ box => {
       i += length;
     }
   }
-  const blocks = [...box.children].filter(child => !child.classList.contains('documentation-resize-handle'));
+  const editing = box.querySelector('.documentation-rich-editor .tiptap');
+  const blocks = [...(editing || box).children].filter(child => !child.classList.contains('documentation-resize-handle'));
   const bottom = Math.max(...blocks.map(child => child.getBoundingClientRect().bottom));
   const highlights = [...box.querySelectorAll('mark')].flatMap(mark => [...mark.getClientRects()].map(r =>
     ({...local(r), color: DocumentationRichTextCore.color(getComputedStyle(mark).backgroundColor)})));
@@ -1646,8 +1647,25 @@ def run_p2b(page, request, server, output, report, record, begin_edit, tool, fre
 
 
 
+def typography_export_check(snapshot, page_id, key, pdf, docx, measured, size, output, stem, record):
+    """One canvas/PDF/DOCX proof, reused for Sage and ribbon-authored typography."""
+    from ai_inspector.documentation.rich_text import plain_text
+    from ai_inspector.documentation.rich_layout import authored_objects, content_model
+    from ai_inspector.parts_manual.pdf import _document_object_style, _document_theme
+    from tests.documentation_rich_export_support import compare_pdf, compare_docx
+    descriptor = next(p for p in snapshot["pages"] if p["pageId"] == page_id)
+    _, obj, value = next(row for row in authored_objects(descriptor) if row[0] == key)
+    model = content_model(value, _document_object_style(_document_theme(snapshot), obj))
+    result = {"pdf": compare_pdf(pdf, snapshot, page_id, key, output / (stem + "-pdf.png")),
+              "docx": compare_docx(docx, key, model),
+              "canvas": canvas_matches_layout(snapshot, page_id, key, stem + "-canvas", measured, record, size, typography=True)}
+    record(stem + "-exports", True)
+    record(stem + "-raw-text", docx_run_text(docx, key) == plain_text(value).replace("\r", " ").replace("\n", ""))
+    return result
+
+
 def run_p3a(page, request, server, output, report, record, begin_edit, tool, fresh_page):
-    """P3a part 1: Sage-authored typography, real canvas geometry and both exports."""
+    """P3a parts 1 and 2: authored typography and the real ribbon editor."""
     from copy import deepcopy
     import math
     from PIL import Image
@@ -1690,7 +1708,7 @@ def run_p3a(page, request, server, output, report, record, begin_edit, tool, fre
     frames = [{"x": .06, "y": .07, "width": .88, "height": .32},
               {"x": .06, "y": .40, "width": .88, "height": .48},
               {"x": .06, "y": .90, "width": .88, "height": .06}]
-    comparison = {"rounds": {}, "scope": "P3a-1"}
+    comparison = {"rounds": {}, "scope": "P3a-1/P3a-2"}
     # Each field's authored IDs are unique across the document.
     def rekey(value, group):
         counter = 0
@@ -1737,12 +1755,11 @@ def run_p3a(page, request, server, output, report, record, begin_edit, tool, fre
     record("p3a_georgia_uses_times", family.replace('"', '') == "Times New Roman", family)
     revision = snapshot["revision"]
     before_posts = len(h.posts)
-    begin_edit(h.box(keys[0]), read_only=True)
-    notice = page.locator('.documentation-rich-readonly')
-    record("p3a_schema2_read_only", "cannot be edited here yet" in notice.inner_text()
-           and page.evaluate("() => DocumentationRichText.mountedCount") == 0)
-    record("p3a_read_only_does_not_save", h.scene(spec)["revision"] == revision and len(h.posts) == before_posts)
-    h.screenshot("readonly")
+    editor = h.mount(keys[0])
+    record("p3a_schema2_editor_mounts", page.evaluate("() => DocumentationRichText.mountedCount") == 1)
+    h.screenshot("schema2-editor")
+    editor.press("Escape")
+    record("p3a_unchanged_editor_does_not_save", h.scene(spec)["revision"] == revision and len(h.posts) == before_posts)
     reopen()
 
     def press_export(format):
@@ -1808,10 +1825,10 @@ def run_p3a(page, request, server, output, report, record, begin_edit, tool, fre
             pdf_stroke = stroke_measurement(pdf_path, pdf_baseline)
             # Chromium (P3a-1 gate, rich_fonts.decoration): line-through centred a third of the whole-pixel ascent
             # above the baseline, its top edge and thickness on whole pixels; the PDF keeps the exact third.
-            ascent, thickness = math.floor(.9053 * 48 + .5), max(1, round(.0498 * 48))
+            ascent, thickness = math.floor(.9053 * 48 + .5), max(1, round(48 / 10))
             chromium = math.floor(2 * ascent / 3 - thickness / 2 + .5) + thickness / 2 - ascent
             expected = {"canvas": {"offsetFromBaseline": chromium, "thickness": thickness},
-                        "pdf": {"offsetFromBaseline": -.9053 / 3 * 48, "thickness": .0498 * 48}}
+                        "pdf": {"offsetFromBaseline": -.9053 / 3 * 48, "thickness": 48 / 10}}
             comparison.setdefault("decorationMeasurements", {})[str(round_number)] = {
                 "canvas": canvas_stroke, "pdf": pdf_stroke, "expected": expected}
             # Each raster against its own model: the canvas within one output pixel (the scaled raster can move a
@@ -1825,14 +1842,8 @@ def run_p3a(page, request, server, output, report, record, begin_edit, tool, fre
         for key, obj, value in authored_objects(descriptor):
             if key not in keys:
                 continue
-            model = content_model(value, _document_object_style(_document_theme(snapshot), obj))
-            row = {"pdf": compare_pdf(pdf, snapshot, page_id, key, output / f"p3a-{round_number}-{key[-1]}-pdf.png"),
-                   "docx": compare_docx(docx, key, model),
-                   "canvas": canvas_matches_layout(snapshot, page_id, key, "p3a_canvas_" + str(round_number) + key,
-                                                     measured[key], record, size, typography=True)}
-            record(f"p3a_{round_number}_{key}_exports", True)
-            record(f"p3a_{round_number}_{key}_raw_text", docx_run_text(docx, key) == plain_text(value).replace("\r", " ").replace("\n", ""))
-            results[key] = row
+            results[key] = typography_export_check(snapshot, page_id, key, pdf, docx, measured[key], size,
+                output, f"p3a-{round_number}-{key[-1]}", record)
         comparison["rounds"][str(round_number)] = results
         write_json(output / "p3a-comparison.json", comparison)
         return results
@@ -1856,7 +1867,262 @@ def run_p3a(page, request, server, output, report, record, begin_edit, tool, fre
             changed = [i for i, (a, b) in enumerate(zip(before, after)) if a != b]
             record("p3a_only_one_run_" + key + "_" + format, len(before) == len(after) and changed == ([0] if key == keys[0] else []), changed)
     report["p3aComparison"] = (output / "p3a-comparison.json").relative_to(ROOT).as_posix()
+    run_p3a_editor(page, h, page_id, keys, output, report, record, tool)
     report["p3aScenePosts"] = h.posts
+
+def run_p3a_editor(page, h, page_id, prior_keys, output, report, record, tool):
+    """Part 2 uses pointer/keyboard toolbar input, never editor formatting commands."""
+    from copy import deepcopy
+    from ai_inspector.documentation.rich_text import validate, plain_text, FEATURES
+    from ai_inspector.documentation.commands import canonical_bytes
+    from tests.test_documentation_typography import envelope, paragraph, text, mark
+
+    # Part 1's proofs are saved. Remove its overlapping specimens in this isolated
+    # store so part 2 can measure a fresh, unobscured authored box on the same page.
+    for key in prior_keys:
+        before = h.scene()
+        response = h.request.post(h.base() + "/documentation-scene/commands", data={
+            "baseRevision": before["revision"], "sourceRevision": before["scene"]["sourceRevision"],
+            "manualPlanRevision": before["scene"]["manualPlanRevision"], "operation": "remove_object",
+            "pageId": page_id, "targetType": "document_object", "targetId": key}, timeout=120000)
+        assert response.ok, response.text()[:1000]
+        response.body()
+    key = "document-object-p3a-edit"
+    h.create(h.spec, key, "", frame={"x": .08, "y": .07, "width": .84, "height": .86}, style={"fontSize": 12, "fontFamily": "Arial"})
+    words = ["Title", "Caption", "Note", "Styled sub sup link", "Centered", "Right", "Spacing"] + [f"List {i}" for i in range(1, 7)]
+    initial = validate(envelope(*(paragraph(text(word)) for word in words), version=1))
+    bound = tool("read_document_pages", {"documentType": h.spec, "targets": [{"pageId": page_id, "targetId": key}]})
+    assert bound.get("ok"), bound
+    observed = bound["data"]["targets"][0]
+    applied = tool("apply_document_edits", {"documentId": bound["data"]["documentId"], "expectedRevision": observed["revision"],
+        "requestId": "p3a-editor-initial", "operations": [{"operation": "replace_rich_text", "targetId": observed["targetId"],
+            "expectedContentHash": observed["contentHash"], "richText": initial}]})
+    assert applied.get("ok"), applied
+    page = h.open_document(h.spec, page_id)
+    editor = h.mount(key)
+    controls = page.locator('.documentation-rich-controls')
+    checks = 0
+
+    def state(label, expected, *, toggle=False):
+        nonlocal checks
+        control = controls.get_by_role("button", name=label, exact=True) if toggle else controls.get_by_label(label, exact=True)
+        actual = control.get_attribute("aria-pressed") if toggle else control.input_value()
+        checks += 1
+        record(f"p3a2_control_{checks:02d}_" + label.replace(" ", "_"), actual == str(expected), {"expected": expected, "actual": actual})
+
+    def choose(word):
+        rich_select_word(page, editor, word)
+
+    def click(label, expected=None):
+        controls.get_by_role("button", name=label, exact=True).click()
+        if expected is not None:
+            state(label, expected, toggle=True)
+
+    def select(label, value):
+        control = controls.get_by_label(label, exact=True)
+        control.click()
+        control.select_option(value)
+        state(label, value)
+
+    def fill(label, value):
+        control = controls.get_by_label(label, exact=True)
+        control.click()
+        control.press("Control+a")
+        if value:
+            page.keyboard.insert_text(str(value))
+        else:
+            control.press("Backspace")
+        control.press("Tab")
+        state(label, value)
+
+    # Style controls convert the block, and resets remove rather than store defaults.
+    for word, style in (("Title", "title"), ("Caption", "caption"), ("Note", "note")):
+        choose(word); select("Style", style)
+    choose("Centered")
+    for style in ("h1", "h2", "h3", "body"):
+        select("Style", style)
+    choose("Styled")
+    select("Font", "Courier New")
+    editor.press("Control+z"); state("Font", "box")
+    record("p3a2_control_undo_is_local", h.field(h.scene(), key)["richText"] == initial)
+    editor.press("Control+y"); state("Font", "Courier New")
+    select("Font", "box"); select("Font", "Helvetica")
+    fill("Size", "12"); fill("Size", ""); fill("Size", "24")
+    for label in ("Bold", "Italic", "Underline", "Strikethrough"):
+        click(label, "true")
+    fill("Text color", "#2468ac")
+    # The native picker beside each colour field mirrors the shared colour (black when there is none), and a pick is
+    # one undoable change (supervisor P3a-2).
+    picker = controls.get_by_label("Text color picker", exact=True)
+    record("p3a2_color_picker_mirrors_field", picker.input_value() == "#2468ac", picker.input_value())
+    picker.fill("#13579b"); state("Text color", "#13579b")
+    editor.press("Control+z"); state("Text color", "#2468ac")
+    fill("Highlight color", "#ffee80")
+    click("Remove highlight"); state("Highlight color", "")
+    highlight_picker = controls.get_by_label("Highlight color picker", exact=True)
+    record("p3a2_color_picker_none_is_black", highlight_picker.input_value() == "#000000", highlight_picker.input_value())
+    fill("Highlight color", "#ffee80")
+    choose("sub"); click("Subscript", "true")
+    choose("sup"); click("Subscript", "true"); click("Superscript", "true"); state("Subscript", "false", toggle=True)
+    choose("link")
+    fill("HTTP or HTTPS link", "https://example.test/editor")
+    click("Link"); state("HTTP or HTTPS link", "https://example.test/editor")
+    click("Unlink"); state("HTTP or HTTPS link", "")
+    fill("HTTP or HTTPS link", "https://example.test/editor"); click("Link")
+    state("HTTP or HTTPS link", "https://example.test/editor")
+    choose("Centered"); click("Align left", "true"); click("Box alignment", "true"); click("Align center", "true")
+    choose("Right"); click("Align right", "true")
+    choose("Spacing")
+    click("Increase indent"); click("Decrease indent"); click("Increase indent")
+    record("p3a2_indent_state", controls.get_by_role("button", name="Increase indent", exact=True).get_attribute("data-indent") == "18")
+    fill("Space before", "3.5"); fill("Space after", "4")
+    select("Line spacing", "2"); select("Line spacing", "1.2"); select("Line spacing", "1.5")
+
+    # Select whole paragraphs by their native DOM range, then click the ribbon.
+    editor.evaluate("""node => {
+        const ps = [...node.querySelectorAll('p')];
+        const start = ps.find(p => p.textContent === 'List 1'), end = ps.find(p => p.textContent === 'List 6');
+        const range = document.createRange(); range.setStart(start, 0); range.setEnd(end, end.childNodes.length);
+        const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range); node.focus();
+    }""")
+    page.wait_for_timeout(50)
+    click("Numbering", "true"); click("Bullets", "true")
+    for depth in range(2, 7):
+        choose(f"List {depth}")
+        for _ in range(depth - 1):
+            click("Increase indent")
+        record(f"p3a2_list_depth_{depth}", page.evaluate("""() => {
+            let p = getSelection().anchorNode.parentElement, depth = 0;
+            while (p && !p.classList.contains('tiptap')) { if (p.matches('ul,ol')) depth++; p = p.parentElement; }
+            return depth;
+        }""") == depth)
+        state("Bullets", "true", toggle=True)
+        record(f"p3a2_style_disabled_in_list_{depth}", controls.get_by_label("Style", exact=True).is_disabled())
+    click("Increase indent")
+    record("p3a2_depth_limit_notice", "6 levels" in page.locator('.documentation-rich-message').inner_text())
+    h.screenshot("part2-ribbon")
+    h.finish()
+    actual = h.field(h.scene(), key)["richText"]
+
+    # Expected formatting is authored here, independent of the editor's output.
+    # Retained paragraphs have known IDs; only newly allocated list/container IDs
+    # are copied from the API, after checking their node kinds and tree structure.
+    expected = deepcopy(initial); expected["schemaVersion"] = 2
+    blocks = expected["doc"]["content"]
+    for index, style in enumerate(("title", "caption", "note")):
+        blocks[index]["attrs"]["namedStyle"] = style
+    blocks[3]["content"] = [text("Styled", mark("bold"), mark("italic"), mark("underline"), mark("strike"),
+        mark("highlight", color="#ffee80"), mark("textStyle", fontFamily="Helvetica", fontSize=24, color="#2468ac")),
+        text(" "), text("sub", mark("subscript")), text(" "), text("sup", mark("superscript")), text(" "),
+        text("link", mark("link", href="https://example.test/editor"))]
+    blocks[4]["attrs"]["textAlign"] = "center"
+    blocks[5]["attrs"]["textAlign"] = "right"
+    blocks[6]["attrs"].update(indent=18, spaceBefore=3.5, spaceAfter=4, lineHeight=1.5)
+    tail = None
+    for p in reversed(blocks[7:]):
+        tail = {"type": "bulletList", "content": [{"type": "listItem", "content": [p] + ([tail] if tail else [])}]}
+    expected["doc"]["content"] = blocks[:7] + [tail]
+
+    def allocated_ids(wanted, observed):
+        assert wanted["type"] == observed["type"], (wanted, observed)
+        if wanted["type"] not in {"doc", "text"} and "id" not in wanted.get("attrs", {}):
+            wanted.setdefault("attrs", {})["id"] = observed["attrs"]["id"]
+        assert len(wanted.get("content", [])) == len(observed.get("content", [])), (wanted, observed)
+        for a, b in zip(wanted.get("content", []), observed.get("content", [])):
+            allocated_ids(a, b)
+    allocated_ids(expected["doc"], actual["doc"])
+    expected = validate(expected)
+    record("p3a2_exact_saved_envelope", canonical_bytes(actual) == canonical_bytes(expected), {"expected": expected, "actual": actual})
+    write_json(output / "p3a2-expected.json", expected)
+
+    def export_edited(stem):
+        snapshot = h.scene()["document"]
+        measured = h.canvas_lines(key)
+        h.screenshot(stem)
+        h.box(key).screenshot(path=str(output / (stem + "-canvas.png")))
+        artifacts = {}
+        for format in ("pdf", "docx"):
+            response, result = h.press_export(h.spec, format)
+            assert response.ok, result
+            artifacts[format] = h.download(result[format], stem + "." + format)
+        with fitz_open(artifacts["pdf"]) as pdf:
+            size = (pdf[0].rect.width, pdf[0].rect.height)
+        result = typography_export_check(snapshot, page_id, key, artifacts["pdf"], artifacts["docx"], measured, size, output, stem, record)
+        report.setdefault("p3a2Exports", {})[stem] = result
+        return measured
+
+    static = export_edited("p3a2-edited")
+    editor = h.mount(key)
+    editing = h.canvas_lines(key)
+    record("p3a2_editor_static_lines", len(static["lines"]) == len(editing["lines"]) and all(
+        a["text"] == b["text"] and all(abs(a[k] - b[k]) <= 1 for k in ("left", "top", "bottom"))
+        for a, b in zip(static["lines"], editing["lines"])), {"static": static, "editing": editing})
+    h.screenshot("part2-editor-measured")
+    editor.press("Escape")
+    for direction, wanted in (("undo", initial), ("redo", expected)):
+        with page.expect_response(lambda response: response.request.method == "POST" and response.url.endswith("/documentation-scene/" + direction), timeout=120000) as moved:
+            page.locator("#documentation" + direction.title() + "Ribbon").click()
+        moved.value.finished(); assert moved.value.ok, moved.value.text()[:1000]
+        h.idle()
+        record("p3a2_document_" + direction, canonical_bytes(h.field(h.scene(), key)["richText"]) == canonical_bytes(wanted))
+
+    editor = h.mount(key)
+    # A partial clear lifts only the selected item out of all its lists; the items around it stay valid lists
+    # (supervisor P3a-2: Tiptap's clearNodes lifted a nested list one level per node).
+    choose("List 3")
+    click("Clear formatting")
+    partial = page.evaluate("""() => {
+        const shape = n => n.type === 'paragraph' ? (n.content || []).map(t => t.text || '').join('')
+            : n.type === 'listItem' ? (n.content || []).map(shape).join('>')
+            : n.type + '[' + (n.content || []).map(shape).join('|') + ']';
+        const doc = DocumentationRichText.active.editor.getJSON();
+        return {shape: doc.content.map(shape), id: doc.content.find(n => shape(n) === 'List 3')?.attrs?.id};
+    }""")
+
+    def paragraph_ids(node):
+        if node["type"] == "paragraph":
+            yield "".join(child.get("text", "") for child in node.get("content", [])), node["attrs"]["id"]
+        for child in node.get("content", []):
+            yield from paragraph_ids(child)
+    record("p3a2_partial_clear_lifts_one_item", partial["shape"] == [
+        "Title", "Caption", "Note", "Styled sub sup link", "Centered", "Right", "Spacing",
+        "bulletList[List 1>bulletList[List 2]]", "List 3", "bulletList[List 4>bulletList[List 5>bulletList[List 6]]]"]
+        and partial["id"] == dict(paragraph_ids(expected["doc"]))["List 3"], partial)
+    editor.press("Control+a")
+    click("Clear formatting")
+    state("Bold", "false", toggle=True); state("Size", ""); state("Font", "box"); state("Style", "body")
+    state("Space before", ""); state("Space after", ""); state("Line spacing", "1.2")
+    h.finish()
+    cleared = h.field(h.scene(), key)["richText"]
+    record("p3a2_clear_returns_schema1", cleared["schemaVersion"] == 1 and plain_text(cleared) == plain_text(initial)
+           and all(p["type"] == "paragraph" and set(p["attrs"]) == {"id"}
+                   and all(not run.get("marks") for run in p.get("content", [])) for p in cleared["doc"]["content"]))
+    record("p3a2_clear_keeps_paragraph_ids", [p["attrs"]["id"] for p in cleared["doc"]["content"]]
+           == [p["attrs"]["id"] for p in initial["doc"]["content"]])
+    editor = h.mount(key)
+    editor.press("Control+a")
+    rich_paste(editor, '<p style="text-align:justify"><span style="font-family:Georgia; font-size:12pt">Dropped</span></p>'
+        '<p><span style="font-family:Helvetica,serif; font-size:13.26px">Mapped</span> '
+        '<span style="font-family:Courier New; font-size:48px">Token</span></p>', mime="text/html")
+    h.finish()
+    pasted = h.field(h.scene(), key)["richText"]
+    wanted = {"format": "tiptap", "schemaVersion": 2, "doc": {"type": "doc", "content": [
+        {"type": "paragraph", "content": [text("Dropped")]},
+        {"type": "paragraph", "content": [text("Mapped", mark("textStyle", fontFamily="Helvetica", fontSize=13.5)),
+            text(" "), text("Token", mark("textStyle", fontFamily="Courier New", fontSize=48))]}]}}
+    allocated_ids(wanted["doc"], pasted["doc"])
+    record("p3a2_paste_exact_mappings", canonical_bytes(validate(wanted)) == canonical_bytes(pasted), pasted)
+    before_canvas = export_edited("p3a2-paste")
+    page = h.open_document(h.spec, page_id)
+    record("p3a2_reopen_keeps_envelope", h.field(h.scene(), key)["richText"] == pasted)
+    after_canvas = h.canvas_lines(key)
+    record("p3a2_reopen_keeps_canvas", before_canvas == after_canvas)
+    read = tool("read_document_pages", {"documentType": h.spec, "targets": [{"pageId": page_id, "targetId": key}]})
+    assert read.get("ok"), read
+    record("p3a2_read_capabilities", read["data"]["targets"][0]["richTextCapabilities"] == {
+        "schemaVersions": [1, 2], "features": list(FEATURES), "listDepth": 6})
+    write_json(output / "p3a2-comparison.json", report["p3a2Exports"])
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -1937,7 +2203,7 @@ def main():
 
     try:
         if args.phase not in {"P1a", "P1b", "P1c", "P2a", "P2b", "P3a"}:
-            raise RuntimeError("Only the P1a, P1b, P1c, P2a, P2b and P3a-1 gates are implemented.")
+            raise RuntimeError("Only the P1a, P1b, P1c, P2a, P2b and P3a parts 1-2 gates are implemented.")
         from playwright.sync_api import sync_playwright
         server.start()
         report["isolation"] = server.isolation

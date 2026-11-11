@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 import uuid
 
 from .commands import DocumentEditError, canonical_bytes
-from .rich_fonts import FONT_MAP
+from .rich_fonts import FONT_MAP, NAMED_STYLES
 
 FEATURE_FLAG = "INSPECTORPRO_DOCUMENTATION_RICH_TEXT"
 MAX_BYTES = 24 * 1024
@@ -25,7 +25,51 @@ LINK_ATTRIBUTES = {"target": "_blank", "rel": "noopener noreferrer nofollow", "c
 PLAIN_EDIT_CONSEQUENCE = "Whole-field replacement removes all rich formatting and node IDs and stores one plain string."
 _BLOCKS = {"paragraph", "heading", "bulletList", "orderedList"}
 _MARKS = ("bold", "italic", "underline", "strike", "subscript", "superscript", "highlight", "textStyle", "link")
-_PARAGRAPH_ATTRS = {"textAlign", "indent", "spaceBefore", "spaceAfter", "lineHeight"}
+_PARAGRAPH_ATTRS = {"textAlign", "indent", "spaceBefore", "spaceAfter", "lineHeight", "namedStyle"}
+
+
+# One target feature vocabulary, mirrored in documentation_rich_text_core.js.
+FEATURES = ("bold", "italic", "underline", "strike", "subscript", "superscript", "highlight", "color",
+            "fontFamily", "fontSize", "link", "heading", "bulletList", "orderedList", "textAlign", "indent",
+            "spaceBefore", "spaceAfter", "lineHeight", "namedStyle")
+
+
+def used_features(value):
+    """Inventory of a canonical envelope; callers validate before checking authority."""
+    found, deepest = set(), 0
+    def walk(node, depth=0):
+        nonlocal deepest
+        kind = node["type"]
+        if kind in {"bulletList", "orderedList"}:
+            depth += 1
+            deepest = max(deepest, depth)
+        if kind in {"heading", "bulletList", "orderedList"}:
+            found.add(kind)
+        found.update(_PARAGRAPH_ATTRS & node.get("attrs", {}).keys())
+        for item in node.get("marks", []):
+            if item["type"] == "textStyle":
+                found.update(item["attrs"].keys())
+            else:
+                found.add(item["type"])
+        for child in node.get("content", []):
+            walk(child, depth)
+    walk(value["doc"])
+    return {"features": sorted(found), "listDepth": deepest}
+
+
+def require_capabilities(value, capabilities, *, targets):
+    used = used_features(value)
+    refused = set(used["features"]) - set(capabilities.get("features", []))
+    version = value["schemaVersion"] not in capabilities.get("schemaVersions", [])
+    depth = used["listDepth"] > capabilities.get("listDepth", 0)
+    if depth:
+        refused.update(set(used["features"]) & {"bulletList", "orderedList"})
+    if version:
+        refused.update(used["features"])
+    if refused or version or depth:
+        raise DocumentEditError("unsupported_rich_text_feature", "This target does not support this rich formatting.",
+                                targets=targets, features=sorted(refused), schemaVersion=value["schemaVersion"],
+                                listDepth=used["listDepth"])
 
 
 def enabled(environ=None):
@@ -158,7 +202,11 @@ def validate(value, *, reserved_ids=()):
                 for name in sorted(_PARAGRAPH_ATTRS & attrs.keys()):
                     feature_v2()
                     attr_value = attrs[name]
-                    if name == "textAlign":
+                    if name == "namedStyle":
+                        if kind != "paragraph" or depth != 1 or not isinstance(attr_value, str) or attr_value not in NAMED_STYLES:
+                            _invalid("Named styles are title, caption or note, on top-level paragraphs only.")
+                        result["attrs"][name] = attr_value
+                    elif name == "textAlign":
                         if not isinstance(attr_value, str) or attr_value not in {"left", "center", "right"}:
                             _invalid("Paragraph alignment must be left, center or right.")
                         result["attrs"][name] = attr_value

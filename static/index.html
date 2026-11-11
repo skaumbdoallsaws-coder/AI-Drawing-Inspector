@@ -12,9 +12,9 @@
     <link rel="stylesheet" href="/static/packaging_ribbon_icons.css">
     <script src="/static/documentation_commands.js?v=20261109-p1b-3"></script>
     <script src="/static/documentation_conflicts.js?v=20261110-p2a-1"></script>
-    <script src="/static/documentation_rich_text_core.js?v=20261110-p3a-1"></script>
-    <script type="module" src="/static/documentation_rich_text.js?v=20261110-p3a-1"></script>
-    <link rel="stylesheet" href="/static/documentation_rich_text.css?v=20261110-p3a-1">
+    <script src="/static/documentation_rich_text_core.js?v=20261110-p3a-2"></script>
+    <script type="module" src="/static/documentation_rich_text.js?v=20261110-p3a-2"></script>
+    <link rel="stylesheet" href="/static/documentation_rich_text.css?v=20261110-p3a-2">
     <script src="/static/cad_viewport.js"></script>
     <script>
         // Theme bootstrap — set data-theme BEFORE the stylesheet is parsed
@@ -36648,6 +36648,7 @@
 
         function _documentationApplyElementStyle(element, style = {}) {
             if (!element) return;
+            if (element.classList.contains('text')) element.style.textDecorationSkipInk = 'none';
             const properties = {
                 fontFamily: 'font-family', fontSize: 'font-size', fontWeight: 'font-weight',
                 fontStyle: 'font-style', textDecoration: 'text-decoration',
@@ -39556,6 +39557,7 @@
                 && page.pageId === _documentationActivePage()?.pageId;
             const controller = DocumentationRichText.mount(element, {
                 field, snapshot: payload, noticeHost: document.getElementById('documentationWorkspace'),
+                boxStyle: _documentationResolvedObjectStyle(page.documentationObjects[target.targetId]),
                 findField: snapshot => _documentationRichField(page.pageId, target.targetId, snapshot),
                 read: () => _partsManualApi(`${bound.apiBase}/documentation-scene`),
                 commit: (snapshot, current, richText) => {

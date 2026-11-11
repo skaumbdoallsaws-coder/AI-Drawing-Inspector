@@ -14,9 +14,9 @@ import unicodedata
 
 from .commands import DocumentEditError
 from .rich_text import from_plain, is_rich, validate
-from .rich_fonts import font as canvas_font, line_box, decoration, rounded_metrics, SCRIPT_SIZE, SUB_OFFSET, SUP_OFFSET
+from .rich_fonts import font as canvas_font, line_box, decoration, rounded_metrics, NAMED_STYLES, SCRIPT_SIZE, SUB_OFFSET, SUP_OFFSET
 
-PDF_RENDERER_VERSION = "authored-text-pdf-2"
+PDF_RENDERER_VERSION = "authored-text-pdf-3"
 # The PDF mirrors the canvas: documentation_rich_text.js render() inside a
 # .documentation-object.text box, where one page px is one PDF point. These are
 # that box's CSS and the browser defaults it relies on.
@@ -100,6 +100,8 @@ class Paragraph:
     space_before: float = 0
     space_after: float = 0
     line_height: float = LINE_HEIGHT
+    named_style: str | None = None
+    base_run: Run | None = None
 
 
 @dataclass(frozen=True)
@@ -107,7 +109,6 @@ class Content:
     paragraphs: tuple[Paragraph, ...]
     base_size: float
     base_run: Run
-    schema2: bool = False  # the canvas sets decoration thicknesses explicitly only for schema-2 envelopes
 
 
 def _color(value, fallback="#18212a"):
@@ -141,15 +142,15 @@ def content_model(value, style=None):
     align = style.get("textAlign") if style.get("textAlign") in {"left", "center", "right", "justify"} else "left"
     paragraphs, list_count = [], 0
 
-    def inline(node, heading):
+    def inline(node, paragraph_base):
         marks = {mark["type"]: mark.get("attrs", {}) for mark in node.get("marks", [])}
         href = marks.get("link", {}).get("href")
         # The canvas nests the color span inside the link, so an explicit color wins;
         # otherwise a link has the browser's link color. Links are underlined either way.
         return Run("break" if node["type"] == "hardBreak" else "text", node.get("text", ""),
-                   base.bold or heading or "bold" in marks, base.italic or "italic" in marks,
+                   paragraph_base.bold or "bold" in marks, paragraph_base.italic or "italic" in marks,
                    base.underline or "underline" in marks or bool(href),
-                   _color(marks.get("textStyle", {}).get("color"), LINK_COLOR if href else base.color), href,
+                   _color(marks.get("textStyle", {}).get("color"), LINK_COLOR if href else paragraph_base.color), href,
                    font_family=marks.get("textStyle", {}).get("fontFamily"),
                    font_size=marks.get("textStyle", {}).get("fontSize"), strike="strike" in marks,
                    script="subscript" if "subscript" in marks else "superscript" if "superscript" in marks else None,
@@ -170,23 +171,27 @@ def content_model(value, style=None):
                     block(child, path + (level,), label)
             return
         level = node["attrs"]["level"] if kind == "heading" else 0
+        attrs = node.get("attrs", {})
+        named = NAMED_STYLES.get(attrs.get("namedStyle"), {})
+        paragraph_base = replace(base, bold=base.bold or kind == "heading" or named.get("bold", False),
+                                 italic=base.italic or named.get("italic", False), color=named.get("color", base.color))
         runs = []
         for child in node.get("content", []):
-            run = inline(child, kind == "heading")
+            run = inline(child, paragraph_base)
             # Adjacent identical text styles form one normalization unit; a mark
             # boundary is never silently moved across a combining character.
             if runs and run.kind == "text" and replace(runs[-1], text="") == replace(run, text=""):
                 runs[-1] = replace(run, text=runs[-1].text + run.text)
             else:
                 runs.append(run)
-        attrs = node.get("attrs", {})
-        paragraphs.append(Paragraph(kind, level, family, size * HEADING_SCALE[level], attrs.get("textAlign", align),
+        paragraphs.append(Paragraph(kind, level, family, size * named.get("scale", HEADING_SCALE[level]), attrs.get("textAlign", align),
                                     path, marker, tuple(runs), attrs.get("indent", 0), attrs.get("spaceBefore", 0),
-                                    attrs.get("spaceAfter", 0), attrs.get("lineHeight", LINE_HEIGHT)))
+                                    attrs.get("spaceAfter", 0), attrs.get("lineHeight", LINE_HEIGHT),
+                                    attrs.get("namedStyle"), paragraph_base))
 
     for node in envelope["doc"]["content"]:
         block(node)
-    return Content(tuple(paragraphs), size, base, isinstance(value, dict) and value.get("schemaVersion") == 2)
+    return Content(tuple(paragraphs), size, base)
 
 
 class _Fonts:
@@ -377,9 +382,9 @@ def layout_text(value, frame, style=None, *, fitz_module=None, canvas_rounding=F
         indent = list_indent + paragraph.indent
         top += paragraph.space_before
         available = x1 - x0 - indent
-        bold = content.base_run.bold or paragraph.heading_level > 0
-        metrics = fonts.get(_pdf_font(paragraph.font_family, 700 if bold else 400,
-                                      "italic" if content.base_run.italic else "normal"))
+        paragraph_base = paragraph.base_run or content.base_run
+        metrics = fonts.get(_pdf_font(paragraph.font_family, 700 if paragraph_base.bold else 400,
+                                      "italic" if paragraph_base.italic else "normal"))
         if metrics is None:
             raise DocumentEditError("unsupported_export_font", "The built-in PDF base font is unavailable.")
         # Plain text boxes use the same canvas CSS and fonts as rich ones, so the same metrics (supervisor P3a-1).
@@ -417,8 +422,8 @@ def layout_text(value, frame, style=None, *, fitz_module=None, canvas_rounding=F
                     rect = (pen + min(0, atom.left), shifted - atom.ascent,
                             pen + max(atom.advance, atom.right), shifted + atom.descent)
                     highlight_rect = (pen, baseline - atom.highlight_ascent, pen + atom.advance, baseline + atom.highlight_descent)
-                    underline = decoration(atom.family, atom.size, atom.run.bold, "underline", auto=not content.schema2)
-                    strike = decoration(atom.family, atom.size, atom.run.bold, "strike")
+                    underline = decoration(atom.family, atom.size, "underline")
+                    strike = decoration(atom.family, atom.size, "strike")
                     run = PositionedRun(atom.text, pen, shifted, atom.advance, atom.font, atom.size,
                         atom.run.bold, atom.run.italic, atom.run.underline, atom.run.color, atom.run.href, rect,
                         font_family=atom.family, strike=atom.run.strike, script=atom.run.script, highlight=atom.run.highlight,

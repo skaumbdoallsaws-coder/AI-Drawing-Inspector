@@ -26,14 +26,14 @@ test('normalizes representative Tiptap defaults without changing the projection'
     const p = list.content[0].content[0];
     assert.deepEqual(p.attrs, { id: id(3) });
     assert.deepEqual(p.content[0].marks, [{ type: 'bold' }, { type: 'textStyle', attrs: { color: '#ff0010' } }]);
-    assert.deepEqual(p.content[2].marks, [{ type: 'link', attrs: { href: 'https://example.com/source' } }]);
+    assert.deepEqual(p.content[2].marks, [{ type: 'link', attrs: { href: 'https://example.com/source', ...core.LINK } }]);
     assert.equal(core.plainText(result), 'red\nsource');
     assert.deepEqual(normalize(result), result);
 });
 
 test('bounded colors and empty textStyle marks', () => {
     for (const [value, expected] of [['RED', '#ff0000'], ['rebeccapurple', '#663399'], ['#AbC', '#aabbcc'],
-        ['#AABBCC', '#aabbcc'], ['rgb(0, 128, 255)', '#0080ff'], ['rgb(256,0,0)', null],
+        ['#AABBCC', '#aabbcc'], ['tomato', '#ff6347'], ['LightSlateGrey', '#778899'], ['rgb(0, 128, 255)', '#0080ff'], ['rgb(256,0,0)', null],
         ['rgba(0,0,0,0)', null], ['transparent', null], ['url(file:///a)', null], [null, null]]) {
         assert.equal(core.color(value), expected);
     }
@@ -105,9 +105,10 @@ test('node, byte, depth, list and ordered-start bounds are checked before saving
             ...(level > 1 ? [list(level - 1)] : [])] }] };
     }
     normalize(doc([list(3)]));
-    assert.throws(() => normalize(doc([list(4)])), tooLarge);
+    assert.equal(normalize(doc([list(6)])).schemaVersion, 2);
+    assert.throws(() => normalize(doc([list(7)])), tooLarge);
     let deep = text('a');
-    for (let n = 0; n < 13; n++) deep = paragraph([deep]);
+    for (let n = 0; n < 15; n++) deep = paragraph([deep]);
     assert.throws(() => normalize(doc([deep])), tooLarge);
     for (const start of [0, 10000, 1.5, true]) assert.throws(() => normalize(doc([
         { type: 'orderedList', attrs: { start }, content: [{ type: 'listItem', content: [paragraph()] }] },
@@ -128,23 +129,24 @@ test('unsupported nodes, marks and malformed text remain errors', () => {
     for (const type of ['image', 'video', 'table', 'codeBlock', 'script']) {
         assert.throws(() => normalize(doc([{ type, attrs: { src: 'file:///secret' } }])));
     }
-    assert.throws(() => normalize(doc([paragraph([text('a', [{ type: 'strike' }])])])));
+    assert.throws(() => normalize(doc([paragraph([text('a', [{ type: 'backgroundColor' }])])])));
     assert.throws(() => normalize(doc([paragraph([text('\ud800')])])));
     assert.throws(() => normalize(doc([paragraph([text('')])])));
 });
 
-test('schema 2 is readable but cannot enter the schema 1 editor or save normalization', () => {
-    const richText = { format: 'tiptap', schemaVersion: 2, doc: doc([paragraph([text('kept')])]) };
+test('read-only guard checks stored versions, features and depth without modifying the value', () => {
+    const richText = normalize(doc([paragraph([text('kept', [{ type: 'strike' }])])]));
     const before = JSON.stringify(richText);
-    assert.match(core.readOnlyReason({ richText }), /cannot be edited here yet/);
-    assert.match(core.readOnlyReason({ richText }), /Sage/);
-    assert.equal(core.readOnlyReason({ richText: { ...richText, schemaVersion: 1 } }), '');
+    assert.equal(core.readOnlyReason({ richText, richTextCapabilities: core.FULL_CAPABILITIES }), '');
+    for (const capabilities of [
+        { ...core.FULL_CAPABILITIES, schemaVersions: [1] },
+        { ...core.FULL_CAPABILITIES, features: core.FEATURES.filter(name => name !== 'strike') },
+    ]) assert.match(core.readOnlyReason({ richText, richTextCapabilities: capabilities }), /read-only/);
+    const list = normalize(doc([{ type: 'bulletList', content: [{ type: 'listItem', content: [paragraph([text('item')])] }] }]));
+    assert.match(core.readOnlyReason({ richText: list, richTextCapabilities: { ...core.FULL_CAPABILITIES, listDepth: 0 } }), /read-only/);
     assert.equal(core.readOnlyReason({ text: 'old plain field' }), '');
-    assert.throws(() => normalize(richText), { code: 'unsupported_rich_text_schema' });
-    for (const attr of ['textAlign', 'indent', 'spaceBefore', 'spaceAfter', 'lineHeight']) {
-        assert.throws(() => normalize(doc([paragraph([text('kept')], { [attr]: attr === 'textAlign' ? 'left' : 1 })])),
-            { code: 'unsupported_rich_text_schema' });
-    }
+    const nonminimal = normalize(doc([paragraph([text('body')])])); nonminimal.schemaVersion = 2;
+    assert.match(core.readOnlyReason({ richText: nonminimal, richTextCapabilities: { ...core.FULL_CAPABILITIES, schemaVersions: [1] } }), /read-only/);
     assert.equal(JSON.stringify(richText), before);
 });
 
@@ -155,4 +157,62 @@ test('rich font tokens and legacy box aliases use the export families', () => {
     assert.equal(core.font('Inter').canvas, 'Arial');
     assert.equal(core.font('Arial').ascent, .9053);
     assert.deepEqual(core.RENDER_MARKS, ['bold', 'italic', 'underline', 'strike', 'subscript', 'superscript', 'highlight', 'textStyle', 'link']);
+});
+
+for (const vector of require('./fixtures/rich_text_v2_vectors.json')) {
+    test('shared typography vector: ' + vector.name, () => {
+        if (vector.code) assert.throws(() => core.normalize(vector.input), { code: vector.code });
+        else assert.deepEqual(core.normalize(vector.input), vector.expected);
+    });
+}
+
+test('paste maps only token families, px sizes and bounded paragraph attributes', () => {
+    const raw = doc([paragraph([
+        text('dropped', [{ type: 'textStyle', attrs: { fontFamily: 'Georgia, Arial', fontSize: '12pt', color: 'unresolvable' } }]),
+        text('kept', [{ type: 'textStyle', attrs: { fontFamily: '"hELVetica", sans-serif', fontSize: '16.26px', color: 'rgb(17, 34, 51)' } }]),
+        text('outside', [{ type: 'textStyle', attrs: { fontSize: '48.01px' } }]),
+        text('low', [{ type: 'textStyle', attrs: { fontSize: '5.99px' } }]),
+    ], { textAlign: 'justify', indent: 73, spaceBefore: -1, spaceAfter: 36.5, lineHeight: 2.05, namedStyle: null })]);
+    const result = normalize(raw);
+    const p = result.doc.content[0];
+    assert.deepEqual(p.attrs, { id: id(101) });
+    assert.equal(p.content[0].marks, undefined);
+    assert.deepEqual(p.content[1].marks, [{ type: 'textStyle', attrs: { fontFamily: 'Helvetica', fontSize: 16.5, color: '#112233' } }]);
+    assert.equal(p.content[2].marks, undefined);
+    assert.equal(p.content[3].marks, undefined);
+    assert.equal(result.schemaVersion, 2);
+    const dropped = normalize(doc([raw.content[0].content.length && paragraph([raw.content[0].content[0]], { textAlign: 'justify' })]));
+    assert.equal(dropped.schemaVersion, 1);
+});
+
+test('Tiptap null defaults disappear, explicit server defaults remain schema two', () => {
+    const defaults = Object.fromEntries(core.PARAGRAPH_ATTRS.map(name => [name, null]));
+    const value = normalize(doc([paragraph([text('body')], defaults)]));
+    assert.equal(value.schemaVersion, 1);
+    for (const [name, number] of [['indent', 0], ['spaceBefore', 0], ['spaceAfter', 0], ['lineHeight', 1.2], ['textAlign', 'left']]) {
+        const explicit = structuredClone(value); explicit.schemaVersion = 2;
+        explicit.doc.content[0].attrs[name] = number;
+        assert.equal(core.normalize(explicit).schemaVersion, 2);
+    }
+});
+
+test('editor representation round-trips the minimal version and all typography', () => {
+    const value = normalize(doc([paragraph([text('body', [{ type: 'textStyle', attrs: { fontSize: '9.5px', fontFamily: 'Arial' } }])],
+        { namedStyle: 'note', indent: 18, spaceBefore: 3.5, spaceAfter: 4, lineHeight: 1.15, textAlign: 'center' })]));
+    const editing = core.editorDocument(value);
+    assert.equal(editing.content[0].content[0].marks[0].attrs.fontSize, '9.5px');
+    assert.deepEqual(normalize(editing), value);
+    assert.throws(() => normalize(editing, { capabilities: { ...core.FULL_CAPABILITIES, features: [] } }),
+        { code: 'unsupported_rich_text_feature' });
+});
+
+
+test('the box underline wrapper is editor presentation and never becomes stored formatting', () => {
+    const value = normalize(doc([paragraph([text('box'), text(' own', [{ type: 'underline' }, { type: 'textStyle', attrs: { fontSize: '24px' } }])])]));
+    const editing = core.editorDocument(value, { boxUnderline: true });
+    assert.ok(editing.content[0].content.every(run => run.marks.some(mark => mark.type === 'documentationInheritedUnderline')));
+    assert.deepEqual(normalize(editing), value);
+    const foreign = structuredClone(value);
+    foreign.doc.content[0].content[0].marks = [{ type: 'documentationInheritedUnderline' }];
+    assert.throws(() => core.normalize(foreign), { code: 'invalid_rich_text' });
 });

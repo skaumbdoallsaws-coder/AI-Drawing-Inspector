@@ -3,9 +3,8 @@
 Vertical metrics are the Windows canvas fonts' hhea/win values (em), supplied
 at the P3a-1 supervisor gate. Advances still come from the PDF built-in programs.
 OS/2 script metrics are recorded for reference; the explicit CSS contract uses
-SCRIPT_SIZE/SUB_OFFSET/SUP_OFFSET instead. The decoration thicknesses are the
-fonts' own; their positions follow Chromium, which ignores the fonts' underline
-and strikeout positions (decoration). No system fonts are read at runtime.
+SCRIPT_SIZE/SUB_OFFSET/SUP_OFFSET instead. Decorations use Chromium's CSS auto
+rules in every schema. No system fonts are read at runtime.
 """
 from dataclasses import dataclass
 import math
@@ -18,18 +17,15 @@ class Font:
     docx: str
     ascent: float
     descent: float
-    underline_regular: float
-    underline_bold: float
-    strike_size: float = .0498
     script_size: float = .6499
     sub_offset: float = .1382
     sup_offset: float = .4771
 
 
-_ARIAL = Font("Arial", "Helvetica", "Arial", .9053, .2119, .0732, .1050)
-_TIMES = Font("Times New Roman", "Times", "Times New Roman", .8911, .2163, .0488, .0952,
+_ARIAL = Font("Arial", "Helvetica", "Arial", .9053, .2119)
+_TIMES = Font("Times New Roman", "Times", "Times New Roman", .8911, .2163,
               sub_offset=.1431, sup_offset=.4531)
-_COURIER = Font("Courier New", "Courier", "Courier New", .8325, .3003, .0410, .1001,
+_COURIER = Font("Courier New", "Courier", "Courier New", .8325, .3003,
                 sub_offset=.1392, sup_offset=.4224)
 FONT_MAP = {"Arial": _ARIAL, "Helvetica": _ARIAL, "Times New Roman": _TIMES, "Courier New": _COURIER}
 SCRIPT_SIZE, SUB_OFFSET, SUP_OFFSET = .65, .14, .45
@@ -67,20 +63,19 @@ def line_box(size, family, multiplier, *, canvas_rounding=False):
     return (multiplier * size + difference) / 2, (multiplier * size - difference) / 2
 
 
-def decoration(family, size, bold, kind, *, auto=False):
-    """(Offset of the stroke's centre from the baseline, down positive; stroke thickness), in points.
+def decoration(family, size, kind):
+    """Chromium 141 CSS auto: continuous strokes of size / 10 in every schema.
 
-    As Chromium 141 draws text-decoration (measured at the P3a-1 gate: three fonts, 12 to 100 px, regular and bold):
-    - line-through is centred a third of the ascent above the baseline;
-    - an underline's top edge lies half its thickness below the baseline (Blink's auto offset), so its centre lies
-      one thickness below.
-    The fonts' own underline and strikeout positions are not used. Chromium also puts both on whole device pixels
-    (rounded ascent, thickness and gap; a gap of at least 1 px); the PDF keeps the exact values, within a pixel.
-    Schema-2 CSS sets the fonts' thicknesses; auto is CSS text-decoration-thickness: auto, which schema-1 and plain
-    text keep on the canvas: a tenth of the size, whatever the font or weight.
+    Strike is centred ascent / 3 above the baseline; underline is centred one
+    thickness below. Chromium snaps to device pixels; exports retain exact units.
     """
-    metrics = font(family)
-    if kind == "strike":
-        return -metrics.ascent / 3 * size, metrics.strike_size * size
-    thickness = size / 10 if auto else (metrics.underline_bold if bold else metrics.underline_regular) * size
-    return thickness, thickness
+    thickness = size / 10
+    return (-font(family).ascent * size / 3 if kind == "strike" else thickness), thickness
+
+
+# Mirrored in documentation_rich_text_core.js; styles add to the box's emphasis.
+NAMED_STYLES = {
+    "title": {"scale": 2.25, "bold": True},
+    "caption": {"scale": .85, "italic": True, "color": "#5b6670"},
+    "note": {"scale": .9, "color": "#5b6670"},
+}

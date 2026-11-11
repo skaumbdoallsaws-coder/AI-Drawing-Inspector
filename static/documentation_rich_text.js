@@ -17,11 +17,13 @@ window.DocumentationRichText = api;
 // A static import would prevent ready from resolving when the bundle fails to load.
 // Consume named exports only, from the reviewed self-contained module.
 api.ready = import('/static/vendor/tiptap/tiptap.bundle.js?v=c36fd989775f').then(
-    ({ Editor, Extension, StarterKit, TextStyle, Color }) => {
+    ({ Editor, Extension, Mark, StarterKit, TextStyle, Color, FontFamily, FontSize,
+        Highlight, Subscript, Superscript, TextAlign }) => {
         if (!core || !Editor || !Extension || !StarterKit || !TextStyle || !Color) {
             return { ok: false, reason: 'The rich text editor is unavailable.' };
         }
-        kit = { Editor, Extension, StarterKit, TextStyle, Color };
+        kit = { Editor, Extension, Mark, StarterKit, TextStyle, Color, FontFamily, FontSize,
+            Highlight, Subscript, Superscript, TextAlign };
         return { ok: true, reason: '' };
     }, () => ({ ok: false, reason: 'The rich text editor could not load. This field is read-only.' })
 ).then(status => {
@@ -39,7 +41,7 @@ function render(element, envelope, boxStyle = {}) {
     root.className = 'documentation-rich-content';
     root.dataset.schemaVersion = String(envelope.schemaVersion);
     root.style.fontFamily = core.font(boxStyle.fontFamily).canvas;
-    function node(value, heading = false) {
+    function node(value) {
         if (value.type === 'text' || value.type === 'hardBreak') {
             let child = document.createElement(value.type === 'text' ? 'span' : 'br');
             if (value.type === 'text') child.textContent = value.text;
@@ -51,22 +53,14 @@ function render(element, envelope, boxStyle = {}) {
                 marks.push({ type: 'underline' });
                 marks.sort((a, b) => core.RENDER_MARKS.indexOf(a.type) - core.RENDER_MARKS.indexOf(b.type));
             }
-            const ownStyle = marks.find(m => m.type === 'textStyle')?.attrs || {};
-            const metrics = core.font(ownStyle.fontFamily || boxStyle.fontFamily);
-            const bold = heading || Number(boxStyle.fontWeight || 400) >= 600 || marks.some(m => m.type === 'bold');
             for (const mark of marks) {
                 const tag = { bold: 'strong', italic: 'em', underline: 'u', strike: 's', subscript: 'sub', superscript: 'sup', highlight: 'mark', textStyle: 'span', link: 'a' }[mark.type];
                 if (!tag) continue;
                 const wrapper = document.createElement(tag);
-                if (schema2 && (mark.type === 'underline' || mark.type === 'strike')) {
-                    wrapper.className = 'documentation-rich-decoration';
-                    wrapper.style.textDecorationLine = mark.type === 'strike' ? 'line-through' : 'underline';
-                    wrapper.style.textDecorationThickness = (mark.type === 'strike' ? metrics.strike_size
-                        : bold ? metrics.underline_bold : metrics.underline_regular) + 'em';
-                    if (bold) wrapper.style.fontWeight = '700';
-                }
                 if (mark.type === 'textStyle') {
                     wrapper.style.color = core.color(mark.attrs?.color) || '';
+                    if (mark.attrs?.color) wrapper.dataset.richColor = mark.attrs.color;
+                    if (mark.attrs?.fontFamily) wrapper.dataset.richFontFamily = mark.attrs.fontFamily;
                     if (mark.attrs?.fontFamily) wrapper.style.fontFamily = core.font(mark.attrs.fontFamily).canvas;
                     if (mark.attrs?.fontSize != null) wrapper.style.fontSize = mark.attrs.fontSize + 'px';
                 }
@@ -93,6 +87,10 @@ function render(element, envelope, boxStyle = {}) {
         if (['paragraph', 'heading', 'bulletList', 'orderedList'].includes(value.type)) result.style.margin = '0';
         if (['paragraph', 'heading'].includes(value.type)) {
             const attrs = value.attrs || {};
+            if (attrs.namedStyle) result.dataset.namedStyle = attrs.namedStyle;
+            for (const name of core.PARAGRAPH_ATTRS) if (attrs[name] != null && name !== 'namedStyle') {
+                result.setAttribute('data-rich-' + name.replace(/[A-Z]/g, c => '-' + c.toLowerCase()), String(attrs[name]));
+            }
             if (attrs.textAlign) result.style.textAlign = attrs.textAlign;
             if (attrs.indent != null) result.style.marginInlineStart = attrs.indent + 'px';
             if (attrs.spaceBefore != null) result.style.paddingTop = attrs.spaceBefore + 'px';
@@ -100,18 +98,134 @@ function render(element, envelope, boxStyle = {}) {
             if (attrs.lineHeight != null) result.style.lineHeight = String(attrs.lineHeight);
         }
         if (value.type === 'paragraph' && !value.content?.length) result.appendChild(document.createElement('br'));
-        for (const child of value.content || []) result.appendChild(node(child, heading || value.type === 'heading'));
+        for (const child of value.content || []) result.appendChild(node(child));
         return result;
     }
     for (const child of envelope.doc.content || []) root.appendChild(node(child));
     element.replaceChildren(root);
 }
 
+// Paste reads inline authored values only. Computed margins and inherited foreign CSS never enter the model.
+function cssColor(value) {
+    const direct = core.color(value);
+    if (direct || !value || !CSS.supports('color', value) || /^(inherit|initial|unset|revert|currentcolor)$/i.test(value)) return direct;
+    const probe = document.createElement('span');
+    probe.style.color = value; probe.hidden = true;
+    document.body.appendChild(probe);
+    const result = core.color(getComputedStyle(probe).color);
+    probe.remove();
+    return result;
+}
+
+function extensions(capabilities, sink, toggleList, boxUnderline) {
+    const { Extension, Mark, StarterKit, TextStyle, Color, FontFamily, FontSize, Highlight, Subscript, Superscript, TextAlign } = kit;
+    const allows = name => capabilities.features.includes(name);
+    // Preserve the static renderer's outer link/color precedence. A presentation
+    // mark at the leaf supplies each link's underline at the run's own size.
+    const priorities = { textStyle: 120, highlight: 110, subscript: 100, superscript: 100,
+        strike: 90, underline: 80, italic: 70, bold: 60, link: 200 };
+    const starter = StarterKit.extend({
+        addExtensions() {
+            return this.parent().map(extension => {
+                if (extension.type !== 'mark') return extension;
+                if (extension.name === 'link') return extension.extend({ priority: priorities.link,
+                    renderHTML(args) {
+                        const output = this.parent(args);
+                        output[1] = { ...output[1], style: 'text-decoration: none' };
+                        return output;
+                    },
+                });
+                return extension.extend({ priority: priorities[extension.name] || 100 });
+            });
+        },
+    }).configure({
+        code: false, codeBlock: false, blockquote: false, horizontalRule: false, trailingNode: false,
+        bold: allows('bold') ? {} : false, italic: allows('italic') ? {} : false,
+        underline: allows('underline') ? {} : false, strike: allows('strike') ? {} : false,
+        heading: allows('heading') ? { levels: [1, 2, 3] } : false,
+        bulletList: allows('bulletList') ? {} : false, orderedList: allows('orderedList') ? {} : false,
+        listItem: allows('bulletList') || allows('orderedList') ? {} : false,
+        listKeymap: allows('bulletList') || allows('orderedList') ? {} : false,
+        link: allows('link') ? { openOnClick: false, autolink: false, linkOnPaste: false,
+            isAllowedUri: value => Boolean(core.href(value)), HTMLAttributes: core.LINK } : false,
+    });
+    const result = [starter];
+    if (boxUnderline || allows('link')) result.push(Mark.create({ name: 'documentationInheritedUnderline', priority: 45,
+        parseHTML() { return []; }, renderHTML() { return ['u', { 'data-rich-inherited-underline': '' }, 0]; },
+    }));
+    if (['color', 'fontFamily', 'fontSize'].some(allows)) result.push(TextStyle.extend({ priority: priorities.textStyle }));
+    if (allows('color')) result.push(Color.extend({ addGlobalAttributes() {
+        return [{ types: ['textStyle'], attributes: { color: { default: null,
+            parseHTML: node => cssColor(node.style.color),
+            renderHTML: attrs => attrs.color ? { style: 'color: ' + attrs.color, 'data-rich-color': attrs.color } : {},
+        } } }];
+    } }));
+    if (allows('fontFamily')) result.push(FontFamily.extend({ addGlobalAttributes() {
+        return [{ types: ['textStyle'], attributes: { fontFamily: { default: null,
+            parseHTML: node => core.pasteFontFamily(node.getAttribute('data-rich-font-family') || node.style.fontFamily),
+            renderHTML: attrs => attrs.fontFamily ? { style: 'font-family: ' + core.font(attrs.fontFamily).canvas,
+                'data-rich-font-family': attrs.fontFamily } : {},
+        } } }];
+    } }));
+    if (allows('fontSize')) result.push(FontSize.extend({ addGlobalAttributes() {
+        return [{ types: ['textStyle'], attributes: { fontSize: { default: null,
+            parseHTML: node => { const size = core.pasteFontSize(node.style.fontSize); return size == null ? null : size + 'px'; },
+            renderHTML: attrs => attrs.fontSize ? { style: 'font-size: ' + attrs.fontSize } : {},
+        } } }];
+    } }));
+    if (allows('subscript')) result.push(Subscript.extend({ priority: priorities.subscript, excludes: allows('superscript') ? 'superscript' : '' }));
+    if (allows('superscript')) result.push(Superscript.extend({ priority: priorities.superscript, excludes: allows('subscript') ? 'subscript' : '' }));
+    if (allows('highlight')) result.push(Highlight.extend({ priority: priorities.highlight,
+        addAttributes() { return { color: { default: '#ffff00',
+            parseHTML: node => { const value = node.style.backgroundColor || node.getAttribute('data-color'); return value ? cssColor(value) : '#ffff00'; },
+            renderHTML: attrs => attrs.color ? { 'data-color': attrs.color, style: 'background-color: ' + attrs.color + '; color: inherit' } : {},
+        } }; },
+    }).configure({ multicolor: true }));
+    if (allows('textAlign')) result.push(TextAlign.configure({ types: ['paragraph', 'heading'],
+        alignments: ['left', 'center', 'right'], defaultAlignment: null }));
+    const properties = { indent: 'margin-inline-start', spaceBefore: 'padding-top', spaceAfter: 'padding-bottom', lineHeight: 'line-height' };
+    result.push(Extension.create({ name: 'documentationParagraphTypography', priority: 1000,
+        addGlobalAttributes() {
+            const attributes = {};
+            for (const [name, property] of Object.entries(properties)) if (allows(name)) {
+                const data = 'data-rich-' + name.replace(/[A-Z]/g, c => '-' + c.toLowerCase());
+                attributes[name] = { default: null,
+                    parseHTML: node => core.paragraphValue(name, (node.getAttribute(data) ?? node.style.getPropertyValue(property)) || null, true),
+                    renderHTML: attrs => attrs[name] == null ? {} : { [data]: String(attrs[name]),
+                        style: property + ': ' + attrs[name] + (name === 'lineHeight' ? '' : 'px') },
+                };
+            }
+            const groups = [{ types: ['paragraph', ...(allows('heading') ? ['heading'] : [])], attributes }];
+            if (allows('namedStyle')) groups.push({ types: ['paragraph'], attributes: { namedStyle: { default: null,
+                parseHTML: node => node.closest('li') ? null : core.paragraphValue('namedStyle', node.getAttribute('data-named-style'), true),
+                renderHTML: attrs => attrs.namedStyle ? { 'data-named-style': attrs.namedStyle } : {},
+            } } });
+            return groups;
+        },
+        addKeyboardShortcuts() {
+            const keys = {};
+            if (allows('bulletList') || allows('orderedList')) keys.Tab = () => this.editor.isActive('listItem') ? sink() : false;
+            if (allows('bulletList')) keys['Mod-Shift-8'] = () => toggleList('toggleBulletList');
+            if (allows('orderedList')) keys['Mod-Shift-7'] = () => toggleList('toggleOrderedList');
+            return keys;
+        },
+    }));
+    return result;
+}
+
 function mount(element, options) {
     const readOnly = core?.readOnlyReason(options.field);
     if (readOnly) { options.onError?.(new Error(readOnly)); return null; }
     if (!kit || !core || active || !element) return null;
-    const { Editor, Extension, StarterKit, TextStyle, Color } = kit;
+    const { Editor, Extension } = kit;
+    const advertised = options.field.richTextCapabilities || core.FULL_CAPABILITIES;
+    const schema2 = advertised.schemaVersions.includes(2);
+    const capabilities = { ...advertised,
+        features: advertised.features.filter(name => (schema2 || !core.SCHEMA2_FEATURES.includes(name))
+            && (advertised.listDepth > 0 || !['bulletList', 'orderedList'].includes(name))),
+        listDepth: Math.min(advertised.listDepth, schema2 ? 6 : 3),
+    };
+    const allows = name => capabilities.features.includes(name);
     const field = options.field;
     const originalHash = field.contentHash;
     let composing = false, pendingCommit = false, saving = false, disposed = false, conflict = false;
@@ -123,10 +237,14 @@ function mount(element, options) {
         listeners.push(() => target.removeEventListener(event, fn, capture));
     }
     const originalNodes = [...element.childNodes];
+    const boxUnderline = options.boxStyle?.textDecoration === 'underline';
+    const originalDecoration = element.style.textDecoration;
+    if (boxUnderline) element.style.textDecoration = 'none';
     element.replaceChildren();
     element.classList.add('documentation-rich-mounted');
     const editorHost = document.createElement('div');
-    editorHost.className = 'documentation-rich-editor';
+    editorHost.className = 'documentation-rich-editor documentation-rich-content';
+    editorHost.style.fontFamily = core.font(options.boxStyle?.fontFamily).canvas;
     element.appendChild(editorHost);
     const panel = document.createElement('div');
     panel.className = 'documentation-rich-panel';
@@ -179,17 +297,15 @@ function mount(element, options) {
             } }];
         },
     });
-    let editor;
+    let editor, savedSelection = null;
+    const stateControls = [];
+    const blockTypes = ['paragraph', ...(allows('heading') ? ['heading'] : [])];
     try {
         editor = new Editor({
             element: editorHost,
-            extensions: [StarterKit.configure({
-                code: false, codeBlock: false, blockquote: false, horizontalRule: false, strike: false,
-                heading: { levels: [1, 2, 3] }, trailingNode: false,
-                link: { openOnClick: false, autolink: false, linkOnPaste: false,
-                    isAllowedUri: value => Boolean(core.href(value)), HTMLAttributes: core.LINK },
-            }), TextStyle, Color, identities],
-            content: field.richText?.doc || core.fromPlain(field.text).doc,
+            enableCoreExtensions: { textDirection: false },
+            extensions: [...extensions(capabilities, () => changeIndent(1), toggleList, boxUnderline), identities],
+            content: core.editorDocument(field.richText || core.fromPlain(field.text), { boxUnderline }),
             parseOptions: { preserveWhitespace: 'full' },
             editorProps: {
                 attributes: { 'aria-label': 'Rich text editor', role: 'textbox', 'aria-multiline': 'true' },
@@ -206,6 +322,8 @@ function mount(element, options) {
                     return true;
                 },
             },
+            onSelectionUpdate() { refreshControls(); },
+            onTransaction() { refreshControls(); },
             onUpdate() {
                 dirty = JSON.stringify(editor.getJSON()) !== initialJSON;
                 if (!conflict) message.textContent = dirty ? 'Draft not yet saved.' : 'Edit text, then choose Done.';
@@ -213,10 +331,39 @@ function mount(element, options) {
         });
     } catch (error) {
         panel.remove(); element.classList.remove('documentation-rich-mounted');
+        element.style.textDecoration = originalDecoration;
         element.replaceChildren(...originalNodes);
         options.onError?.(error);
         return null;
     }
+    // Apply presentation and structural invariants in the original transaction:
+    // typing, paste and keyboard commands get the same contract as the ribbon.
+    const dispatch = editor.view.props.dispatchTransaction;
+    editor.view.setProps({ dispatchTransaction(tr) {
+        let deepest = 0;
+        function lists(node, depth = 0) {
+            if (['bulletList', 'orderedList'].includes(node.type.name)) depth++;
+            deepest = Math.max(deepest, depth);
+            node.forEach(child => lists(child, depth));
+        }
+        lists(tr.doc);
+        if (deepest > capabilities.listDepth) {
+            notice('Lists are limited to ' + capabilities.listDepth + ' levels.');
+            editor.view.updateState(editor.state);
+            return;
+        }
+        const inherited = editor.schema.marks.documentationInheritedUnderline;
+        tr.doc.descendants((node, pos, parent) => {
+            if (node.type.name === 'paragraph' && node.attrs.namedStyle && parent.type.name !== 'doc') {
+                tr.setNodeMarkup(pos, undefined, { ...node.attrs, namedStyle: null });
+            }
+            if (!inherited || !node.isInline) return;
+            const needed = boxUnderline || node.marks.some(mark => mark.type.name === 'link');
+            if (needed && !inherited.isInSet(node.marks)) tr.addMark(pos, pos + node.nodeSize, inherited.create());
+            if (!needed && inherited.isInSet(node.marks)) tr.removeMark(pos, pos + node.nodeSize, inherited);
+        });
+        dispatch(tr);
+    } });
     initialJSON = JSON.stringify(editor.getJSON());
     const controller = {
         element, editor, pageId: field.pageId, targetId: field.targetId,
@@ -251,6 +398,7 @@ function mount(element, options) {
         clearTimeout(blurTimer);
         listeners.splice(0).forEach(remove => remove());
         editor.destroy(); panel.remove(); toolbar.remove();
+        element.style.textDecoration = originalDecoration;
         element.classList.remove('documentation-rich-mounted');
         element.replaceChildren(...originalNodes);
         if (active === controller) active = null;
@@ -271,7 +419,7 @@ function mount(element, options) {
         editor.setEditable(false, false);
         try {
             // Validate before doing I/O; the fresh read reserves IDs added since mount.
-            core.normalize(editor.getJSON(), { reservedIds: core.reservedIds(options.snapshot.richTextFields, field) });
+            core.normalize(editor.getJSON(), { reservedIds: core.reservedIds(options.snapshot.richTextFields, field), capabilities });
             const snapshot = await options.read();
             if (disposed) return;
             const current = options.findField(snapshot);
@@ -285,6 +433,7 @@ function mount(element, options) {
             }
             const richText = core.normalize(editor.getJSON(), {
                 reservedIds: core.reservedIds(snapshot.richTextFields, current),
+                capabilities: current.richTextCapabilities || capabilities,
             });
             await options.commit(snapshot, current, richText);
             if (disposed) return;
@@ -305,29 +454,306 @@ function mount(element, options) {
             done.disabled = overwrite.disabled = cancel.disabled = false;
         }
     }
-    function mark(command, argument) {
-        if (disposed || saving) return;
-        editor.chain().focus()[command](argument).run();
+    function selectedBlocks(state = editor.state) {
+        const blocks = [];
+        const { from, to, $from, empty } = state.selection;
+        if (empty) {
+            for (let depth = $from.depth; depth > 0; depth--) {
+                if ($from.node(depth).isTextblock) { blocks.push({ node: $from.node(depth), pos: $from.before(depth) }); break; }
+            }
+        } else state.doc.nodesBetween(from, to, (node, pos) => { if (node.isTextblock) blocks.push({ node, pos }); });
+        return blocks;
     }
-    button(toolbar, 'Bold', () => mark('toggleBold'));
-    button(toolbar, 'Italic', () => mark('toggleItalic'));
-    button(toolbar, 'Underline', () => mark('toggleUnderline'));
-    const color = document.createElement('input');
-    color.type = 'color'; color.title = 'Text color'; color.setAttribute('aria-label', 'Text color');
-    listen(color, 'input', () => mark('setColor', color.value));
-    toolbar.appendChild(color);
-    for (let level = 1; level <= 3; level++) button(toolbar, 'H' + level, () => mark('toggleHeading', { level }));
-    button(toolbar, 'Bullets', () => mark('toggleBulletList'));
-    button(toolbar, 'Numbering', () => mark('toggleOrderedList'));
-    const link = document.createElement('input');
-    link.type = 'url'; link.placeholder = 'https://example.com'; link.setAttribute('aria-label', 'HTTP or HTTPS link');
-    toolbar.appendChild(link);
-    button(toolbar, 'Link', () => {
-        const href = core.href(link.value);
-        if (!href) { notice('Enter an absolute http:// or https:// link.'); return; }
-        mark('setLink', { href });
-    });
-    button(toolbar, 'Unlink', () => mark('unsetLink'));
+    function insideList() {
+        const { $from, from, to } = editor.state.selection;
+        for (let depth = $from.depth; depth > 0; depth--) if ($from.node(depth).type.name === 'listItem') return true;
+        let found = false;
+        editor.state.doc.nodesBetween(from, to, node => { if (node.type.name === 'listItem') found = true; });
+        return found;
+    }
+    function selectedMarks() {
+        const { from, to, $from, empty } = editor.state.selection;
+        if (empty) return [editor.state.storedMarks || $from.marks()];
+        const marks = [];
+        editor.state.doc.nodesBetween(from, to, (node, pos) => {
+            if (node.isInline && pos < to && pos + node.nodeSize > from) marks.push(node.marks);
+        });
+        return marks.length ? marks : [[]];
+    }
+    function shared(values) {
+        return values.every(value => value === values[0]) ? values[0] : undefined;
+    }
+    function markValue(name, attr) {
+        return shared(selectedMarks().map(marks => {
+            const mark = marks.find(value => value.type.name === name);
+            return attr ? mark?.attrs[attr] ?? null : Boolean(mark);
+        }));
+    }
+    function blockValue(name) { return shared(selectedBlocks().map(({ node }) => node.attrs[name] ?? null)); }
+    function refreshControls() {
+        if (!editor || editor.isDestroyed) return;
+        for (const update of stateControls) update();
+    }
+    function perform(build) {
+        if (disposed || saving) return false;
+        // The pinned bundle's closeHistory helper uses this PluginKey name but
+        // does not export the helper. Each ribbon action starts one undo group.
+        let chain = editor.chain().focus().setMeta('closeHistory$', true);
+        if (savedSelection) chain = chain.setTextSelection(savedSelection);
+        const ok = build(chain).run();
+        savedSelection = null;
+        refreshControls();
+        return ok;
+    }
+    function mark(command, argument) { return perform(chain => chain[command](argument)); }
+    function paragraph(name, value) {
+        return perform(chain => {
+            for (const type of blockTypes) chain = chain.updateAttributes(type, { [name]: value });
+            return chain;
+        });
+    }
+    function fieldControl(label, control, callback, value) {
+        control.title = label; control.setAttribute('aria-label', label);
+        control.dataset.richControl = label.toLowerCase().replaceAll(' ', '-');
+        listen(control, 'pointerdown', () => {
+            const { from, to } = editor.state.selection; savedSelection = { from, to };
+        });
+        listen(control, 'change', () => { if (callback(control.value) !== false) refreshControls(); });
+        const wrapper = document.createElement('label');
+        wrapper.textContent = label + ' '; wrapper.appendChild(control); toolbar.appendChild(wrapper);
+        stateControls.push(() => {
+            const current = value();
+            control.dataset.mixed = String(current === undefined);
+            control.value = current == null ? '' : String(current);
+        });
+        return control;
+    }
+    function select(label, values, callback, value) {
+        const control = document.createElement('select');
+        // Mixed selections have an empty value; it is never an implicit default.
+        control.appendChild(new Option('', '', false, false));
+        for (const [key, text] of values) control.appendChild(new Option(text, key));
+        return fieldControl(label, control, callback, value);
+    }
+    function number(label, min, max, step, callback, value) {
+        const control = document.createElement('input');
+        control.type = 'number'; control.min = String(min); control.max = String(max); control.step = String(step);
+        return fieldControl(label, control, input => {
+            if (input !== '' && (!control.validity.valid || !Number.isFinite(Number(input)))) {
+                notice('Enter a value from ' + min + ' to ' + max + ' in steps of ' + step + '.'); return;
+            }
+            callback(input === '' ? null : Number(input));
+        }, value);
+    }
+    function toggle(label, feature, command) {
+        if (!allows(feature)) return;
+        const control = button(toolbar, label, () => mark(command));
+        stateControls.push(() => {
+            const value = markValue(feature);
+            control.setAttribute('aria-pressed', value === undefined ? 'mixed' : String(value));
+        });
+    }
+    if (allows('heading') || allows('namedStyle')) {
+        const values = [];
+        if (allows('namedStyle')) values.push(['title', 'Title']);
+        if (allows('heading')) for (let level = 1; level <= 3; level++) values.push(['h' + level, 'Heading ' + level]);
+        values.push(['body', 'Body']);
+        if (allows('namedStyle')) values.push(['caption', 'Caption'], ['note', 'Note']);
+        const style = select('Style', values, value => {
+            if (!value || insideList()) return;
+            perform(chain => chain.command(({ tr, state }) => {
+                const heading = /^h[1-3]$/.test(value);
+                const type = editor.schema.nodes[heading ? 'heading' : 'paragraph'];
+                for (const { node, pos } of selectedBlocks(state)) {
+                    const attrs = { ...node.attrs };
+                    delete attrs.level; delete attrs.namedStyle;
+                    if (heading) attrs.level = Number(value.slice(1));
+                    else if (allows('namedStyle')) attrs.namedStyle = value === 'body' ? null : value;
+                    tr.setNodeMarkup(pos, type, attrs);
+                }
+                return true;
+            }));
+        }, () => shared(selectedBlocks().map(({ node }) => node.type.name === 'heading' ? 'h' + node.attrs.level : node.attrs.namedStyle || 'body')));
+        stateControls.push(() => { style.disabled = insideList(); });
+    }
+    if (allows('fontFamily')) select('Font', [['box', 'Box font'], ...Object.keys(core.FONT_MAP).map(name => [name, name])],
+        value => { if (value) mark(value === 'box' ? 'unsetFontFamily' : 'setFontFamily', value); },
+        () => { const value = markValue('textStyle', 'fontFamily'); return value === null ? 'box' : value; });
+    if (allows('fontSize')) number('Size', 6, 48, .5,
+        value => mark(value == null ? 'unsetFontSize' : 'setFontSize', value == null ? undefined : value + 'px'),
+        () => { const value = markValue('textStyle', 'fontSize'); return value == null ? value : Number.parseFloat(value); });
+    toggle('Bold', 'bold', 'toggleBold');
+    toggle('Italic', 'italic', 'toggleItalic');
+    toggle('Underline', 'underline', 'toggleUnderline');
+    toggle('Strikethrough', 'strike', 'toggleStrike');
+    toggle('Subscript', 'subscript', 'toggleSubscript');
+    toggle('Superscript', 'superscript', 'toggleSuperscript');
+    function colorControl(label, feature, markName, attr, command) {
+        if (!allows(feature)) return;
+        const input = document.createElement('input'); input.type = 'text'; input.placeholder = '#rrggbb';
+        input.className = 'documentation-rich-color';
+        const apply = value => {
+            const color = cssColor(value);
+            if (!color) { notice('Enter a color such as #336699.'); return; }
+            mark(command, markName === 'highlight' ? { color } : color);
+        };
+        const value = () => markValue(markName, attr);
+        fieldControl(label, input, apply, value);
+        // A native picker sits beside the field (supervisor P3a-2): a pick applies one undoable change. It shows the
+        // shared colour, and black when the selection has none or mixes colours; the field stays empty then.
+        const picker = document.createElement('input'); picker.type = 'color';
+        picker.className = 'documentation-rich-color-picker';
+        picker.title = label + ' picker'; picker.setAttribute('aria-label', label + ' picker');
+        picker.dataset.richControl = input.dataset.richControl + '-picker';
+        listen(picker, 'pointerdown', () => {
+            const { from, to } = editor.state.selection; savedSelection = { from, to };
+        });
+        listen(picker, 'change', () => { apply(picker.value); refreshControls(); });
+        input.parentElement.appendChild(picker);
+        stateControls.push(() => {
+            const current = value();
+            picker.dataset.mixed = String(current === undefined);
+            picker.value = typeof current === 'string' ? current : '#000000';
+        });
+    }
+    colorControl('Text color', 'color', 'textStyle', 'color', 'setColor');
+    colorControl('Highlight color', 'highlight', 'highlight', 'color', 'setHighlight');
+    if (allows('highlight')) button(toolbar, 'Remove highlight', () => mark('unsetHighlight'));
+    if (allows('textAlign')) {
+        for (const align of ['left', 'center', 'right']) {
+            const control = button(toolbar, 'Align ' + align, () => paragraph('textAlign', align));
+            stateControls.push(() => control.setAttribute('aria-pressed', blockValue('textAlign') === undefined ? 'mixed' : String(blockValue('textAlign') === align)));
+        }
+        const reset = button(toolbar, 'Box alignment', () => paragraph('textAlign', null));
+        stateControls.push(() => reset.setAttribute('aria-pressed', blockValue('textAlign') === undefined ? 'mixed' : String(blockValue('textAlign') === null)));
+    }
+    function changeIndent(direction) {
+        if (!editor || disposed || saving) return false;
+        if (insideList()) {
+            if (direction < 0) return mark('liftListItem', 'listItem');
+            let deepest = 0;
+            for (const { pos } of selectedBlocks()) {
+                const resolved = editor.state.doc.resolve(pos + 1);
+                let itemDepth = resolved.depth;
+                while (itemDepth > 0 && resolved.node(itemDepth).type.name !== 'listItem') itemDepth--;
+                if (!itemDepth) continue;
+                let depth = 0;
+                for (let i = 0; i < itemDepth; i++) if (['bulletList', 'orderedList'].includes(resolved.node(i).type.name)) depth++;
+                function nested(node, extra = 0) {
+                    if (['bulletList', 'orderedList'].includes(node.type.name)) extra++;
+                    deepest = Math.max(deepest, depth + extra);
+                    node.forEach(child => nested(child, extra));
+                }
+                nested(resolved.node(itemDepth));
+            }
+            if (deepest >= capabilities.listDepth) { notice('Lists are limited to ' + capabilities.listDepth + ' levels.'); return true; }
+            return mark('sinkListItem', 'listItem');
+        }
+        if (!allows('indent')) return false;
+        return perform(chain => chain.command(({ tr, state }) => {
+            for (const { node, pos } of selectedBlocks(state)) {
+                const indent = Math.max(0, Math.min(72, (node.attrs.indent || 0) + direction * 18));
+                tr.setNodeMarkup(pos, undefined, { ...node.attrs, indent: indent || null });
+            }
+            return true;
+        }));
+    }
+    if (allows('indent') || allows('bulletList') || allows('orderedList')) {
+        for (const [direction, label] of [[-1, 'Decrease indent'], [1, 'Increase indent']]) {
+            const control = button(toolbar, label, () => changeIndent(direction));
+            stateControls.push(() => {
+                const list = insideList(), current = blockValue('indent');
+                control.disabled = !list && !allows('indent');
+                control.dataset.indent = current === undefined ? '' : String(current || 0);
+                control.setAttribute('aria-description', list ? 'Lift or sink the selected list item.'
+                    : current === undefined ? 'Mixed paragraph indents.' : 'Paragraph indent: ' + (current || 0) + ' pt.');
+            });
+        }
+    }
+    for (const [name, label] of [['spaceBefore', 'Space before'], ['spaceAfter', 'Space after']]) if (allows(name)) {
+        number(label, 0, 36, .5, value => paragraph(name, value || null), () => blockValue(name));
+    }
+    if (allows('lineHeight')) {
+        const spacing = select('Line spacing', ['1', '1.15', '1.2', '1.5', '2'].map(value => [value, value === '1.2' ? '1.2 (default)' : value]),
+            value => { if (value) paragraph('lineHeight', Number(value) === 1.2 ? null : Number(value)); },
+            () => {
+                const current = blockValue('lineHeight');
+                if (current != null && ![...spacing.options].some(option => option.value === String(current))) spacing.add(new Option(String(current), String(current)));
+                return current === null ? 1.2 : current;
+            });
+    }
+    function toggleList(command) {
+        return perform(chain => {
+            if (allows('namedStyle')) chain = chain.updateAttributes('paragraph', { namedStyle: null });
+            return chain[command]();
+        });
+    }
+    for (const [name, label, command] of [['bulletList', 'Bullets', 'toggleBulletList'], ['orderedList', 'Numbering', 'toggleOrderedList']]) if (allows(name)) {
+        const control = button(toolbar, label, () => toggleList(command));
+        stateControls.push(() => {
+            const value = shared(selectedBlocks().map(({ pos }) => {
+                const parent = editor.state.doc.resolve(pos + 1);
+                for (let depth = parent.depth; depth > 0; depth--) if (parent.node(depth).type.name === name) return true;
+                return false;
+            }));
+            control.setAttribute('aria-pressed', value === undefined ? 'mixed' : String(value));
+        });
+    }
+    if (allows('link')) {
+        const link = document.createElement('input'); link.type = 'url'; link.placeholder = 'https://example.com';
+        fieldControl('HTTP or HTTPS link', link, () => false, () => markValue('link', 'href'));
+        button(toolbar, 'Link', () => {
+            const href = core.href(link.value);
+            if (!href) { notice('Enter an absolute http:// or https:// link.'); return; }
+            mark('setLink', { href });
+        });
+        button(toolbar, 'Unlink', () => mark('unsetLink'));
+    }
+    button(toolbar, 'Clear formatting', () => perform(chain => chain.command(({ tr, commands }) => {
+        // Every selected block becomes a plain body paragraph outside every list, keeping its durable ID, and the
+        // selected text loses every mark; a caret clears its whole block. Tiptap's clearNodes lifts a nested list
+        // only one level per node: it split a six-level list into five one-item lists (supervisor P3a-2). Each
+        // selected block is lifted with the list command until it is in no list, so unselected items stay valid lists.
+        // Every lift runs on a fresh state of the current document and its steps are replayed onto this transaction:
+        // the list command maps positions through its transaction's whole mapping and the chain state caches its
+        // selection, so a second lift inside one chain threw "Inconsistent open depths" (supervisor P3a-2).
+        const EditorState = editor.state.constructor, lift = editor.extensionManager.commands.liftListItem('listItem');
+        const start = tr.steps.length, caret = tr.selection.empty ? tr.selection.from : null;
+        const from = caret == null ? tr.selection.from : tr.selection.$from.start();
+        const to = caret == null ? tr.selection.to : tr.selection.$from.end();
+        const mapping = () => tr.mapping.slice(start);
+        const bounds = () => [mapping().map(from, -1), mapping().map(to, 1)];
+        function inList(pos) {
+            const $pos = tr.doc.resolve(pos);
+            for (let depth = $pos.depth; depth > 0; depth--) if ($pos.node(depth).type.name === 'listItem') return true;
+            return false;
+        }
+        // Each lift moves one block a level out, so the summed depth bounds the passes.
+        for (let guard = 0; guard < core.LIMITS.nodes * core.LIMITS.lists; guard++) {
+            let target = null;
+            tr.doc.nodesBetween(...bounds(), (node, pos) => {
+                if (target != null) return false;
+                if (!node.isTextblock) return true;
+                if (inList(pos + 1)) target = pos + 1;
+                return false;
+            });
+            if (target == null) break;
+            commands.setTextSelection(target);
+            let lifted = null;
+            const fresh = EditorState.create({ doc: tr.doc, selection: tr.selection });
+            if (!lift({ state: fresh, dispatch: next => { lifted = next; } }) || !lifted) break;
+            for (const step of lifted.steps) tr.step(step);
+        }
+        const [a, b] = bounds();
+        tr.doc.nodesBetween(a, b, (node, pos) => {
+            if (!node.isTextblock) return true;
+            tr.setNodeMarkup(pos, editor.schema.nodes.paragraph, { id: node.attrs.id });
+            return false;
+        });
+        tr.removeMark(a, b);
+        commands.setTextSelection(caret == null ? { from: a, to: b } : mapping().map(caret));
+        return true;
+    })));
     for (const host of [element, panel, toolbar]) {
         listen(host, 'keydown', event => {
             if (event.key === 'Escape') { event.preventDefault(); if (!saving) close(); }
@@ -364,5 +790,6 @@ function mount(element, options) {
     });
     notice('Edit text, then choose Done.');
     editor.commands.focus('end');
+    refreshControls();
     return controller;
 }

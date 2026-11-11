@@ -39,12 +39,16 @@ def compare_docx(payload, target, model):
         assert _value(xml, './w:pPr/w:rPr/w:sz/@w:val') == str(round(p.font_size * 2))
         assert _value(xml, './w:pPr/w:spacing/@w:lineRule') == "atLeast"
         assert _value(xml, './w:pPr/w:spacing/@w:line') == str(round(20 * p.line_height * p.font_size))
-        assert _value(xml, './w:pPr/w:pStyle/@w:val') == ("Heading" + str(p.heading_level) if p.heading_level else None)
+        assert _value(xml, './w:pPr/w:pStyle/@w:val') == (p.named_style.title() if p.named_style else "Heading" + str(p.heading_level) if p.heading_level else None)
         assert _value(xml, './w:pPr/w:spacing/@w:before') == str(round(20 * p.space_before))
         assert _value(xml, './w:pPr/w:spacing/@w:after') == str(round(20 * p.space_after))
         assert _value(xml, './w:pPr/w:jc/@w:val') == ("both" if p.align == "justify" else p.align)
         if p.indent and not p.list_path:
             assert _value(xml, './w:pPr/w:ind/@w:left') == str(round(20 * p.indent))
+        base = p.base_run or model.base_run
+        assert _value(xml, './w:pPr/w:rPr/w:color/@w:val').lower() == base.color.lstrip("#").lower()
+        assert (_value(xml, './w:pPr/w:rPr/w:b/@w:val') == "1") == base.bold
+        assert (_value(xml, './w:pPr/w:rPr/w:i/@w:val') == "1") == base.italic
         expected_chars = []
         for run in p.runs:
             text = "\n" if run.kind == "break" else run.text.replace("\r", " ")

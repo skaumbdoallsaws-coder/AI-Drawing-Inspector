@@ -140,7 +140,10 @@ def test_the_tool_set_is_exact_typed_and_closed():
     assert schema["schemaVersion"]["enum"] == [1, 2]
     assert all(word in schema["doc"]["description"] for word in (
         "strike", "subscript", "superscript", "highlight", "fontFamily", "fontSize", "textAlign",
-        "spaceBefore", "spaceAfter", "lineHeight", "minimal version", "6 in schema 2"))
+        "spaceBefore", "spaceAfter", "lineHeight", "namedStyle", "title", "caption", "note",
+        "top-level paragraphs only", "minimal version", "6 in schema 2"))
+    reader = next(s for s in specs if s["name"] == "read_document_pages")
+    assert "richTextCapabilities" in reader["description"]
     plain = next(s for s in specs if s["name"] == "edit_document_text")["input_schema"]
     assert plain["properties"]["edits"]["items"]["properties"]["wholeFieldReplacement"] == {"type": "boolean"}
     assert "product_specification_sheet" in plain["properties"]["documentType"]["enum"]

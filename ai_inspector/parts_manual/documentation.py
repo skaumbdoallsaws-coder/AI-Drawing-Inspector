@@ -2311,6 +2311,12 @@ def apply_documentation_command_candidate(
         if target_type != "document_object" or current_object.get("type") != "text" or current_object.get("locked"):
             raise DocumentEditError("read_only_derived_field", "Only an unlocked authored text object supports rich text.")
         rich_text = validate_rich_text(command.get("richText"), reserved_ids=rich_reserved_ids(scene.get("pages", {}), page_id, target_id))
+        from ai_inspector.documentation.targets import rich_text_capabilities
+        from ai_inspector.documentation.rich_text import require_capabilities
+        target = {"targetType": target_type, "targetId": target_id, "pageId": page_id,
+                  "attributes": current_object, "richField": rich_field_read(current_value)}
+        require_capabilities(rich_text, rich_text_capabilities(target) or {},
+                             targets=[{"pageId": page_id, "targetId": target_id}])
     document_object = None
     if operation == "add_object":
         document_object = _document_object(

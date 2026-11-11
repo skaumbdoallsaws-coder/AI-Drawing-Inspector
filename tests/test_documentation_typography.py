@@ -1,4 +1,4 @@
-"""P3a-1 schema, real PDF/DOCX typography, and P2b-2 compatibility.
+"""P3a typography, capabilities, shared schema vectors and P2b-2 compatibility.
 
 Runtime/real-app gates are run by the supervisor, not by the sandbox builder.
 The independent geometry expectations below come from the supervisor's font
@@ -26,16 +26,16 @@ from tests.documentation_rich_export_support import compare_docx, compare_pdf
 
 ROOT = Path(__file__).resolve().parents[1]
 P2B2 = "49cdaed"
-# Independent expectations: family, ascent, descent, regular/bold underline width,
-# strike width (em). Do not import the production metric table here. Positions follow
+# Independent expectations: family, ascent, descent. Do not import the production
+# metric table here. Every schema uses CSS auto (size / 10). Positions follow
 # Chromium as measured at the supervisor gate: line-through centred a third of the
 # ascent above the baseline; an underline centred one thickness below it, which for
-# schema-1 and plain text (CSS auto) is a tenth of the size.
+# every schema and plain text (CSS auto) is a tenth of the size.
 METRICS = {
-    "Arial": ("Helvetica", .9053, .2119, .0732, .1050, .0498),
-    "Helvetica": ("Helvetica", .9053, .2119, .0732, .1050, .0498),
-    "Times New Roman": ("Times", .8911, .2163, .0488, .0952, .0498),
-    "Courier New": ("Courier", .8325, .3003, .0410, .1001, .0498),
+    "Arial": ("Helvetica", .9053, .2119),
+    "Helvetica": ("Helvetica", .9053, .2119),
+    "Times New Roman": ("Times", .8911, .2163),
+    "Courier New": ("Courier", .8325, .3003),
 }
 
 
@@ -214,15 +214,15 @@ def test_pdf_run_fonts_sizes_decorations_and_highlight(tmp_path, family, bold):
         marks.append(mark("bold"))
     payload, plan, package = render(envelope(paragraph(text("Proof", *marks))), tmp_path)
     run = plan.layout.lines[0].runs[0]
-    _, a, d, ur, ub, thickness = METRICS[family]
+    _, a, d = METRICS[family]
     assert run.font_size == 48
     assert run.baseline == pytest.approx(plan.layout.frame[1] + (1.2 + a - d) * 48 / 2)
     assert run.rect[1:] == pytest.approx((run.baseline - a * 48, run.x + run.width, run.baseline + d * 48))
     assert run.highlight_rect == pytest.approx(run.rect)
-    assert run.underline_offset == pytest.approx((ub if bold else ur) * 48)
-    assert run.underline_width == pytest.approx((ub if bold else ur) * 48)
+    assert run.underline_offset == pytest.approx(48 / 10)
+    assert run.underline_width == pytest.approx(48 / 10)
     assert run.strike_offset == pytest.approx(-a / 3 * 48)
-    assert run.strike_width == pytest.approx(thickness * 48)
+    assert run.strike_width == pytest.approx(48 / 10)
     table = proof.authored_tables(package["word/document.xml"])[0]
     assert proof.xp(table, './/w:r/w:rPr/w:strike/@w:val') == ["1"]
     assert proof.xp(table, './/w:r/w:rPr/w:shd/@w:fill') == ["FECC80"]
@@ -328,7 +328,7 @@ def test_python_and_js_font_table_stay_identical():
     # Static mirror assertion; no Node process or browser required by this test.
     source = (ROOT / "static/documentation_rich_text_core.js").read_text("utf-8")
     for metrics in rich_layout.canvas_font("Arial"), rich_layout.canvas_font("Times New Roman"), rich_layout.canvas_font("Courier New"):
-        for field in ("ascent", "descent", "underline_regular", "underline_bold", "strike_size", "script_size", "sub_offset", "sup_offset"):
+        for field in ("ascent", "descent", "script_size", "sub_offset", "sup_offset"):
             value = str(getattr(metrics, field)).replace("0.", ".")
             # JS may retain a terminal zero to document the measured precision.
             assert field + ": " + value in source
@@ -582,3 +582,109 @@ def test_schema2_scene_read_is_lossless_and_write_uses_minimal_version(tmp_path,
     scene.batch(ordinary, request_id="typography-one")
     assert scene.value()["schemaVersion"] == 1
     assert scene.value() == rich_text.validate(ordinary)
+
+
+_VECTORS = json.loads((ROOT / "tests/fixtures/rich_text_v2_vectors.json").read_text("utf-8"))
+
+
+@pytest.mark.parametrize("vector", _VECTORS, ids=lambda vector: vector["name"])
+def test_shared_schema_vectors(vector):
+    if "code" in vector:
+        invalid(vector["input"], vector["code"])
+    else:
+        assert canonical_bytes(rich_text.validate(vector["input"])) == canonical_bytes(vector["expected"])
+
+
+def test_feature_and_named_style_tables_match_javascript():
+    from ai_inspector.documentation.rich_fonts import NAMED_STYLES
+    flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    script = "const c=require('./static/documentation_rich_text_core.js');process.stdout.write(JSON.stringify({features:c.FEATURES,styles:c.NAMED_STYLES}));"
+    result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, check=True, creationflags=flags)
+    mirror = json.loads(result.stdout)
+    assert mirror == {"features": list(rich_text.FEATURES), "styles": NAMED_STYLES}
+
+
+@pytest.mark.parametrize("name,scale,bold,italic,color", [
+    ("title", 2.25, True, False, "#18212a"),
+    ("caption", .85, False, True, "#5b6670"),
+    ("note", .9, False, False, "#5b6670"),
+])
+def test_named_style_pdf_strut_and_docx_direct_formatting(tmp_path, name, scale, bold, italic, color):
+    value = envelope(paragraph(text("Styled "), text("override", mark("bold"), mark("italic"),
+        mark("textStyle", fontSize=6, color="#112233")), namedStyle=name, spaceBefore=3, spaceAfter=4, lineHeight=1.5))
+    _, plan, package = render(value, tmp_path)
+    p = plan.layout.content.paragraphs[0]
+    assert p.named_style == name and p.font_size == pytest.approx(12 * scale)
+    line = plan.layout.lines[0]
+    assert line.height == pytest.approx(1.5 * 12 * scale)
+    assert line.baseline == pytest.approx(plan.layout.frame[1] + 3 + (1.5 + .9053 - .2119) * 12 * scale / 2)
+    first_run, override = line.runs
+    assert first_run.font_size == pytest.approx(12 * scale)
+    assert (first_run.bold, first_run.italic, first_run.color) == (bold, italic, color)
+    assert (override.font_size, override.bold, override.italic, override.color) == (6, True, True, "#112233")
+    assert plan.layout.measured_height == pytest.approx(3 + 1.5 * 12 * scale + 4)
+    table = proof.authored_tables(package["word/document.xml"])[0]
+    assert proof.xp(table, './/w:pPr/w:pStyle/@w:val') == [name.title()]
+    assert proof.xp(table, './/w:pPr/w:rPr/w:sz/@w:val') == [str(round(24 * scale))]
+    assert proof.xp(table, './/w:pPr/w:rPr/w:color/@w:val') == [color[1:].upper()]
+    # The template's Title style carries a bottom border, contextual spacing, letter spacing and kerning; the
+    # paragraph turns them off directly so Word shows the canvas look (supervisor P3a-2).
+    paragraph_props = proof.xp(table, './/w:p/w:pPr')[0]
+    assert proof.xp(paragraph_props, './w:pBdr/*/@w:val') == ["nil"] * 6
+    assert proof.xp(paragraph_props, './w:contextualSpacing/@w:val') == ["0"]
+    order = [child.tag.rsplit("}", 1)[1] for child in paragraph_props]
+    assert order == sorted(order, key=["pStyle", "keepNext", "keepLines", "widowControl", "pBdr", "spacing",
+                                       "contextualSpacing", "jc", "rPr"].index)
+    for props in proof.xp(table, './/w:rPr'):
+        assert proof.xp(props, './w:spacing/@w:val') == ["0"] and proof.xp(props, './w:kern/@w:val') == ["0"]
+    styles = package["word/styles.xml"]
+    assert proof.xp(styles, './w:style[@w:styleId="' + name.title() + '"]')
+    if name == "note":
+        assert proof.xp(styles, './w:style[@w:styleId="Note"]/w:basedOn/@w:val') == ["Normal"]
+
+
+def test_adding_strike_does_not_change_existing_underlines():
+    value = envelope(paragraph(text("underlined", mark("underline"))), version=1)
+    old = rich_layout.layout_text(value, (0, 0, 500, 300), {"fontSize": 48})
+    value["schemaVersion"] = 2
+    value["doc"]["content"].append(envelope(paragraph(text("strike", mark("strike"))))["doc"]["content"][0])
+    value["doc"]["content"][-1]["attrs"]["id"] = "rt-00000000-0000-4000-8000-000000000999"
+    new = rich_layout.layout_text(value, (0, 0, 500, 300), {"fontSize": 48})
+    assert old.lines[0] == new.lines[0]
+    assert old.lines[0].runs[0].underline_width == pytest.approx(4.8)
+    assert old.lines[0].runs[0].underline_offset == pytest.approx(4.8)
+
+
+def test_rich_capability_read_shape_and_feature_inventory(tmp_path, monkeypatch):
+    from tests.test_documentation_rich_text import RichScene
+    monkeypatch.setenv(rich_text.FEATURE_FLAG, "on")
+    scene = RichScene(tmp_path)
+    field = scene.field()
+    assert field["richTextEligible"]
+    assert field["richTextCapabilities"] == {"schemaVersions": [1, 2], "features": list(rich_text.FEATURES), "listDepth": 6}
+    value = rich_text.validate(envelope(paragraph(text("title", mark("textStyle", fontSize=12, color="#112233")), namedStyle="title"), nested(6)))
+    assert rich_text.used_features(value) == {"features": ["bulletList", "color", "fontSize", "namedStyle"], "listDepth": 6}
+    scene.batch(value)
+    before = scene.path.read_bytes()
+    assert scene.field()["richText"] == value
+    assert scene.path.read_bytes() == before
+
+
+@pytest.mark.parametrize("narrow", ["features", "schemaVersions", "listDepth"])
+@pytest.mark.parametrize("write", ["edit", "batch"])
+def test_target_capabilities_are_enforced_on_both_write_paths(tmp_path, monkeypatch, narrow, write):
+    from ai_inspector.documentation import targets
+    from tests.test_documentation_rich_text import RichScene, PAGE, OBJECT
+    monkeypatch.setenv(rich_text.FEATURE_FLAG, "on")
+    scene = RichScene(tmp_path)
+    caps = {"schemaVersions": [1, 2], "features": list(rich_text.FEATURES), "listDepth": 6}
+    value = rich_text.validate(envelope(nested(4))) if narrow == "listDepth" else rich_text.validate(envelope(paragraph(text("x", mark("strike")))))
+    caps[narrow] = [] if narrow == "features" else [1] if narrow == "schemaVersions" else 3
+    monkeypatch.setattr(targets, "rich_text_capabilities", lambda target: deepcopy(caps))
+    before = scene.path.read_bytes()
+    with pytest.raises(DocumentEditError) as caught:
+        getattr(scene, write)(value)
+    assert caught.value.code == "unsupported_rich_text_feature"
+    assert caught.value.details["targets"] == [{"pageId": PAGE, "targetId": OBJECT}]
+    assert caught.value.details["features"] == (["bulletList"] if narrow == "listDepth" else ["strike"])
+    assert scene.path.read_bytes() == before

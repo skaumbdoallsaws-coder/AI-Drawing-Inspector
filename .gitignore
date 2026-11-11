@@ -37,6 +37,7 @@ venv/
 !generated/cad_feature_icon_candidates/*.json
 !tests/fixtures/viewport_authorization_cases.json
 !tests/fixtures/skill_route_cases.json
+!tests/fixtures/rich_text_v2_vectors.json
 !docs/agent-skills-phase0-baseline.json
 !docs/facility-layout-kf0-*.json
 !ai_inspector/agent_skills/schemas/*.json

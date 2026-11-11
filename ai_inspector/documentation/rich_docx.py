@@ -6,7 +6,7 @@ from .commands import DocumentEditError
 from .rich_fonts import font
 from .rich_layout import authored_objects, content_model, PADDING, LIST_INDENT
 
-DOCX_RENDERER_VERSION = "authored-text-docx-2"
+DOCX_RENDERER_VERSION = "authored-text-docx-3"
 
 
 def font_family(value):
@@ -20,6 +20,15 @@ _SPACE_EM = {"Arial": 0.278, "Times New Roman": 0.25, "Courier New": 0.6}
 
 def marker_gap(paragraph):
     return round(_SPACE_EM[font_family(paragraph.font_family)] * paragraph.font_size * 20)
+
+
+# w:pPr child order (ECMA-376 CT_PPr); python-docx does not export its own copy.
+_PPR_ORDER = ("w:pStyle", "w:keepNext", "w:keepLines", "w:pageBreakBefore", "w:framePr", "w:widowControl", "w:numPr",
+              "w:suppressLineNumbers", "w:pBdr", "w:shd", "w:tabs", "w:suppressAutoHyphens", "w:kinsoku", "w:wordWrap",
+              "w:overflowPunct", "w:topLinePunct", "w:autoSpaceDE", "w:autoSpaceDN", "w:bidi", "w:adjustRightInd",
+              "w:snapToGrid", "w:spacing", "w:ind", "w:contextualSpacing", "w:mirrorIndents", "w:suppressOverlap", "w:jc",
+              "w:textDirection", "w:textAlignment", "w:textboxTightWrap", "w:outlineLvl", "w:divId", "w:cnfStyle",
+              "w:rPr", "w:sectPr", "w:pPrChange")
 
 
 def _element(name, **attributes):
@@ -41,6 +50,11 @@ def _properties(run, paragraph):
     if run.strike:
         props.append(_element("w:strike", val="1"))
     props.append(_element("w:color", val=run.color.lstrip("#").upper()))
+    if paragraph.named_style:
+        # Word's built-in Title style spaces its letters out (0.25 pt) and kerns them; the canvas does neither.
+        # Zero turns both off (supervisor P3a-2).
+        props.append(_element("w:spacing", val=0))
+        props.append(_element("w:kern", val=0))
     size = round(2 * (run.font_size if run.font_size is not None else paragraph.font_size))
     props.append(_element("w:sz", val=size))
     props.append(_element("w:szCs", val=size))
@@ -243,7 +257,14 @@ class DocxObjects:
         cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
         for index, model in enumerate(item.content.paragraphs):
             paragraph = cell.paragraphs[0] if index == 0 else cell.add_paragraph()
-            if model.heading_level:
+            if model.named_style:
+                from docx.enum.style import WD_STYLE_TYPE
+                name = model.named_style.title()
+                if name not in self.output.styles:
+                    added = self.output.styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)
+                    added.base_style = self.output.styles["Normal"]
+                paragraph.style = self.output.styles[name]
+            elif model.heading_level:
                 paragraph.style = self.output.styles[f"Heading {model.heading_level}"]
             fmt = paragraph.paragraph_format
             fmt.space_before = Pt(model.space_before)
@@ -277,7 +298,16 @@ class DocxObjects:
                     tabs.append(_element("w:tab", val="num", pos=round((LIST_INDENT * depth + model.indent) * 20)))
             elif model.indent:
                 props.get_or_add_ind().set(qn("w:left"), str(round(model.indent * 20)))
-            base = replace(item.content.base_run, bold=item.content.base_run.bold or bool(model.heading_level))
+            if model.named_style:
+                # The template's Title style draws a bottom border and its contextual spacing drops the space between
+                # two Title paragraphs; the canvas has neither (supervisor P3a-2). Direct formatting turns both off.
+                borders = _element("w:pBdr")
+                for side in ("top", "left", "bottom", "right", "between", "bar"):
+                    borders.append(_element("w:" + side, val="nil"))
+                props.insert_element_before(borders, *_PPR_ORDER[_PPR_ORDER.index("w:pBdr") + 1:])
+                props.insert_element_before(_element("w:contextualSpacing", val=0),
+                                            *_PPR_ORDER[_PPR_ORDER.index("w:contextualSpacing") + 1:])
+            base = model.base_run or replace(item.content.base_run, bold=item.content.base_run.bold or bool(model.heading_level))
             props.append(_properties(base, model))
             for run, kind, value in tokens(model):
                 element = _element("w:r")

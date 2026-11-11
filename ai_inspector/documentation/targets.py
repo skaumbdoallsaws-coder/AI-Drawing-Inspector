@@ -174,6 +174,14 @@ def capabilities(target):
     return result
 
 
+def rich_text_capabilities(target):
+    """Authored text boxes only this round; no new narrative targets are admitted."""
+    from .rich_text import FEATURES
+    if target.get("targetType") != "document_object" or target.get("richField") is None:
+        return None
+    return {"schemaVersions": [1, 2], "features": list(FEATURES), "listDepth": 6}
+
+
 def read_targets(state: dict, targets: Mapping[str, dict], requested: list[dict], *, limit=65536) -> dict:
     if not 1 <= len(requested) <= 12:
         raise DocumentEditError("invalid_document_operation", "Read 1-12 targets at a time.")
@@ -198,7 +206,8 @@ def read_targets(state: dict, targets: Mapping[str, dict], requested: list[dict]
                        "capabilities": [] if conflict_ids else capabilities(target), "binding": binding(owned),
                        "owner": "slots" if target["operation"] == "set_slot_value" else "scene",
                        "revision": owned["revision"],
-                       **({**rich, "richTextEligible": True, "plainEditConsequence": PLAIN_EDIT_CONSEQUENCE,
+                       **({**rich, "richTextEligible": True, "richTextCapabilities": rich_text_capabilities(target),
+                           "plainEditConsequence": PLAIN_EDIT_CONSEQUENCE,
                            "wholeFieldReplacementRequired": rich["isRichText"]} if rich else {})})
     from .refresh import open_conflicts
     result = {**binding(state), "documentationRichText": rich_text_enabled(), "openConflictCount": len(open_conflicts(state)), "sceneRevision": state.get("sceneRevision"), "targets": output,

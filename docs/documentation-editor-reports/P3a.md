@@ -138,3 +138,132 @@ except the prescribed y and decoration moves, now with the `auto` underline rule
 - P4b: plain text boxes whose font is Georgia or Inter still draw that font on the canvas (the textContent path),
   while the exports use Times or Helvetica. This predates P3a. Map the box font as rich objects now do, or cover it in
   the fidelity matrix.
+
+## P3a-2
+
+### CHANGED
+
+- `ai_inspector/documentation/rich_text.py` and `rich_fonts.py`: top-level paragraph named styles, the shared feature vocabulary, feature/depth inventory, capability validation, and CSS-auto decoration metrics in every schema. Removed the obsolete font-specific decoration thicknesses.
+- `rich_layout.py` and `rich_docx.py`: Title, Caption and Note base formatting, paragraph struts, explicit run overrides, native DOCX styles with direct formatting, and renderer cache-version bumps. Removed `Content.schema2`; retained the schema-1 compatibility oracle.
+- `targets.py`, `parts_manual/documentation.py` and `codex_runtime/documentation_tools.py`: additive `richTextCapabilities` reads, capability enforcement on the shared UI/Sage write path, and updated tool descriptions. Target eligibility and tool names remain as authorized for this slice.
+- `static/documentation_rich_text.js`, `documentation_rich_text_core.js`, `documentation_rich_text.css` and `index.html`: capability-scoped extensions and the ordered ribbon controls; schema-2 editing; named styles; selection state, resets, local undo boundaries, bounded lists, paste mapping and minimal-version saves. Static/editor typography shares CSS. An editor-only underline wrapper preserves sized-link and box-underline rendering without entering stored JSON. Clear formatting preserves paragraph IDs. The full toolbar uses an attached ribbon strip. Changed static URLs were bumped to `20261110-p3a-2`; plain boxes also disable ink skipping.
+- `tests/test_documentation_typography.py`, `documentation_rich_text.test.cjs`, `documentation_rich_export_support.py`, `test_documentation_rich_exports.py` and `test_codex_documentation_tools.py`: named-style/export checks, auto decorations, narrowed capabilities, mirror tests, paste/read-only coverage and updated pins. Added 230 shared vectors in `tests/fixtures/rich_text_v2_vectors.json`; `.gitignore` allows only that requested fixture through the existing JSON ignore rule.
+- `tests/smoke_documentation_editor.py`: P3a part 2 exercises the real ribbon, expected canonical envelopes, local/document undo, clear formatting, paste, reopen, capabilities and canvas/PDF/DOCX comparisons. Part 1 now checks schema-2 mounting and the auto strike rule. P2a/P2b flows remain unchanged; the shared canvas helper also measures the editor's content.
+
+### TESTS
+
+Final static checks only, all passed:
+
+- AST parsing of all 12 changed Python files.
+- `node --check` on both changed JavaScript modules and `tests/documentation_rich_text.test.cjs`.
+- Syntax compilation of four inline application scripts and 86 smoke JavaScript snippets.
+- JSON parsing of the 230 shared vectors; no vector assertions executed.
+- `git diff --check`, LF checks, ASCII checks on added `index.html` lines, and verification that the untouched `server.py` retains its UTF-8 BOM.
+
+### NOT RUN
+
+No pytest, Node test suite, baseline, browser smoke, PDF/DOCX rendering or Word review ran. No visual artifacts were produced here. Claude should run these through the existing hidden Windows launcher:
+
+~~~text
+python -m pytest -q tests/test_documentation_typography.py tests/test_documentation_rich_text.py tests/test_documentation_rich_exports.py
+python -m pytest -q tests/test_documentation_transactions.py tests/test_documentation_provenance.py tests/test_documentation_change_undo.py tests/test_documentation_refresh.py tests/test_documentation_store_chokepoint.py tests/test_documentation_editor_smoke.py tests/test_documentation_conflicts_ui.py tests/test_codex_documentation_tools.py tests/test_codex_specification_sheet_tools.py tests/test_codex_readonly_pilot.py tests/test_codex_assisted_tools.py
+python -m pytest -q tests/test_parts_manual.py tests/test_specification_sheet_workflow.py tests/test_operations_manual_workspace.py tests/test_work_instruction_workflow.py
+node --test tests/documentation*.test.cjs
+python tools/documentation_baseline.py --check
+python tools/documentation_baseline.py --local --check
+python tests/smoke_documentation_editor.py --phase P1a
+python tests/smoke_documentation_editor.py --phase P1b
+python tests/smoke_documentation_editor.py --phase P1c
+python tests/smoke_documentation_editor.py --phase P2a
+python tests/smoke_documentation_editor.py --phase P2b
+python tests/smoke_documentation_editor.py --phase P3a
+python -c "import glob,sys,pytest; sys.exit(pytest.main(['-q']+sorted({p for pattern in ('tests/test_documentation*.py','tests/test_parts_manual*.py','tests/test_operations_manual*.py','tests/test_specification_sheet*.py','tests/test_work_instruction*.py','tests/test_inspection_sheet*.py') for p in glob.glob(pattern)})))"
+python -c "import glob,sys,pytest; sys.exit(pytest.main(['-q']+sorted({p for pattern in ('tests/test_codex*.py','tests/test_facility*.py','tests/test_authored*.py','tests/test_sage*.py','tests/test_industrial*.py') for p in glob.glob(pattern)})))"
+~~~
+
+The compatibility oracle requires commit `49cdaed`. Review the P3a screenshots/exports and render the DOCX in Word.
+
+### DEVIATIONS
+
+Scope follows the revised P3a-2 instructions. Wider eligibility remains P3a-3; find/replace and symbols remain P3a-4. Color controls accept color text so mixed selections can display an empty value.
+
+DOCX retains Word's script geometry and half-point font-size units. Consequently, fractional named-style sizes round to the nearest half point, as existing heading sizes do; exact Word/canvas geometry is not claimed.
+
+### OPEN QUESTIONS
+
+The supplied Chromium measurements are implemented: auto strokes are size / 10 thick, strike is centered ascent / 3 above the baseline, and underline is centered one thickness below it. Chromium snaps paint to pixels; exports retain exact units. No new Chromium measurements were made here.
+
+Runtime acceptance is pending, especially the expanded ribbon, per-run inherited underline, named-style geometry, selection/undo behavior and editor/static measurements. Every new style still needs the real-app measurement gate before shipping. Work is uncommitted and ready for supervisor review.
+
+## P3a-2 supervisor gate
+
+Reviewed, fixed and gated by Claude on 2026-11-10. Codex's build ran static checks only; every run below was made
+here, in the worktree, one heavy job at a time.
+
+### Findings and fixes
+
+1. DOCX: Word's built-in Title style (python-docx's default template, which the exports start from) carries a bottom
+   border (single, 4F81BD), contextual spacing, 0.25 pt letter spacing and kerning from 14 pt. Direct run formatting
+   overrode the font, size, colour, bold and italic, but not these, so Word drew a blue rule under every Title and
+   set it wider than the canvas. A named-style paragraph now turns them off directly: every pBdr side "nil",
+   contextualSpacing 0 (in CT_PPr order), and run/paragraph-mark spacing 0 and kern 0. The template's Caption style
+   (bold, blue, 9 pt) was already overridden by the explicit b/i/color/sz. Schema-1 DOCX bytes are unchanged (the
+   49cdaed oracle passes). The named-style test also parsed an already-parsed styles part (3 failures); it now uses
+   the parsed part and asserts the new properties and the pPr order.
+2. Clear formatting split nested lists. Tiptap's clearNodes lifts each node one level only: clearing a six-level list
+   saved five separate one-item bullet lists and a paragraph (smoke P3a 121/123; both clear checks failed). Clear
+   formatting now lifts each selected block with the list command until it is in no list, then makes every selected
+   block a plain paragraph with its own ID and removes every mark in the selection; a caret clears its whole block.
+   Unselected items stay valid lists: a new smoke check clears "List 3" alone and expects List 1 > List 2, then the
+   paragraph, then List 4 > List 5 > List 6, with List 3's ID kept. The first version of this fix ran the list
+   command inside the ribbon's chain and threw "Inconsistent open depths" on the second lift (rerun 120/124, all
+   three clear checks plus the browser-error check): prosemirror-schema-list maps positions through its
+   transaction's whole mapping, and Tiptap's chain state caches its selection until `tr` is read. Each lift now runs
+   on a fresh EditorState of the current document and its steps are replayed onto the chain's transaction. A
+   harness that runs the shipped Clear formatting code against the pinned bundle passes a caret clear inside a
+   six-level list, select-all, a range across three levels and a multi-paragraph ordered item: IDs kept, no page
+   errors, and one undo restores the original exactly.
+3. Colour controls were text fields only (the build's deviation, so a mixed selection can show an empty value). A
+   native colour picker now sits beside each field: a pick applies the colour as one undoable change; the picker
+   shows the shared colour, or black when the selection has none or mixes colours (the field stays empty then).
+   New smoke checks: the picker mirrors the field, a pick updates the field, one Ctrl+Z restores the previous
+   colour, and no highlight shows black.
+
+Accepted as built: the capability vocabulary, inventory and refusal (unsupported_rich_text_feature on both write
+paths); readOnlyReason over capabilities; the 230 shared vectors (pytest validate and Node normalize agree); the
+editor-only underline mark for links and underlined boxes (never stored: normalize drops it, Node test); the
+dispatch wrapper that keeps list depth, named-style placement and the presentation mark in each transaction; the
+closeHistory meta key (the pinned bundle's PluginKey name) that starts one undo group per ribbon action; the Title,
+Caption and Note table; CSS auto decorations in every schema with skip-ink none on all authored text.
+
+### Visual review
+
+- Ribbon (p3a-part2-ribbon.png, 1720 x 1080): every control in the brief's order on a three-row strip below the
+  command bar; toggles show their pressed state; the colour pickers sit beside their fields.
+- Edited box (p3a-p3a2-edited.png) against Word 16's render of the smoke DOCX: Title, Caption and Note sizes and
+  colours; the Styled run (bold, italic, underline, strike, colour, highlight); sub and sup; the link; centred and
+  right alignment; indent and spacing; six list levels with the same bullet glyphs. Word draws no rule under the
+  Title, and the Caption is grey italic, not bold. The PDF is compared line by line by the smoke
+  (typography_export_check).
+- A schema-2 box mounts the editor without moving text (p3a-schema2-editor.png); the editor's lines match the static
+  view within 1 px (smoke check).
+
+### Numbers
+
+- Node 274/274 (rich text 256, conflicts 18).
+- Focused suite 1174 passed (after the fixes; Codex's build had 1171 plus the 3 named-style test failures).
+- Clear formatting harness (the shipped code against the pinned bundle in Chromium): 5/5 cases, undo exact.
+- Smoke P3a: run 1 121/123 (both clear checks), run 2 120/124 (the first clear fix), run 3 128/128, and 128/128
+  again in the gate chain.
+- Smokes P2b 36/36, P2a 23/23, P1a 27/27, P1b 46/46, P1c 35/35.
+- Both baseline checks exit 0 (stores reopened unchanged).
+- Documentation suites 1231 passed plus the 1 pre-existing failure
+  (test_operations_manual_precoding_contracts::test_source_ids_references_and_local_hashes_are_closed).
+- Wide suites 170 failed / 9 errors / 3851 passed: the same 179 failure IDs as at P3a-1, nothing new.
+- Word 16 render of the smoke's edited DOCX (2 pages), checked against the canvas.
+
+### Notes for later slices
+
+- The editing toolbar is a three-row strip that overlays the top of the canvas (about 90 px at 1720 x 1080). A box at
+  the very top of a page can sit under it while editing. Reserve the space or dock the strip in the UX pass (P5a).
+- DOCX scripts and half-point sizes stay Word's own (the build's note): a 0.85 x 12 pt caption is 10 pt in Word.

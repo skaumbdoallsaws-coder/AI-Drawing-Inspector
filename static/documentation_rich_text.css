@@ -27,8 +27,8 @@
 .documentation-rich-panel[data-conflict="true"] { border-color: #e6ad45; }
 .documentation-rich-actions, .documentation-rich-controls { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
 .documentation-rich-message { margin-bottom: 6px; }
-.documentation-rich-controls { pointer-events: auto; width: 350px; max-width: 350px; gap: 3px; }
-.documentation-rich-controls input, .documentation-rich-controls button,
+.documentation-rich-controls { pointer-events: auto; width: 100%; max-height: 106px; overflow: auto; gap: 3px; }
+.documentation-rich-controls input, .documentation-rich-controls select, .documentation-rich-controls button,
 .documentation-rich-panel button {
     pointer-events: auto; color: #edf6ff; background: #213b4c; border: 1px solid #547083;
     border-radius: 3px; padding: 4px 7px; font: 12px Arial, sans-serif;
@@ -54,3 +54,26 @@
 .documentation-rich-content :is(ul, ol) ul { list-style-type: circle; }
 .documentation-rich-content :is(ul, ol) :is(ul, ol) ul { list-style-type: square; }
 .documentation-rich-content ol { list-style-type: decimal; }
+
+/* The editor and static renderer share this contract; no UA decoration or named-style defaults. */
+.documentation-rich-content, .documentation-rich-content * { text-decoration-skip-ink: none; }
+.documentation-rich-content :is(u, s, a) { text-decoration-thickness: auto; }
+.documentation-rich-content p[data-named-style="title"] { font-size: 2.25em; font-weight: 700; }
+.documentation-rich-content p[data-named-style="caption"] { font-size: .85em; font-style: italic; color: #5b6670; }
+.documentation-rich-content p[data-named-style="note"] { font-size: .9em; color: #5b6670; }
+.documentation-rich-controls label { white-space: nowrap; font: 11px Arial, sans-serif; }
+.documentation-rich-controls input[type="number"] { width: 58px; }
+.documentation-rich-controls .documentation-rich-color { width: 76px; }
+.documentation-rich-controls .documentation-rich-color-picker { width: 26px; height: 20px; padding: 0 1px; margin-left: 3px; vertical-align: middle; }
+.documentation-rich-controls [aria-pressed="true"] { background: #356f91; border-color: #8ed5ff; }
+.documentation-rich-controls [aria-pressed="mixed"] { border-style: dashed; }
+.documentation-rich-controls :disabled { opacity: .5; }
+
+/* The full editing toolbar occupies an attached ribbon strip. The other ribbon
+   commands stay reachable, and the page keeps its layout while editing starts. */
+.documentation-ribbon-commandbar:has(.documentation-rich-controls) { position: relative; }
+.documentation-ribbon-commandbar:has(.documentation-rich-controls) [data-documentation-ribbon-group="format"] {
+    position: absolute; left: 0; right: 0; top: 100%; z-index: 51;
+    background: #122532; color: #eef6fc; border: 1px solid #547083;
+    box-shadow: 0 3px 10px #0005; padding: 6px;
+}

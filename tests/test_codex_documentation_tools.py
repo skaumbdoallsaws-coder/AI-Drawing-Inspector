@@ -135,6 +135,12 @@ def test_the_tool_set_is_exact_typed_and_closed():
     assert batch["read_only"] is False
     variants = batch["input_schema"]["properties"]["operations"]["items"]["anyOf"]
     assert {item["properties"]["operation"]["enum"][0] for item in variants} == {"replace_text", "set_slot_value", "replace_rich_text"}
+    rich = next(v for v in variants if v["properties"]["operation"]["enum"] == ["replace_rich_text"])
+    schema = rich["properties"]["richText"]["properties"]
+    assert schema["schemaVersion"]["enum"] == [1, 2]
+    assert all(word in schema["doc"]["description"] for word in (
+        "strike", "subscript", "superscript", "highlight", "fontFamily", "fontSize", "textAlign",
+        "spaceBefore", "spaceAfter", "lineHeight", "minimal version", "6 in schema 2"))
     plain = next(s for s in specs if s["name"] == "edit_document_text")["input_schema"]
     assert plain["properties"]["edits"]["items"]["properties"]["wholeFieldReplacement"] == {"type": "boolean"}
     assert "product_specification_sheet" in plain["properties"]["documentType"]["enum"]

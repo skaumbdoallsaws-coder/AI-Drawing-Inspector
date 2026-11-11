@@ -197,7 +197,7 @@ def write_json(path, value):
 class IsolatedDocumentationServer:
     def __init__(self, output, phase=None):
         self.output = output
-        self.rich_text = phase in {"P2a", "P2b"}
+        self.rich_text = phase in {"P2a", "P2b", "P3a"}
         self.temporary = self.process = self.log = None
         self.original = {}
 
@@ -892,7 +892,7 @@ def rich_browser_helpers(page, request, server, output, report, begin_edit, fres
     def field(payload, key=object_id):
         return next(row for row in payload["richTextFields"] if row["legacyTargetId"] == key)
 
-    def create(kind, key, value):
+    def create(kind, key, value, *, frame=None, style=None):
         before = scene(kind)
         page_id = before["document"]["pages"][0]["pageId"]
         response = request.post(base(kind) + "/documentation-scene/commands", data={
@@ -900,8 +900,8 @@ def rich_browser_helpers(page, request, server, output, report, begin_edit, fres
             "manualPlanRevision": before["scene"]["manualPlanRevision"],
             "operation": "add_object", "pageId": page_id, "targetType": "document_object", "targetId": key,
             "documentObject": {"objectId": key, "type": "text", "name": "Rich text proof", "source": "user",
-                "content": value, "frame": {"x": 0.12, "y": 0.28, "width": 0.66, "height": 0.24},
-                "styleOverrides": {"fontSize": 16, "fill": "#FFFFFF", "color": "#18212A"}}}, timeout=120000)
+                "content": value, "frame": frame or {"x": 0.12, "y": 0.28, "width": 0.66, "height": 0.24},
+                "styleOverrides": {"fontSize": 16, "fill": "#FFFFFF", "color": "#18212A", **(style or {})}}}, timeout=120000)
         if not response.ok:
             raise RuntimeError(response.text()[:1000])
         response.body()  # Consume writes before any reload or navigation.
@@ -981,6 +981,26 @@ def rich_browser_helpers(page, request, server, output, report, begin_edit, fres
         page.wait_for_function("() => window.DocumentationRichText.mountedCount === 0", timeout=120000)
         idle()
         return saved.value.json()
+
+    def press_export(kind, format="pdf"):
+        with page.expect_response(lambda r: r.request.method == "POST" and r.url == base(kind) + "/pdf", timeout=600000) as response:
+            page.locator("#documentationExportDocxRibbon" if format == "docx" else "#documentationPublishRibbon").click()
+        response.value.finished()  # Never reload with a large POST body in flight.
+        idle()
+        return response.value, response.value.json()
+
+    def download(artifact, filename):
+        assert artifact.get("url", "").startswith("/api/"), artifact
+        response = request.get(server.url + artifact["url"], timeout=120000)
+        assert response.ok, response.text()[:500]
+        payload = response.body()
+        (output / filename).write_bytes(payload)
+        report.setdefault("exportArtifacts", []).append({"file": filename, "sha256": hashlib.sha256(payload).hexdigest(),
+                                                         "bytes": len(payload)})
+        return payload
+
+    def canvas_lines(key=object_id):
+        return box(key).evaluate(CANVAS_LINES_JS)
 
     def screenshot(name):
         filename = phase.lower() + "-" + name + ".png"
@@ -1238,33 +1258,128 @@ def run_p2a(page, request, server, output, report, record, begin_edit, tool, fre
 CANVAS_LINES_JS = """
 box => {
   const rect = box.getBoundingClientRect();
-  const scale = rect.width / box.offsetWidth;
+  const scale = rect.width / parseFloat(getComputedStyle(box).width);
   const style = getComputedStyle(box);
   const insetLeft = parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft);
   const insetTop = parseFloat(style.borderTopWidth) + parseFloat(style.paddingTop);
+  const local = r => ({left: (r.left - rect.left) / scale - insetLeft,
+    top: (r.top - rect.top) / scale - insetTop,
+    right: (r.right - rect.left) / scale - insetLeft, bottom: (r.bottom - rect.top) / scale - insetTop});
   const lines = [];
-  let current = null;
+  let current = null, currentBlock = null;
+  const tolerance = box.querySelector('.documentation-rich-content')?.dataset.schemaVersion === '2' ? 1.25 : 2.5;
   const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
   while (walker.nextNode()) {
-    const text = walker.currentNode;
-    if (text.parentElement.closest('.documentation-resize-handle')) continue;
-    for (let i = 0; i < text.data.length; i++) {
+    const text = walker.currentNode, parent = text.parentElement;
+    if (parent.closest('.documentation-resize-handle')) continue;
+    const css = getComputedStyle(parent), size = parseFloat(css.fontSize);
+    const metrics = DocumentationRichTextCore.font(css.fontFamily.replaceAll('"', ''));
+    const script = parent.closest('sub, sup');
+    const shift = script ? parseFloat(getComputedStyle(script).top) : 0;
+    const block = parent.closest('p,h1,h2,h3');
+    // Range rectangles use the font content box, not the line box. Infer the
+    // common baseline, undoing only position:relative's paint shift. Large,
+    // small, mixed-family and scripted glyphs then stay on the same line.
+    for (let i = 0; i < text.data.length;) {
+      const length = text.data.codePointAt(i) > 0xffff ? 2 : 1;
       const range = document.createRange();
-      range.setStart(text, i); range.setEnd(text, i + 1);
+      range.setStart(text, i); range.setEnd(text, i + length);
       const r = [...range.getClientRects()].pop();
-      if (!r) continue;
-      const left = (r.left - rect.left) / scale - insetLeft, top = (r.top - rect.top) / scale - insetTop;
-      if (!current || top > current.top + 2) { current = { top, left, text: '' }; lines.push(current); }
-      current.left = Math.min(current.left, left);
-      current.text += text.data[i];
+      if (!r) { i += length; continue; }
+      const glyph = local(r), baseline = glyph.top + metrics.ascent * size - shift;
+      if (!current || block !== currentBlock || Math.abs(baseline - current.baseline) > tolerance) {
+        current = {top: glyph.top, bottom: glyph.bottom, left: glyph.left, baseline, text: '', glyphs: []};
+        lines.push(current); currentBlock = block;
+      }
+      current.left = Math.min(current.left, glyph.left);
+      current.text += text.data.slice(i, i + length);
+      current.glyphs.push({text: text.data.slice(i, i + length), ...glyph, size, family: metrics.canvas});
+      i += length;
     }
   }
   const blocks = [...box.children].filter(child => !child.classList.contains('documentation-resize-handle'));
   const bottom = Math.max(...blocks.map(child => child.getBoundingClientRect().bottom));
-  return { scale, width: box.offsetWidth, height: box.offsetHeight, lines,
+  const highlights = [...box.querySelectorAll('mark')].flatMap(mark => [...mark.getClientRects()].map(r =>
+    ({...local(r), color: DocumentationRichTextCore.color(getComputedStyle(mark).backgroundColor)})));
+  return { scale, width: box.offsetWidth, height: box.offsetHeight, lines, highlights,
            contentHeight: (bottom - rect.top) / scale - insetTop };
 }
 """
+
+
+def canvas_matches_layout(snapshot, page_id, key, label, measured, record, page_size=None, *, typography=False):
+    """Shared real-canvas check. P3a adds glyph content boxes and every mark fragment."""
+    import fitz
+    import unicodedata
+    from ai_inspector.documentation.rich_layout import TAB_SPACES, prepare_pdf_objects, authored_objects
+    descriptor = next(p for p in snapshot["pages"] if p["pageId"] == page_id)
+    frame = next(row for row in authored_objects(descriptor) if row[0] == key)[1]["frame"]
+    if page_size is None:
+        page_size = (measured["width"] / frame["width"], measured["height"] / frame["height"])
+    plan = prepare_pdf_objects(fitz, snapshot, page_size)[page_id][key]
+    inner = plan.layout.frame
+    pdf = [{"text": "".join(r.text for r in runs), "left": runs[0].x - inner[0],
+            "top": runs[0].rect[1] - inner[1], "bottom": runs[0].rect[3] - inner[1]}
+           for runs in ([r for r in line.runs if not r.marker] for line in plan.layout.lines) if runs]
+    canvas = [{"text": unicodedata.normalize("NFC", row["text"]).replace("\t", " " * TAB_SPACES).replace("\r", " "),
+               "left": row["left"], "top": row["top"], "bottom": row["bottom"]} for row in measured["lines"]]
+    pdf = [row for row in pdf if row["text"].strip()]
+    canvas = [row for row in canvas if row["text"].strip()]
+    box_size = [abs(measured["width"] - frame["width"] * page_size[0]), abs(measured["height"] - frame["height"] * page_size[1])]
+    detail = {"canvas": canvas, "pdf": pdf, "boxSizeError": box_size,
+              "contentHeight": {"canvas": measured["contentHeight"], "pdf": plan.layout.measured_height}}
+    ok = (len(canvas) == len(pdf)
+          and all(a["text"].rstrip() == b["text"].rstrip() and abs(a["left"] - b["left"]) <= 1 for a, b in zip(canvas, pdf))
+          and abs(measured["contentHeight"] - plan.layout.measured_height) <= 1 and max(box_size) <= .6)
+    if typography:
+        # Vertical geometry is compared with the same layout rounded as Blink rounds at device scale 1 (whole-pixel
+        # ascent/descent, LayoutUnit line heights, floored top half-leading; rich_fonts.line_box). The export itself is
+        # unrounded, within about a pixel of every display scale; the checks above already bound it.
+        rounded = prepare_pdf_objects(fitz, snapshot, page_size, canvas_rounding=True)[page_id][key]
+        assert [len(line.runs) for line in rounded.layout.lines] == [len(line.runs) for line in plan.layout.lines]
+        plan = rounded
+        pdf = [{"text": "".join(r.text for r in runs), "top": runs[0].rect[1] - inner[1], "bottom": runs[0].rect[3] - inner[1]}
+               for runs in ([r for r in line.runs if not r.marker] for line in plan.layout.lines) if runs]
+        pdf = [row for row in pdf if row["text"].strip()]
+        detail["rounded"] = {"lines": pdf, "contentHeight": plan.layout.measured_height}
+        ok = ok and abs(measured["contentHeight"] - plan.layout.measured_height) <= .25
+        ok = ok and all(abs(a[k] - b[k]) <= .25 for a, b in zip(canvas, pdf) for k in ("top", "bottom"))
+        # P3a's ASCII typography vectors also compare every glyph, so a script
+        # or small run in the middle of a mixed line cannot hide behind its first glyph.
+        glyphs = [{"text": g["text"], "top": g["top"], "bottom": g["bottom"]}
+                  for row in measured["lines"] for g in row["glyphs"]]
+        expected_glyphs = [{"text": char, "top": run.rect[1] - inner[1], "bottom": run.rect[3] - inner[1]}
+                           for line in plan.layout.lines for run in line.runs if not run.marker for char in run.text]
+        detail["glyphs"] = {"canvas": glyphs, "pdf": expected_glyphs}
+        ok = ok and len(glyphs) == len(expected_glyphs) and all(a["text"] == b["text"] and
+            all(abs(a[k] - b[k]) <= .25 for k in ("top", "bottom")) for a, b in zip(glyphs, expected_glyphs))
+        # A mark is one inline box per line, even if marks/font fallback split its
+        # PDF drawing into adjacent runs. Join only contiguous equal rectangles.
+        expected = []
+        for line in plan.layout.lines:
+            for run in line.runs:
+                if not run.highlight:
+                    continue
+                x0, y0, x1, y1 = run.highlight_rect
+                item = {"left": x0 - inner[0], "top": y0 - inner[1], "right": x1 - inner[0],
+                        "bottom": y1 - inner[1], "color": run.highlight,
+                        "hangingTail": run.width if run.hanging else 0.0}
+                if expected and all(expected[-1][k] == item[k] for k in ("top", "bottom", "color")) and abs(expected[-1]["right"] - item["left"]) < .01:
+                    expected[-1]["right"] = item["right"]
+                    expected[-1]["hangingTail"] = item["hangingTail"]
+                else:
+                    expected.append(item)
+        actual = measured["highlights"]
+        detail["highlights"] = {"canvas": actual, "pdf": expected}
+        # A fragment ending in hanging white space (pre-wrap, at a line end) may end anywhere inside it: Chromium's
+        # inline box covers only part of a hanging space, while the PDF highlights the whole advance.
+        ok = ok and len(actual) == len(expected) and all(
+            a["color"] == b["color"] and abs(a["left"] - b["left"]) <= .5
+            and all(abs(a[k] - b[k]) <= .25 for k in ("top", "bottom"))
+            and b["right"] - b["hangingTail"] - .5 <= a["right"] <= b["right"] + .5
+            for a, b in zip(actual, expected))
+    record(label, ok, None if ok else detail)
+    return detail
 
 
 def docx_run_text(payload, target):
@@ -1292,7 +1407,7 @@ def run_p2b(page, request, server, output, report, record, begin_edit, tool, fre
     from ai_inspector.documentation.rich_text import validate, plain_text
     from ai_inspector.documentation.rich_layout import authored_objects, content_model
     from ai_inspector.parts_manual.pdf import _document_object_style, _document_theme
-    from tests.documentation_rich_export_support import compare_docx, compare_pdf
+    from tests.documentation_rich_export_support import compare_docx, compare_pdf, export_characters
 
     h = rich_browser_helpers(page, request, server, output, report, begin_edit, fresh_page, "P2b")
     spec, key = h.spec, h.object_id
@@ -1359,13 +1474,7 @@ def run_p2b(page, request, server, output, report, record, begin_edit, tool, fre
         return {p.relative_to(server.stores).as_posix(): sha(p) for extension in ("*.pdf", "*.docx")
                 for p in server.stores.rglob(extension)}
 
-    def press_export(kind, format="pdf"):
-        url = h.base(kind) + "/pdf"
-        with page.expect_response(lambda r: r.request.method == "POST" and r.url == url, timeout=600000) as response:
-            page.locator("#documentationExportDocxRibbon" if format == "docx" else "#documentationPublishRibbon").click()
-        response.value.finished()  # Never reload with a large POST body in flight.
-        h.idle()
-        return response.value, response.value.json()
+    press_export = h.press_export
 
     def walk(value, mutate):
         if isinstance(value, dict):
@@ -1424,51 +1533,15 @@ def run_p2b(page, request, server, output, report, record, begin_edit, tool, fre
         stored[kind] = fresh
         return fresh
 
-    def download(artifact, filename):
-        assert artifact.get("url", "").startswith("/api/"), artifact
-        response = request.get(server.url + artifact["url"], timeout=120000)
-        assert response.ok, response.text()[:500]
-        payload = response.body()
-        (output / filename).write_bytes(payload)
-        report.setdefault("exportArtifacts", []).append({"file": filename, "sha256": hashlib.sha256(payload).hexdigest(),
-                                                         "bytes": len(payload)})
-        return payload
+    download, canvas_lines = h.download, h.canvas_lines
 
-    def canvas_lines():
-        # The static render as the user sees it: characters grouped into lines by their top edge, in layout px.
-        return h.box().evaluate(CANVAS_LINES_JS)
-
-    def canvas_matches_layout(kind, label, measured, page_size=None):
-        import fitz
-        import unicodedata
-        from ai_inspector.documentation.rich_layout import TAB_SPACES, prepare_pdf_objects
-        snapshot = h.scene(kind)["document"]
-        descriptor = next(p for p in snapshot["pages"] if p["pageId"] == pages[kind])
-        frame = next(row for row in authored_objects(descriptor) if row[0] == key)[1]["frame"]
-        if page_size is None:
-            page_size = (measured["width"] / frame["width"], measured["height"] / frame["height"])
-        plan = prepare_pdf_objects(fitz, snapshot, page_size)[pages[kind]][key]
-        inner = plan.layout.frame
-        pdf = [{"text": "".join(r.text for r in runs), "left": runs[0].x - inner[0]}
-               for runs in ([r for r in line.runs if not r.marker] for line in plan.layout.lines) if runs]
-        canvas = [{"text": unicodedata.normalize("NFC", row["text"]).replace("\t", " " * TAB_SPACES).replace("\r", " "),
-                   "left": row["left"]} for row in measured["lines"]]
-        pdf = [row for row in pdf if row["text"].strip()]
-        canvas = [row for row in canvas if row["text"].strip()]
-        box_size = [abs(measured["width"] - frame["width"] * page_size[0]), abs(measured["height"] - frame["height"] * page_size[1])]
-        detail = {"canvas": canvas, "pdf": pdf, "boxSizeError": box_size,
-                  "contentHeight": {"canvas": measured["contentHeight"], "pdf": plan.layout.measured_height}}
-        ok = (len(canvas) == len(pdf)
-              and all(a["text"].rstrip() == b["text"].rstrip() and abs(a["left"] - b["left"]) <= 1.0 for a, b in zip(canvas, pdf))
-              and abs(measured["contentHeight"] - plan.layout.measured_height) <= 1.0
-              and max(box_size) <= 0.6)
-        record(label, ok, None if ok else detail)
-        return detail
+    def compare_canvas(kind, label, measured, page_size=None):
+        return canvas_matches_layout(h.scene(kind)["document"], pages[kind], key, label, measured, record, page_size)
 
     def parts_not_publishable(round_number):
         open_document(DOC_TYPE)
         assert h.field(h.scene(DOC_TYPE))["richText"] == stored[DOC_TYPE]
-        canvas = canvas_matches_layout(DOC_TYPE, f"p2b-{round_number}-parts_canvas_matches_pdf_layout", canvas_lines())
+        canvas = compare_canvas(DOC_TYPE, f"p2b-{round_number}-parts_canvas_matches_pdf_layout", canvas_lines())
         state = page.evaluate("""() => {
             const doc = window.__compareDbg.state.partsManualDocumentation?.document || {};
             const pending = (doc.pages || []).filter(p => p.renderRequest && p.renderRequest.image?.status !== 'ready');
@@ -1507,7 +1580,7 @@ def run_p2b(page, request, server, output, report, record, begin_edit, tool, fre
             pdf_page = exported[next(i for i, p in enumerate(snapshot["pages"]) if p["pageId"] == pages[kind])]
             pdf_size = (pdf_page.rect.width, pdf_page.rect.height)
         row = {"richText": canonical, "pdf": pdf_result,
-               "canvas": canvas_matches_layout(kind, prefix + "_canvas_matches_pdf_layout", measured, pdf_size)}
+               "canvas": compare_canvas(kind, prefix + "_canvas_matches_pdf_layout", measured, pdf_size)}
         response, result = press_export(kind, "docx")
         assert response.ok, result
         docx_bytes = download(result["docx"], prefix + ".docx")
@@ -1525,11 +1598,7 @@ def run_p2b(page, request, server, output, report, record, begin_edit, tool, fre
         comparison["export" + str(round_number)][kind] = row
         checkpoint()
 
-    def semantic_characters(snapshot, format):
-        if format == "docx":
-            return [char for paragraph in snapshot["paragraphs"] for char in paragraph]
-        return [{"text": char, **{key: run[key] for key in ("bold", "italic", "underline", "color", "href", "size")}}
-                for line in snapshot["lines"] for run in line if not run["marker"] for char in run["text"]]
+    semantic_characters = export_characters
 
     for kind in (spec, DOC_TYPE):
         author(kind)
@@ -1576,6 +1645,219 @@ def run_p2b(page, request, server, output, report, record, begin_edit, tool, fre
     report["p2bScenePosts"] = h.posts
 
 
+
+def run_p3a(page, request, server, output, report, record, begin_edit, tool, fresh_page):
+    """P3a part 1: Sage-authored typography, real canvas geometry and both exports."""
+    from copy import deepcopy
+    import math
+    from PIL import Image
+    import fitz
+    from ai_inspector.documentation.rich_text import validate, plain_text
+    from ai_inspector.documentation.rich_layout import authored_objects, content_model, prepare_pdf_objects
+    from ai_inspector.parts_manual.pdf import _document_object_style, _document_theme
+    # Share the declarative vector builders with the focused typography tests.
+    from tests.test_documentation_typography import envelope, paragraph, text, mark, nested
+    from tests.documentation_rich_export_support import compare_pdf, compare_docx, export_characters
+
+    h = rich_browser_helpers(page, request, server, output, report, begin_edit, fresh_page, "P3a")
+    spec = h.spec
+    keys = ["document-object-p3a-a", "document-object-p3a-b", "document-object-p3a-c"]
+    families, sizes = ["Arial", "Helvetica", "Times New Roman", "Courier New"], [6, 9.5, 12, 24, 48]
+    # Twenty short runs fit on one line at their authored sizes. The second line
+    # holds the 48 pt decoration specimen, and the third carries script/link combinations.
+    runs = [text(chr(65 + i), mark("textStyle", fontFamily=family, fontSize=size))
+            for i, (family, size) in enumerate((family, size) for family in families for size in sizes)]
+    specimen = text("Measured", mark("strike"), mark("highlight", color="#ffe680"),
+                    mark("textStyle", fontFamily="Arial", fontSize=48, color="#183a60"))
+    typography = envelope(paragraph(*runs), paragraph(specimen),
+        paragraph(text("strike ", mark("strike")), text("both ", mark("underline"), mark("strike")),
+                  text("sub", mark("subscript"), mark("textStyle", fontSize=24)), text(" "),
+                  text("sup", mark("superscript"), mark("textStyle", fontFamily="Times New Roman", fontSize=24)),
+                  text(" linked", mark("link", href="https://example.test/typography"), mark("textStyle", fontSize=9.5)),
+                  text(" tint", mark("highlight", color="#98e5cc"), mark("textStyle", color="#cc3300"))),
+        {"type": "heading", "attrs": {"level": 3, "textAlign": "right", "spaceBefore": 1, "lineHeight": 1},
+         "content": [text("Heading", mark("textStyle", fontSize=12))]},
+        paragraph(text("break"), {"type": "hardBreak", "marks": [mark("textStyle", fontSize=9.5), mark("strike")]}, text("after")))
+    paragraphs = envelope(paragraph(text("Centered"), textAlign="center", spaceBefore=3, spaceAfter=5, lineHeight=1),
+        paragraph(text("Right aligned"), textAlign="right", indent=12.5, spaceBefore=7, spaceAfter=2, lineHeight=2),
+        nested(6, mixed=True, indent=18),
+        # An unbroken three-level bullet branch measures disc, circle and square as well.
+        nested(3),
+        paragraph(text("Wrapped highlighted fragments repeat across a line boundary. " * 2,
+                       mark("highlight", color="#abddef"), mark("textStyle", fontSize=12))))
+    georgia = envelope(paragraph(text("Georgia box renders Times New Roman", mark("strike"))))
+    values = [typography, paragraphs, georgia]
+    frames = [{"x": .06, "y": .07, "width": .88, "height": .32},
+              {"x": .06, "y": .40, "width": .88, "height": .48},
+              {"x": .06, "y": .90, "width": .88, "height": .06}]
+    comparison = {"rounds": {}, "scope": "P3a-1"}
+    # Each field's authored IDs are unique across the document.
+    def rekey(value, group):
+        counter = 0
+        def walk(node):
+            nonlocal counter
+            if "id" in node.get("attrs", {}):
+                counter += 1
+                node["attrs"]["id"] = f"rt-00000000-0000-4000-8000-{group * 1000 + counter:012x}"
+            for child in node.get("content", []):
+                walk(child)
+        walk(value["doc"])
+        return validate(value)
+    stored = {key: rekey(value, index + 1) for index, (key, value) in enumerate(zip(keys, values))}
+    page_id = None
+
+    def sage_write(key, value, suffix):
+        bound = tool("read_document_pages", {"documentType": spec, "targets": [{"pageId": page_id, "targetId": key}]})
+        assert bound.get("ok"), bound
+        observed = bound["data"]["targets"][0]
+        applied = tool("apply_document_edits", {"documentId": bound["data"]["documentId"], "expectedRevision": observed["revision"],
+            "requestId": "p3a-" + suffix, "operations": [{"operation": "replace_rich_text", "targetId": observed["targetId"],
+                "expectedContentHash": observed["contentHash"], "richText": value}]})
+        assert applied.get("ok"), applied
+        actual = h.field(h.scene(spec), key)["richText"]
+        record("p3a_sage_" + suffix, actual == value)
+
+    for index, key in enumerate(keys):
+        page_id = h.create(spec, key, "", frame=frames[index], style={"fontSize": 12,
+            "fontFamily": "Georgia" if index == 2 else "Arial"})
+        sage_write(key, stored[key], "create-" + str(index))
+
+    def reopen():
+        nonlocal page
+        page = h.open_document(spec, page_id)
+        page.on("popup", lambda popup: popup.close())
+        assert page.evaluate("async () => (await DocumentationRichText.ready).ok")
+        snapshot = h.scene(spec)
+        for key in keys:
+            record("p3a_reopen_" + key, h.field(snapshot, key)["richText"] == stored[key])
+        return snapshot
+
+    snapshot = reopen()
+    family = h.box(keys[2]).locator('.documentation-rich-content').evaluate("node => getComputedStyle(node).fontFamily")
+    record("p3a_georgia_uses_times", family.replace('"', '') == "Times New Roman", family)
+    revision = snapshot["revision"]
+    before_posts = len(h.posts)
+    begin_edit(h.box(keys[0]), read_only=True)
+    notice = page.locator('.documentation-rich-readonly')
+    record("p3a_schema2_read_only", "cannot be edited here yet" in notice.inner_text()
+           and page.evaluate("() => DocumentationRichText.mountedCount") == 0)
+    record("p3a_read_only_does_not_save", h.scene(spec)["revision"] == revision and len(h.posts) == before_posts)
+    h.screenshot("readonly")
+    reopen()
+
+    def press_export(format):
+        response, result = h.press_export(spec, format)
+        assert response.ok, result
+        return result
+
+    download = h.download
+
+    def export_round(round_number):
+        snapshot = reopen()["document"]
+        measured = {key: h.canvas_lines(key) for key in keys}
+        h.screenshot(str(round_number) + "-full")
+        for key in keys:
+            h.box(key).screenshot(path=str(output / f"p3a-{round_number}-{key[-1]}-canvas.png"))
+        pdf = download(press_export("pdf")["pdf"], f"p3a-{round_number}.pdf")
+        docx = download(press_export("docx")["docx"], f"p3a-{round_number}.docx")
+        descriptor = next(p for p in snapshot["pages"] if p["pageId"] == page_id)
+        with fitz.open(stream=pdf, filetype="pdf") as exported:
+            pdf_page = exported[next(i for i, p in enumerate(snapshot["pages"]) if p["pageId"] == page_id)]
+            size = (pdf_page.rect.width, pdf_page.rect.height)
+            plans = prepare_pdf_objects(fitz, snapshot, size)[page_id]
+            plan = plans[keys[0]]
+            run = next(run for line in plan.layout.lines for run in line.runs if run.text == "Measured")
+            # Side-by-side raw visual evidence: the real app's mark and the same
+            # content rectangle rasterized from the exported PDF at its screen scale.
+            specimen = h.box(keys[0]).locator('mark').filter(has_text="Measured")
+            canvas_path = output / f"p3a-{round_number}-word-canvas.png"
+            pdf_path = output / f"p3a-{round_number}-word-pdf.png"
+            scale = measured[keys[0]]["scale"]
+            # Both crops start on a whole output pixel with a known origin, so each baseline is exact in its crop. The
+            # canvas mark's content box starts Chromium's whole-pixel ascent above the baseline (device scale 1).
+            assert page.evaluate("devicePixelRatio === 1 && scrollX === 0 && scrollY === 0")
+            mark_box = specimen.bounding_box()
+            clip = {"x": math.floor(mark_box["x"]), "y": math.floor(mark_box["y"])}
+            clip["width"] = math.ceil(mark_box["x"] + mark_box["width"]) - clip["x"]
+            clip["height"] = math.ceil(mark_box["y"] + mark_box["height"]) - clip["y"]
+            page.screenshot(path=str(canvas_path), clip=clip)
+            canvas_baseline = mark_box["y"] + math.floor(.9053 * 48 + .5) * scale - clip["y"]
+            pixmap = pdf_page.get_pixmap(matrix=fitz.Matrix(scale, scale), clip=fitz.Rect(run.highlight_rect))
+            pixmap.save(str(pdf_path))
+            pdf_baseline = run.baseline * scale - pixmap.y
+            with Image.open(canvas_path) as left, Image.open(pdf_path) as right:
+                pair = Image.new("RGB", (left.width + right.width + 12, max(left.height, right.height)), "white")
+                pair.paste(left, (0, 0)); pair.paste(right, (left.width + 12, 0))
+                pair.save(output / f"p3a-{round_number}-word-side-by-side.png")
+            # The minimum text-color coverage across a row isolates a continuous
+            # strike from the glyphs (there is blank ink space on every glyph row).
+            # Report the measured center/thickness in layout px, including the
+            # pixel quantization bound. This is evidence from the real canvas.
+            def stroke_measurement(filename, baseline):
+                with Image.open(filename).convert("RGB") as image:
+                    background, foreground = 255, 24  # red channel: #ffe680 -> #183a60
+                    coverage = [min(max(0, min(1, (background - image.getpixel((x, y))[0]) / (background - foreground)))
+                                    for x in range(2, image.width - 2)) for y in range(image.height)]
+                    weights = [value if value > .03 else 0 for value in coverage]
+                    total = sum(weights)
+                    assert total > 0, "No continuous line-through found in the 48 pt specimen"
+                    center = sum((y + .5) * value for y, value in enumerate(weights)) / total
+                    return {"offsetFromBaseline": (center - baseline) / scale, "thickness": total / scale,
+                            "pixelBound": 1 / scale, "rowCoverage": coverage}
+            canvas_stroke = stroke_measurement(canvas_path, canvas_baseline)
+            pdf_stroke = stroke_measurement(pdf_path, pdf_baseline)
+            # Chromium (P3a-1 gate, rich_fonts.decoration): line-through centred a third of the whole-pixel ascent
+            # above the baseline, its top edge and thickness on whole pixels; the PDF keeps the exact third.
+            ascent, thickness = math.floor(.9053 * 48 + .5), max(1, round(.0498 * 48))
+            chromium = math.floor(2 * ascent / 3 - thickness / 2 + .5) + thickness / 2 - ascent
+            expected = {"canvas": {"offsetFromBaseline": chromium, "thickness": thickness},
+                        "pdf": {"offsetFromBaseline": -.9053 / 3 * 48, "thickness": .0498 * 48}}
+            comparison.setdefault("decorationMeasurements", {})[str(round_number)] = {
+                "canvas": canvas_stroke, "pdf": pdf_stroke, "expected": expected}
+            # Each raster against its own model: the canvas within one output pixel (the scaled raster can move a
+            # snapped line), the PDF within .15 px. The strikes then line up within about a pixel.
+            bound = canvas_stroke["pixelBound"]
+            record(f"p3a_{round_number}_strike_raster",
+                   all(abs(canvas_stroke[k] - expected["canvas"][k]) <= bound for k in ("offsetFromBaseline", "thickness"))
+                   and all(abs(pdf_stroke[k] - expected["pdf"][k]) <= .15 for k in ("offsetFromBaseline", "thickness")),
+                   comparison["decorationMeasurements"][str(round_number)])
+        results = {}
+        for key, obj, value in authored_objects(descriptor):
+            if key not in keys:
+                continue
+            model = content_model(value, _document_object_style(_document_theme(snapshot), obj))
+            row = {"pdf": compare_pdf(pdf, snapshot, page_id, key, output / f"p3a-{round_number}-{key[-1]}-pdf.png"),
+                   "docx": compare_docx(docx, key, model),
+                   "canvas": canvas_matches_layout(snapshot, page_id, key, "p3a_canvas_" + str(round_number) + key,
+                                                     measured[key], record, size, typography=True)}
+            record(f"p3a_{round_number}_{key}_exports", True)
+            record(f"p3a_{round_number}_{key}_raw_text", docx_run_text(docx, key) == plain_text(value).replace("\r", " ").replace("\n", ""))
+            results[key] = row
+        comparison["rounds"][str(round_number)] = results
+        write_json(output / "p3a-comparison.json", comparison)
+        return results
+
+    first_round = export_round(1)
+    candidate = deepcopy(stored[keys[0]])
+    # The first 6 pt run becomes 6.5 pt; the line's 48 pt maximum is unchanged.
+    candidate["doc"]["content"][0]["content"][0]["marks"][0]["attrs"]["fontSize"] = 6.5
+    candidate = validate(candidate)
+    restored = deepcopy(candidate)
+    restored["doc"]["content"][0]["content"][0]["marks"][0]["attrs"]["fontSize"] = 6
+    record("p3a_only_requested_stored_attribute", restored == stored[keys[0]])
+    sage_write(keys[0], candidate, "resize-one-run")
+    stored[keys[0]] = candidate
+    second_round = export_round(2)
+    for key in keys:
+        for format in ("pdf", "docx"):
+            fields = ("font", "family", "size", "bold", "italic", "underline", "strike", "highlight", "script", "color", "href")
+            before = export_characters(first_round[key][format], format, fields)
+            after = export_characters(second_round[key][format], format, fields)
+            changed = [i for i, (a, b) in enumerate(zip(before, after)) if a != b]
+            record("p3a_only_one_run_" + key + "_" + format, len(before) == len(after) and changed == ([0] if key == keys[0] else []), changed)
+    report["p3aComparison"] = (output / "p3a-comparison.json").relative_to(ROOT).as_posix()
+    report["p3aScenePosts"] = h.posts
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--phase", required=True, choices=PHASES)
@@ -1621,7 +1903,7 @@ def main():
         if not ok:
             failure_screenshot(name)
 
-    def begin_edit(cell):
+    def begin_edit(cell, *, read_only=False):
         # A manual page redraws on every press, so the browser never sees a double-click there; the workspace starts an
         # edit on two separate presses on the same text within half a second (_documentationTextPressed).
         # Playwright's mouse waits for each press to be handled (including the redraw) before sending the next, which
@@ -1645,7 +1927,8 @@ def main():
             finally:
                 cdp.detach()
             try:
-                page.wait_for_function("() => !!document.querySelector('[contenteditable=\"true\"]')", timeout=5000)
+                page.wait_for_function("readonly => readonly ? !!document.querySelector('.documentation-rich-readonly') : !!document.querySelector('[contenteditable=\"true\"]')",
+                                       arg=read_only, timeout=5000)
                 report["editAttempts"].append(attempt)
                 return
             except Exception:
@@ -1653,8 +1936,8 @@ def main():
         raise RuntimeError("Inline edit did not start after three double presses")
 
     try:
-        if args.phase not in {"P1a", "P1b", "P1c", "P2a", "P2b"}:
-            raise RuntimeError("Only the P1a, P1b, P1c, P2a and P2b gates are implemented.")
+        if args.phase not in {"P1a", "P1b", "P1c", "P2a", "P2b", "P3a"}:
+            raise RuntimeError("Only the P1a, P1b, P1c, P2a, P2b and P3a-1 gates are implemented.")
         from playwright.sync_api import sync_playwright
         server.start()
         report["isolation"] = server.isolation
@@ -1743,7 +2026,9 @@ def main():
                 raise RuntimeError(f"Tool HTTP {response.status}: {response.text()[:800]}")
             return response.json()
 
-        if args.phase == "P2b":
+        if args.phase == "P3a":
+            run_p3a(page, request, server, output, report, record, begin_edit, tool, fresh_page)
+        elif args.phase == "P2b":
             run_p2b(page, request, server, output, report, record, begin_edit, tool, fresh_page)
         elif args.phase == "P2a":
             run_p2a(page, request, server, output, report, record, begin_edit, tool, fresh_page)

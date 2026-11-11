@@ -18,7 +18,7 @@ test('normalizes representative Tiptap defaults without changing the projection'
             { type: 'hardBreak', attrs: { id: null } },
             text('source', [{ type: 'link', attrs: { href: 'https://example.com/source', target: '_self',
                 rel: 'opener', class: 'pasted', title: 'discarded' } }]),
-        ], { id: id(3), textAlign: 'left' })] },
+        ], { id: id(3), textAlign: null })] },
     ] }]);
     const result = normalize(input);
     const list = result.doc.content[0];
@@ -131,4 +131,28 @@ test('unsupported nodes, marks and malformed text remain errors', () => {
     assert.throws(() => normalize(doc([paragraph([text('a', [{ type: 'strike' }])])])));
     assert.throws(() => normalize(doc([paragraph([text('\ud800')])])));
     assert.throws(() => normalize(doc([paragraph([text('')])])));
+});
+
+test('schema 2 is readable but cannot enter the schema 1 editor or save normalization', () => {
+    const richText = { format: 'tiptap', schemaVersion: 2, doc: doc([paragraph([text('kept')])]) };
+    const before = JSON.stringify(richText);
+    assert.match(core.readOnlyReason({ richText }), /cannot be edited here yet/);
+    assert.match(core.readOnlyReason({ richText }), /Sage/);
+    assert.equal(core.readOnlyReason({ richText: { ...richText, schemaVersion: 1 } }), '');
+    assert.equal(core.readOnlyReason({ text: 'old plain field' }), '');
+    assert.throws(() => normalize(richText), { code: 'unsupported_rich_text_schema' });
+    for (const attr of ['textAlign', 'indent', 'spaceBefore', 'spaceAfter', 'lineHeight']) {
+        assert.throws(() => normalize(doc([paragraph([text('kept')], { [attr]: attr === 'textAlign' ? 'left' : 1 })])),
+            { code: 'unsupported_rich_text_schema' });
+    }
+    assert.equal(JSON.stringify(richText), before);
+});
+
+test('rich font tokens and legacy box aliases use the export families', () => {
+    assert.deepEqual(Object.keys(core.FONT_MAP), ['Arial', 'Helvetica', 'Times New Roman', 'Courier New']);
+    assert.equal(core.font('Helvetica').canvas, 'Arial');
+    assert.equal(core.font('Georgia').canvas, 'Times New Roman');
+    assert.equal(core.font('Inter').canvas, 'Arial');
+    assert.equal(core.font('Arial').ascent, .9053);
+    assert.deepEqual(core.RENDER_MARKS, ['bold', 'italic', 'underline', 'strike', 'subscript', 'superscript', 'highlight', 'textStyle', 'link']);
 });

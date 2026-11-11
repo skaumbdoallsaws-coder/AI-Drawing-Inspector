@@ -29,6 +29,7 @@ from ai_inspector.documentation.rich_layout import (
     content_model, layout_text, prepare_pdf_objects, draw_pdf_objects, finish_pdf_fonts, PDF_RENDERER_VERSION,
     BULLETS, LINE_HEIGHT, LINK_COLOR, LIST_INDENT, PADDING, SYNTHETIC_OBLIQUE,
 )
+from ai_inspector.documentation.rich_fonts import line_box
 from ai_inspector.parts_manual import pdf as parts
 from ai_inspector.specification_sheet import exports as spec
 from ai_inspector.operations_manual import exports as ops
@@ -222,7 +223,7 @@ def test_docx_no_outline_padding_and_explicit_link_color(tmp_path):
 def test_docx_cache_rebuilds_previously_dropped_plain_objects(tmp_path):
     document = attach(fixture_document("operations"), "Previously missing")
     result = ops.store_prototype_docx(tmp_path, NUMBER, document)
-    assert result["rendererVersion"] == "authored-text-docx-1"
+    assert result["rendererVersion"] == "authored-text-docx-2"
     metadata = next(tmp_path.rglob("review-docx.json"))
     old = json.loads(metadata.read_text("ascii"))
     old["rendererVersion"] = ops._DOCX_RENDERER_VERSION
@@ -320,16 +321,9 @@ def test_docx_legacy_xml_parts_equal_p2b1(builder, mode, tmp_path, image_path, m
 
 
 @pytest.mark.parametrize("builder", ("parts", "specification", "fillable", "operations", "wi"))
-def test_rich_pdf_bytes_unchanged_since_p2b1(builder, tmp_path, image_path, monkeypatch):
-    document = attach(fixture_document(builder), mixed())
-    save = fitz.Document.tobytes
-    monkeypatch.setattr(fitz.Document, "tobytes", lambda self, *a, **kw: save(self, *a, **{**kw, "no_new_id": True}))
-    old = legacy_module(parts if builder == "parts" else spec if builder in {"specification", "fillable"} else ops, monkeypatch, "9b01855")
-    if builder in {"specification", "fillable"}:
-        old.draft_render_path = lambda *args: image_path
-    modules = (old if builder == "parts" else parts, old if builder in {"specification", "fillable"} else spec,
-               old if builder in {"operations", "wi"} else ops)
-    assert build(builder, document, tmp_path) == build(builder, document, tmp_path, modules=modules)
+def test_rich_schema1_exports_match_p2b2_with_computed_y_delta(builder, tmp_path, image_path, monkeypatch):
+    from tests.test_documentation_typography import assert_schema1_callers
+    assert_schema1_callers(attach(fixture_document(builder), mixed()), builder, tmp_path, monkeypatch, image_path)
 
 
 def xml_text(node):
@@ -469,7 +463,7 @@ def test_mixed_pdf_runs_fonts_colors_underlines_and_exact_links():
             assert any(name in span["font"].lower().replace(" ", "") for name in ("helvetica", "nimbussans")), span
         assert next(s for s in rows if "Red" in s["text"])["color"] == 0xAB1234
         underline = next(r for line in plan.layout.lines for r in line.runs if r.underline)
-        assert any(item[0] == "l" and abs(item[1].y - (underline.baseline + underline.font_size * .1)) < .05
+        assert any(item[0] == "l" and abs(item[1].y - (underline.baseline + underline.underline_offset)) < .05
                    and abs(item[2].x - item[1].x - underline.width) < .05
                    for drawing in page.get_drawings() for item in drawing["items"])
         drawings = page.get_drawings()
@@ -626,7 +620,10 @@ def test_every_pdf_builder_draws_canonical_rich_objects(builder, mode, tmp_path,
         bold = next(s for s in spans(page) if "Bold" in s["text"])
         assert bold["flags"] & 16
         assert bold["bbox"][0] >= page.rect.width * .1
-        assert bold["bbox"][1] == pytest.approx(page.rect.height * .2 + 2, abs=.2)
+        # The first baseline sits where the canvas puts it: frame top, the 3 px padding, then the line box's ascent
+        # from the canvas font's metrics (P3a-1 decision 5; P2b placed it ~0.04 em lower with Helvetica's).
+        baseline = page.rect.height * .2 + PADDING + line_box(12, "Arial", LINE_HEIGHT)[0]
+        assert bold["origin"][1] == pytest.approx(baseline, abs=.01)
         assert page.get_links()[0]["uri"] == "https://example.test/a?x=1&y=two%20words#part"
         if builder == "fillable":
             assert len(list(page.widgets())) == 1
@@ -653,7 +650,9 @@ def test_previously_dropped_plain_objects_are_present_at_their_frames(builder, t
     with fitz.open(stream=build(builder, document, tmp_path), filetype="pdf") as pdf:
         span = next(s for s in spans(pdf[0]) if "Authored plain proof" in s["text"])
         assert span["bbox"][0] == pytest.approx(pdf[0].rect.width * .12 + 3, abs=.1)
-        assert span["bbox"][1] == pytest.approx(pdf[0].rect.height * .25 + 2, abs=.2)
+        # Plain text boxes share the canvas metrics with rich ones (P3a-1): exact first baseline.
+        baseline = pdf[0].rect.height * .25 + PADDING + line_box(12, "Arial", LINE_HEIGHT)[0]
+        assert span["origin"][1] == pytest.approx(baseline, abs=.01)
 
 
 @pytest.mark.parametrize("builder", BUILDERS)
@@ -834,8 +833,7 @@ def test_layout_matches_the_canvas_box_css():
                                           plan.frame[2] - inset, plan.frame[3] - inset))
     assert [line.height for line in layout.lines] == pytest.approx([LINE_HEIGHT * 12] * 3)
     assert layout.measured_height == pytest.approx(3 * LINE_HEIGHT * 12)
-    helvetica = fitz.Font(fontname="helv")
-    half_leading = (LINE_HEIGHT * 12 + (helvetica.ascender + helvetica.descender) * 12) / 2
+    half_leading = (LINE_HEIGHT * 12 + (.9053 - .2119) * 12) / 2
     assert layout.lines[0].baseline == pytest.approx(layout.frame[1] + half_leading)
     # Exactly as many lines as the box holds fit; one more line overflows.
     holds = (layout.frame[3] - layout.frame[1]) // (LINE_HEIGHT * 12)
@@ -945,3 +943,43 @@ def test_text_box_paints_its_fill_over_what_lies_behind_like_the_canvas():
         text = [span for span in page.get_texttrace() if span["type"] == 0]
     assert len(fills) == 1 and all(abs(c - 1.0) < 1e-3 for c in fills[0]["fill"])
     assert fills[0]["seqno"] < min(span["seqno"] for span in text)  # painted under the text
+
+
+@pytest.fixture(autouse=True)
+def schema1_vector_compatibility(request, tmp_path, monkeypatch):
+    """Every schema-1 vector this file actually exercises also runs the old code.
+
+    Capture at construction AND at export/layout boundaries so mutated vectors,
+    style overrides, hard breaks, list levels, CJK and narrow frames are covered.
+    Deduplicate only after a successful complete comparison.
+    """
+    from tests.test_documentation_typography import assert_schema1_vector
+    pending = []
+    original_rich, original_plain, original_attach, original_layout = rich, from_plain, attach, layout_text
+    def remember(value, style=None, frame=None):
+        pending.append((deepcopy(value), deepcopy(style), deepcopy(frame)))
+    def capture_rich(*args):
+        value = original_rich(*args)
+        remember(value)
+        return value
+    def capture_plain(*args, **kwargs):
+        value = original_plain(*args, **kwargs)
+        remember(value)
+        return value
+    def capture_attach(document, value, **kwargs):
+        remember(value, kwargs.get("style"), kwargs.get("frame"))
+        return original_attach(document, value, **kwargs)
+    def capture_layout(value, frame, style=None, **kwargs):
+        # layout_text's input is a content frame in points, not an object frame.
+        # The same width is exercised through an object with its 3 px inset.
+        x0, y0, x1, y1 = frame
+        obj_frame = {"x": 0, "y": 0, "width": (x1 - x0 + 6) / 600, "height": (y1 - y0 + 6) / 700}
+        remember(value, style, obj_frame)
+        return original_layout(value, frame, style, **kwargs)
+    module = sys.modules[__name__]
+    with monkeypatch.context() as patch:
+        for name, function in (("rich", capture_rich), ("from_plain", capture_plain), ("attach", capture_attach), ("layout_text", capture_layout)):
+            patch.setattr(module, name, function)
+        yield
+    for value, style, frame in pending:
+        assert_schema1_vector(value, style, frame, tmp_path, monkeypatch)

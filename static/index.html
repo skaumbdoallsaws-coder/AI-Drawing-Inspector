@@ -12,9 +12,9 @@
     <link rel="stylesheet" href="/static/packaging_ribbon_icons.css">
     <script src="/static/documentation_commands.js?v=20261109-p1b-3"></script>
     <script src="/static/documentation_conflicts.js?v=20261110-p2a-1"></script>
-    <script src="/static/documentation_rich_text_core.js?v=20261110-p2a-2"></script>
-    <script type="module" src="/static/documentation_rich_text.js?v=20261110-p2a-2"></script>
-    <link rel="stylesheet" href="/static/documentation_rich_text.css?v=20261110-p2b-2">
+    <script src="/static/documentation_rich_text_core.js?v=20261110-p3a-1"></script>
+    <script type="module" src="/static/documentation_rich_text.js?v=20261110-p3a-1"></script>
+    <link rel="stylesheet" href="/static/documentation_rich_text.css?v=20261110-p3a-1">
     <script src="/static/cad_viewport.js"></script>
     <script>
         // Theme bootstrap — set data-theme BEFORE the stylesheet is parsed
@@ -36812,7 +36812,7 @@
                 if (value.type === 'text') {
                     const richField = _documentationRichField(page.pageId, value.objectId);
                     if (richField?.richText && window.DocumentationRichText) {
-                        DocumentationRichText.render(element, richField.richText);
+                        DocumentationRichText.render(element, richField.richText, style);
                     } else element.textContent = value.content || '';
                     if (value.isRichText || richField?.isRichText) {
                         if (window.DocumentationRichText?.status?.ok === false
@@ -36824,6 +36824,10 @@
                             ? 'Rich text unavailable: ' + richField.richTextError : 'Rich text');
                     }
                     _documentationApplyElementStyle(element, style);
+                    if (richField?.richText?.schemaVersion === 2 && style.textDecoration === 'underline') {
+                        // The static renderer draws the box underline at each run's font and size.
+                        element.style.textDecoration = 'none';
+                    }
                     if (style.fill) element.style.background = style.fill;
                     if (Number(style.lineWidth) > 0 && value.styleOverrides?.outlineColor) {
                         element.style.border = `${Number(style.lineWidth)}px solid ${style.outlineColor}`;
@@ -39537,6 +39541,8 @@
                     + (field?.richTextError ? ' ' + field.richTextError : ''));
                 return Boolean(rich);
             }
+            const readOnly = window.DocumentationRichTextCore?.readOnlyReason(field);
+            if (readOnly) { _documentationRichNotice(readOnly); return true; }
             const bound = DocumentationCommands.capture(payload, page, _documentationApiBase());
             const readiness = await (window.DocumentationRichText?.ready || Promise.resolve({ ok: false }));
             if (!DocumentationCommands.isCurrent(bound, _documentationPayload(), _documentationApiBase())

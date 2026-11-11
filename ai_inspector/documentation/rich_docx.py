@@ -3,14 +3,14 @@ from dataclasses import dataclass
 import math
 
 from .commands import DocumentEditError
-from .rich_layout import authored_objects, content_model, PADDING, LINE_HEIGHT, LIST_INDENT
+from .rich_fonts import font
+from .rich_layout import authored_objects, content_model, PADDING, LIST_INDENT
 
-DOCX_RENDERER_VERSION = "authored-text-docx-1"
+DOCX_RENDERER_VERSION = "authored-text-docx-2"
 
 
 def font_family(value):
-    name = str(value or "Arial").casefold()
-    return "Courier New" if "courier" in name else "Times New Roman" if "times" in name or "georgia" in name else "Arial"
+    return font(value).docx
 
 
 # Like the canvas's outside markers ("3. " ends where the item text starts), a marker is right-aligned one space
@@ -34,15 +34,22 @@ def _element(name, **attributes):
 def _properties(run, paragraph):
     """Direct formatting also applies to the paragraph mark, including empty p."""
     props = _element("w:rPr")
-    family = font_family(paragraph.font_family)
+    family = font_family(run.font_family or paragraph.font_family)
     props.append(_element("w:rFonts", ascii=family, hAnsi=family, cs=family))
     for name, enabled in (("b", run.bold), ("bCs", run.bold), ("i", run.italic), ("iCs", run.italic)):
         props.append(_element("w:" + name, val=int(enabled)))
+    if run.strike:
+        props.append(_element("w:strike", val="1"))
     props.append(_element("w:color", val=run.color.lstrip("#").upper()))
-    size = round(2 * paragraph.font_size)
+    size = round(2 * (run.font_size if run.font_size is not None else paragraph.font_size))
     props.append(_element("w:sz", val=size))
     props.append(_element("w:szCs", val=size))
     props.append(_element("w:u", val="single" if run.underline else "none"))
+    if run.highlight:
+        props.append(_element("w:shd", val="clear", color="auto", fill=run.highlight.lstrip("#").upper()))
+    if run.script:
+        # Word chooses its own script scale/offset; retain the authored nominal size.
+        props.append(_element("w:vertAlign", val=run.script))
     return props
 
 
@@ -92,7 +99,7 @@ class _Numbering:
         definition.append(_element("w:numFmt", val="bullet" if bullet else "decimal"))
         definition.append(_element("w:suff", val="tab"))
         symbols = (("Symbol", "\uf0b7"), ("Courier New", "o"), ("Wingdings", "\uf0a7"))
-        family, marker = symbols[ilvl] if bullet else ("Arial", f"%{depth}.")
+        family, marker = symbols[min(ilvl, 2)] if bullet else ("Arial", f"%{depth}.")
         definition.append(_element("w:lvlText", val=marker))
         definition.append(_element("w:lvlJc", val="right"))
         props = _element("w:pPr")
@@ -239,13 +246,15 @@ class DocxObjects:
             if model.heading_level:
                 paragraph.style = self.output.styles[f"Heading {model.heading_level}"]
             fmt = paragraph.paragraph_format
-            fmt.space_before = fmt.space_after = Pt(0)
+            fmt.space_before = Pt(model.space_before)
+            fmt.space_after = Pt(model.space_after)
             fmt.keep_with_next = fmt.keep_together = fmt.widow_control = False
             props = paragraph._p.get_or_add_pPr()
             spacing = props.find(qn("w:spacing"))
-            spacing.set(qn("w:line"), str(round(LINE_HEIGHT * model.font_size * 20)))
+            spacing.set(qn("w:line"), str(round(model.line_height * model.font_size * 20)))
             spacing.set(qn("w:lineRule"), "atLeast")
-            align = "both" if item.style.get("textAlign") == "justify" else model.align
+            # A paragraph's own textAlign wins over the box's justify, as on the canvas (content_model keeps "justify").
+            align = "both" if model.align == "justify" else model.align
             props.append(_element("w:jc", val=align))
             if model.list_path:
                 depth = len(model.list_path)
@@ -257,8 +266,17 @@ class DocxObjects:
                     numpr.append(_element("w:numId", val=number))
                 # Continuations retain the text start but have no numbering.
                 indent = props.get_or_add_ind()
-                indent.set(qn("w:left"), str(round(LIST_INDENT * depth * 20)))
-                indent.set(qn("w:hanging"), str(marker_gap(model)) if model.marker is not None else "0")
+                indent.set(qn("w:left"), str(round((LIST_INDENT * depth + model.indent) * 20)))
+                indent.set(qn("w:hanging"), str(round(model.indent * 20) + marker_gap(model)) if model.marker is not None else "0")
+                if model.indent and model.marker is not None:
+                    # Numbering positions the outside marker at the li start, not the indented paragraph. Word starts the
+                    # text at the first tab stop after the number, and the level's own list tab (at the li start, see
+                    # _Numbering) comes first: clear it so the text starts at the indent (Word 16 render, P3a-1 gate).
+                    tabs = props.get_or_add_tabs()
+                    tabs.append(_element("w:tab", val="clear", pos=round(LIST_INDENT * depth * 20)))
+                    tabs.append(_element("w:tab", val="num", pos=round((LIST_INDENT * depth + model.indent) * 20)))
+            elif model.indent:
+                props.get_or_add_ind().set(qn("w:left"), str(round(model.indent * 20)))
             base = replace(item.content.base_run, bold=item.content.base_run.bold or bool(model.heading_level))
             props.append(_properties(base, model))
             for run, kind, value in tokens(model):

@@ -38,3 +38,19 @@
 .documentation-rich-controls button:hover, .documentation-rich-panel button:hover { background: #31566e; }
 .documentation-rich-controls button:focus-visible, .documentation-rich-panel button:focus-visible { outline: 2px solid #8ed5ff; }
 .documentation-rich-panel [hidden] { display: none; }
+
+/* Static typography is explicit: the application's reset and UA mark/sub/sup
+   rules must not choose colors, padding, script scale or baseline placement. */
+.documentation-rich-content { line-height: inherit; }
+.documentation-rich-content mark { color: inherit; padding: 0; }
+.documentation-rich-content sub, .documentation-rich-content sup {
+    font-size: 65%; vertical-align: baseline; position: relative; line-height: inherit;
+}
+.documentation-rich-content sub { top: 0.2153846153846154em; }
+.documentation-rich-content sup { top: -0.6923076923076923em; }
+.documentation-rich-content a { color: #0000ee; }
+.documentation-rich-decoration { text-decoration-color: currentColor; text-decoration-skip-ink: none; }
+.documentation-rich-content ul { list-style-type: disc; }
+.documentation-rich-content :is(ul, ol) ul { list-style-type: circle; }
+.documentation-rich-content :is(ul, ol) :is(ul, ol) ul { list-style-type: square; }
+.documentation-rich-content ol { list-style-type: decimal; }

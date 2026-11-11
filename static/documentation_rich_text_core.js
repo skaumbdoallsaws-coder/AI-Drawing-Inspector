@@ -1,4 +1,4 @@
-/* Schema-1 client boundary. No DOM, Tiptap or storage dependency. */
+/* Versioned render boundary; the editor remains schema 1. No DOM, Tiptap or storage dependency. */
 (function (root, factory) {
     const api = factory();
     if (typeof module === 'object' && module.exports) module.exports = api;
@@ -19,6 +19,27 @@
         maroon: '#800000', olive: '#808000', lime: '#00ff00', teal: '#008080',
         aqua: '#00ffff', cyan: '#00ffff', navy: '#000080', fuchsia: '#ff00ff', magenta: '#ff00ff',
         rebeccapurple: '#663399' });
+    // Keep this table in sync with documentation/rich_fonts.py. No font discovery.
+    const arial = Object.freeze({ canvas: 'Arial', pdf: 'Helvetica', docx: 'Arial', ascent: .9053, descent: .2119,
+        underline_regular: .0732, underline_bold: .1050, strike_size: .0498,
+        script_size: .6499, sub_offset: .1382, sup_offset: .4771 });
+    const times = Object.freeze({ canvas: 'Times New Roman', pdf: 'Times', docx: 'Times New Roman', ascent: .8911, descent: .2163,
+        underline_regular: .0488, underline_bold: .0952, strike_size: .0498,
+        script_size: .6499, sub_offset: .1431, sup_offset: .4531 });
+    const courier = Object.freeze({ canvas: 'Courier New', pdf: 'Courier', docx: 'Courier New', ascent: .8325, descent: .3003,
+        underline_regular: .0410, underline_bold: .1001, strike_size: .0498,
+        script_size: .6499, sub_offset: .1392, sup_offset: .4224 });
+    const FONT_MAP = Object.freeze({ Arial: arial, Helvetica: arial, 'Times New Roman': times, 'Courier New': courier });
+    const RENDER_MARKS = Object.freeze(['bold', 'italic', 'underline', 'strike', 'subscript', 'superscript', 'highlight', 'textStyle', 'link']);
+    function font(value) {
+        if (Object.hasOwn(FONT_MAP, value)) return FONT_MAP[value];
+        const name = String(value || 'Arial').toLowerCase();
+        return name.includes('courier') ? courier : /times|georgia/.test(name) ? times : arial;
+    }
+    function readOnlyReason(field) {
+        return field?.richText?.schemaVersion === 2
+            ? 'This formatting cannot be edited here yet. This field is read-only; Sage can still edit it.' : '';
+    }
     function fail(message, code = 'invalid_rich_text') {
         const error = new Error(message); error.code = code; throw error;
     }
@@ -69,6 +90,20 @@
     }
     function canonical(value) { return JSON.stringify(sorted(value)); }
     function normalize(value, options = {}) {
+        if (value?.format === 'tiptap' && value.schemaVersion !== 1) {
+            fail(readOnlyReason({ richText: value }) || 'Unsupported rich text schema.', 'unsupported_rich_text_schema');
+        }
+        // P3a-1 must not strip schema-2 paragraph or textStyle attributes, even
+        // when a caller passes a bare document instead of its stored envelope.
+        (function guard(node) {
+            if (!node || typeof node !== 'object') return;
+            if (['textAlign', 'indent', 'spaceBefore', 'spaceAfter', 'lineHeight'].some(k => node.attrs?.[k] != null)
+                || (node.marks || []).some(m => ['strike', 'highlight', 'subscript', 'superscript'].includes(m.type)
+                    || (m.type === 'textStyle' && ['fontFamily', 'fontSize'].some(k => m.attrs?.[k] != null)))) {
+                fail('This formatting cannot be edited here yet.', 'unsupported_rich_text_schema');
+            }
+            (node.content || []).forEach(guard);
+        })(value?.doc || value);
         const raw = value?.format === 'tiptap' ? value.doc : value;
         const used = new Set(options.reservedIds || []), makeId = options.idFactory || allocate;
         let count = 0;
@@ -178,5 +213,5 @@
         }
         return project(value.doc || value);
     }
-    return { LIMITS, ID, IDENTIFIED, LINK, color, href, nodeIds, reservedIds, canonical, normalize, fromPlain, plainText };
+    return { FONT_MAP, RENDER_MARKS, font, readOnlyReason, LIMITS, ID, IDENTIFIED, LINK, color, href, nodeIds, reservedIds, canonical, normalize, fromPlain, plainText };
 });

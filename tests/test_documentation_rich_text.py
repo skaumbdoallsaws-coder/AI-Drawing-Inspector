@@ -177,6 +177,7 @@ def test_size_and_depth_bounds():
     def node(kind, children, **attrs):
         return {"type": kind, "attrs": {"id": "rt-" + str(uuid.UUID(int=next(counter))), **attrs}, "content": children}
     nested = node("bulletList", [node("listItem", [node("paragraph", [])])])
+    value["schemaVersion"] = 2
     for _ in range(rich.MAX_LIST_DEPTH):
         nested = node("bulletList", [node("listItem", [node("paragraph", []), nested])])
     value["doc"]["content"] = [nested]

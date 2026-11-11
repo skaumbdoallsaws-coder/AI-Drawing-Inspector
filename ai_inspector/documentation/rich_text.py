@@ -1,4 +1,4 @@
-"""Schema-1 authored text. JSON is user data, never HTML or model instructions.
+"""Versioned authored text. JSON is user data, never HTML or model instructions.
 
 Only content of scene-owned text objects can hold this envelope. Stored values
 are never repaired on read. The client allocates rt-<UUID> block/break IDs; text
@@ -6,23 +6,26 @@ leaves and the document root have no identity (ProseMirror splits text leaves).
 """
 from __future__ import annotations
 
+import math
 import os
 import re
 from urllib.parse import urlsplit
 import uuid
 
 from .commands import DocumentEditError, canonical_bytes
+from .rich_fonts import FONT_MAP
 
 FEATURE_FLAG = "INSPECTORPRO_DOCUMENTATION_RICH_TEXT"
 MAX_BYTES = 24 * 1024
 MAX_NODES = 512
-MAX_LIST_DEPTH = 3
-MAX_DEPTH = 12
+MAX_LIST_DEPTH = 6
+MAX_DEPTH = 14
 NODE_ID_PATTERN = r"rt-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 LINK_ATTRIBUTES = {"target": "_blank", "rel": "noopener noreferrer nofollow", "class": None}
 PLAIN_EDIT_CONSEQUENCE = "Whole-field replacement removes all rich formatting and node IDs and stores one plain string."
 _BLOCKS = {"paragraph", "heading", "bulletList", "orderedList"}
-_MARKS = ("bold", "italic", "underline", "textStyle", "link")
+_MARKS = ("bold", "italic", "underline", "strike", "subscript", "superscript", "highlight", "textStyle", "link")
+_PARAGRAPH_ATTRS = {"textAlign", "indent", "spaceBefore", "spaceAfter", "lineHeight"}
 
 
 def enabled(environ=None):
@@ -69,23 +72,58 @@ def _href(value):
 def validate(value, *, reserved_ids=()):
     """Return canonical JSON; reject unsupported shapes instead of stripping data."""
     _keys(value, {"format", "schemaVersion", "doc"}, {"format", "schemaVersion", "doc"})
-    if value["format"] != "tiptap" or type(value["schemaVersion"]) is not int or value["schemaVersion"] != 1:
+    if value["format"] != "tiptap" or type(value["schemaVersion"]) is not int or value["schemaVersion"] not in {1, 2}:
         _invalid("Unsupported rich text envelope.", "unsupported_rich_text_schema")
     ids, reserved, count = set(), set(reserved_ids), 0
+    uses_v2 = False
+
+    def feature_v2():
+        nonlocal uses_v2
+        if value["schemaVersion"] == 1:
+            _invalid("Schema-2 formatting requires schemaVersion 2.", "unsupported_rich_text_schema")
+        uses_v2 = True
+
+    def number(raw, minimum, maximum, step):
+        if (type(raw) not in {int, float} or not minimum <= raw <= maximum or not math.isfinite(raw)
+                or abs(raw / step - round(raw / step)) > 1e-9):
+            _invalid("Typography value is outside its range or step.")
+        canonical = round(round(raw / step) * step, 2)
+        return int(canonical) if canonical == int(canonical) else canonical
+
+    def color(raw):
+        if not isinstance(raw, str) or re.fullmatch(r"#[0-9a-fA-F]{6}", raw) is None:
+            _invalid("Color must be a six-digit hex color.")
+        return raw.lower()
 
     def mark(raw):
         _keys(raw, {"type", "attrs"}, {"type"})
         kind, attrs = raw["type"], raw.get("attrs", {})
         if not isinstance(kind, str) or kind not in _MARKS:
             _invalid("Unsupported rich text mark.")
-        if kind in {"bold", "italic", "underline"}:
+        if kind in {"strike", "subscript", "superscript", "highlight"}:
+            feature_v2()
+        if kind in {"bold", "italic", "underline", "strike", "subscript", "superscript"}:
             _keys(attrs, {})
             return {"type": kind}
-        if kind == "textStyle":
+        if kind == "highlight":
             _keys(attrs, {"color"}, {"color"})
-            if not isinstance(attrs["color"], str) or re.fullmatch(r"#[0-9a-fA-F]{6}", attrs["color"]) is None:
-                _invalid("Text color must be a six-digit hex color.")
-            return {"type": kind, "attrs": {"color": attrs["color"].lower()}}
+            return {"type": kind, "attrs": {"color": color(attrs["color"])}}
+        if kind == "textStyle":
+            _keys(attrs, {"color", "fontFamily", "fontSize"})
+            if not attrs:
+                _invalid("Text style requires at least one attribute.")
+            result = {}
+            if "color" in attrs:
+                result["color"] = color(attrs["color"])
+            if "fontFamily" in attrs:
+                feature_v2()
+                if not isinstance(attrs["fontFamily"], str) or attrs["fontFamily"] not in FONT_MAP:
+                    _invalid("Unsupported rich text font family.")
+                result["fontFamily"] = attrs["fontFamily"]
+            if "fontSize" in attrs:
+                feature_v2()
+                result["fontSize"] = number(attrs["fontSize"], 6, 48, .5)
+            return {"type": kind, "attrs": result}
         _keys(attrs, {"href", *LINK_ATTRIBUTES}, {"href"})
         # Persist only server-owned attributes. Unknown attributes (including
         # style, title and event handlers) are refused, never passed through.
@@ -106,6 +144,8 @@ def validate(value, *, reserved_ids=()):
             _keys(attrs, {})
         else:
             extra = {"level"} if kind == "heading" else {"start"} if kind == "orderedList" else set()
+            if kind in {"paragraph", "heading"}:
+                extra |= _PARAGRAPH_ATTRS
             _keys(attrs, {"id", *extra}, {"id"})
             identity = attrs["id"]
             if not isinstance(identity, str) or re.fullmatch(NODE_ID_PATTERN, identity) is None:
@@ -114,6 +154,17 @@ def validate(value, *, reserved_ids=()):
                 _invalid("Authored node IDs must be unique across this document.", "rich_text_node_id_collision")
             ids.add(identity)
             result["attrs"] = {"id": identity}
+            if kind in {"paragraph", "heading"}:
+                for name in sorted(_PARAGRAPH_ATTRS & attrs.keys()):
+                    feature_v2()
+                    attr_value = attrs[name]
+                    if name == "textAlign":
+                        if not isinstance(attr_value, str) or attr_value not in {"left", "center", "right"}:
+                            _invalid("Paragraph alignment must be left, center or right.")
+                        result["attrs"][name] = attr_value
+                    else:
+                        limits = (1, 2, .05) if name == "lineHeight" else (0, 72 if name == "indent" else 36, .5)
+                        result["attrs"][name] = number(attr_value, *limits)
             if kind == "heading":
                 if type(attrs.get("level")) is not int or not 1 <= attrs["level"] <= 3:
                     _invalid("Heading levels are limited to 1-3.")
@@ -135,6 +186,8 @@ def validate(value, *, reserved_ids=()):
             marks = [mark(item) for item in raw["marks"]]
             if len({item["type"] for item in marks}) != len(marks):
                 _invalid("Duplicate rich text mark.")
+            if {"subscript", "superscript"} <= {item["type"] for item in marks}:
+                _invalid("Subscript and superscript cannot be combined.")
             if marks:
                 result["marks"] = sorted(marks, key=lambda item: _MARKS.index(item["type"]))
         children = raw.get("content", [])
@@ -147,7 +200,9 @@ def validate(value, *, reserved_ids=()):
             if kind in {"bulletList", "orderedList"}:
                 lists += 1
                 if lists > MAX_LIST_DEPTH:
-                    _invalid("List nesting exceeds three levels.", "rich_text_too_large")
+                    _invalid("List nesting exceeds six levels.", "rich_text_too_large")
+                if lists > 3:
+                    feature_v2()
             content = [node(child, depth + 1, lists) for child in children]
             types = [child["type"] for child in content]
             allowed = {"text", "hardBreak"} if kind in {"paragraph", "heading"} else {"listItem"} if kind in {"bulletList", "orderedList"} else _BLOCKS
@@ -160,7 +215,8 @@ def validate(value, *, reserved_ids=()):
 
         return result
 
-    result = {"format": "tiptap", "schemaVersion": 1, "doc": node(value["doc"])}
+    doc = node(value["doc"])
+    result = {"format": "tiptap", "schemaVersion": 2 if uses_v2 else 1, "doc": doc}
     try:
         size = len(canonical_bytes(result))
     except (ValueError, UnicodeError, TypeError):
@@ -248,7 +304,7 @@ def field_read(value, *, reserved=()):
         return {"text": value or "", "isRichText": False, "richText": None, "richTextError": None}
     try:
         rich = validate(value, reserved_ids=reserved)
-        return {"text": plain_text(rich), "isRichText": True, "richText": rich, "richTextError": None}
+        return {"text": plain_text(rich), "isRichText": True, "richText": value, "richTextError": None}
     except DocumentEditError as error:
         return {"text": "", "isRichText": True, "richText": None, "richTextError": error.code}
 

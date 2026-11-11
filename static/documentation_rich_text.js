@@ -31,20 +31,50 @@ api.ready = import('/static/vendor/tiptap/tiptap.bundle.js?v=c36fd989775f').then
 });
 
 // Only the validated read envelope is rendered here. No HTML strings or URL navigation.
-function render(element, envelope) {
+function render(element, envelope, boxStyle = {}) {
     const tags = { paragraph: 'p', bulletList: 'ul', orderedList: 'ol', listItem: 'li', hardBreak: 'br' };
-    function node(value) {
-        if (value.type === 'text') {
-            let child = document.createElement('span');
-            child.textContent = value.text;
-            for (const mark of value.marks || []) {
-                const tag = { bold: 'strong', italic: 'em', underline: 'u', textStyle: 'span', link: 'a' }[mark.type];
+    // This wrapper maps legacy rich box families without changing the box font
+    // selector or the style of any plain object. The caller sets box styles later.
+    const root = document.createElement('div');
+    root.className = 'documentation-rich-content';
+    root.dataset.schemaVersion = String(envelope.schemaVersion);
+    root.style.fontFamily = core.font(boxStyle.fontFamily).canvas;
+    function node(value, heading = false) {
+        if (value.type === 'text' || value.type === 'hardBreak') {
+            let child = document.createElement(value.type === 'text' ? 'span' : 'br');
+            if (value.type === 'text') child.textContent = value.text;
+            const marks = [...(value.marks || [])].sort((a, b) => core.RENDER_MARKS.indexOf(a.type) - core.RENDER_MARKS.indexOf(b.type));
+            const schema2 = envelope.schemaVersion === 2;
+            if (schema2 && (marks.some(m => m.type === 'link') || boxStyle.textDecoration === 'underline')
+                && !marks.some(m => m.type === 'underline')) {
+                // Keep the link outermost; link and box underlines use each run's size.
+                marks.push({ type: 'underline' });
+                marks.sort((a, b) => core.RENDER_MARKS.indexOf(a.type) - core.RENDER_MARKS.indexOf(b.type));
+            }
+            const ownStyle = marks.find(m => m.type === 'textStyle')?.attrs || {};
+            const metrics = core.font(ownStyle.fontFamily || boxStyle.fontFamily);
+            const bold = heading || Number(boxStyle.fontWeight || 400) >= 600 || marks.some(m => m.type === 'bold');
+            for (const mark of marks) {
+                const tag = { bold: 'strong', italic: 'em', underline: 'u', strike: 's', subscript: 'sub', superscript: 'sup', highlight: 'mark', textStyle: 'span', link: 'a' }[mark.type];
                 if (!tag) continue;
                 const wrapper = document.createElement(tag);
-                if (mark.type === 'textStyle') wrapper.style.color = core?.color(mark.attrs?.color) || '';
+                if (schema2 && (mark.type === 'underline' || mark.type === 'strike')) {
+                    wrapper.className = 'documentation-rich-decoration';
+                    wrapper.style.textDecorationLine = mark.type === 'strike' ? 'line-through' : 'underline';
+                    wrapper.style.textDecorationThickness = (mark.type === 'strike' ? metrics.strike_size
+                        : bold ? metrics.underline_bold : metrics.underline_regular) + 'em';
+                    if (bold) wrapper.style.fontWeight = '700';
+                }
+                if (mark.type === 'textStyle') {
+                    wrapper.style.color = core.color(mark.attrs?.color) || '';
+                    if (mark.attrs?.fontFamily) wrapper.style.fontFamily = core.font(mark.attrs.fontFamily).canvas;
+                    if (mark.attrs?.fontSize != null) wrapper.style.fontSize = mark.attrs.fontSize + 'px';
+                }
+                if (mark.type === 'highlight') wrapper.style.backgroundColor = core.color(mark.attrs?.color) || '';
                 if (mark.type === 'link') {
-                    const href = core?.href(mark.attrs?.href);
+                    const href = core.href(mark.attrs?.href);
                     if (!href) continue;
+                    if (schema2) wrapper.style.textDecoration = 'none';
                     wrapper.href = href;
                     wrapper.target = core.LINK.target;
                     wrapper.rel = core.LINK.rel;
@@ -61,15 +91,25 @@ function render(element, envelope) {
         if (value.type === 'orderedList') result.start = value.attrs.start;
         result.style.whiteSpace = 'pre-wrap';
         if (['paragraph', 'heading', 'bulletList', 'orderedList'].includes(value.type)) result.style.margin = '0';
+        if (['paragraph', 'heading'].includes(value.type)) {
+            const attrs = value.attrs || {};
+            if (attrs.textAlign) result.style.textAlign = attrs.textAlign;
+            if (attrs.indent != null) result.style.marginInlineStart = attrs.indent + 'px';
+            if (attrs.spaceBefore != null) result.style.paddingTop = attrs.spaceBefore + 'px';
+            if (attrs.spaceAfter != null) result.style.paddingBottom = attrs.spaceAfter + 'px';
+            if (attrs.lineHeight != null) result.style.lineHeight = String(attrs.lineHeight);
+        }
         if (value.type === 'paragraph' && !value.content?.length) result.appendChild(document.createElement('br'));
-        for (const child of value.content || []) result.appendChild(node(child));
+        for (const child of value.content || []) result.appendChild(node(child, heading || value.type === 'heading'));
         return result;
     }
-    element.replaceChildren();
-    for (const child of envelope.doc.content || []) element.appendChild(node(child));
+    for (const child of envelope.doc.content || []) root.appendChild(node(child));
+    element.replaceChildren(root);
 }
 
 function mount(element, options) {
+    const readOnly = core?.readOnlyReason(options.field);
+    if (readOnly) { options.onError?.(new Error(readOnly)); return null; }
     if (!kit || !core || active || !element) return null;
     const { Editor, Extension, StarterKit, TextStyle, Color } = kit;
     const field = options.field;
@@ -239,6 +279,7 @@ function mount(element, options) {
                 notice('This field changed elsewhere. Your draft is kept. Choose how to continue.', true);
                 return;
             }
+            if (core.readOnlyReason(current)) { notice(core.readOnlyReason(current)); return; }
             if (!snapshot.documentationRichText || !current.capabilities?.includes('replace_rich_text')) {
                 notice('This field is no longer editable. Your draft is kept.'); return;
             }

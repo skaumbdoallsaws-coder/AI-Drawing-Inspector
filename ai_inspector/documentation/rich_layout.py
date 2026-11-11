@@ -1,4 +1,4 @@
-"""Bounded authored-text export model and PDF layout (schema 1).
+"""Bounded authored-text export model and PDF layout (schemas 1 and 2).
 
 content_model() is independent of PyMuPDF and contains no PDF positions. DOCX
 consumes that model in P2b-2. Layout uses only PyMuPDF's built-in font programs;
@@ -14,8 +14,9 @@ import unicodedata
 
 from .commands import DocumentEditError
 from .rich_text import from_plain, is_rich, validate
+from .rich_fonts import font as canvas_font, line_box, decoration, rounded_metrics, SCRIPT_SIZE, SUB_OFFSET, SUP_OFFSET
 
-PDF_RENDERER_VERSION = "authored-text-pdf-1"
+PDF_RENDERER_VERSION = "authored-text-pdf-2"
 # The PDF mirrors the canvas: documentation_rich_text.js render() inside a
 # .documentation-object.text box, where one page px is one PDF point. These are
 # that box's CSS and the browser defaults it relies on.
@@ -70,6 +71,11 @@ class Run:
     underline: bool = False
     color: str = "#18212a"
     href: str | None = None
+    font_family: str | None = None
+    font_size: float | None = None
+    strike: bool = False
+    script: str | None = None
+    highlight: str | None = None
 
 
 @dataclass(frozen=True)
@@ -90,6 +96,10 @@ class Paragraph:
     list_path: tuple[ListLevel, ...]
     marker: str | None  # only the first paragraph in an item has a marker
     runs: tuple[Run, ...]
+    indent: float = 0
+    space_before: float = 0
+    space_after: float = 0
+    line_height: float = LINE_HEIGHT
 
 
 @dataclass(frozen=True)
@@ -97,6 +107,7 @@ class Content:
     paragraphs: tuple[Paragraph, ...]
     base_size: float
     base_run: Run
+    schema2: bool = False  # the canvas sets decoration thicknesses explicitly only for schema-2 envelopes
 
 
 def _color(value, fallback="#18212a"):
@@ -125,7 +136,9 @@ def content_model(value, style=None):
                italic=style.get("fontStyle") == "italic", underline=style.get("textDecoration") == "underline",
                color=_color(style.get("color")))
     family = str(style.get("fontFamily") or "Arial")
-    align = style.get("textAlign") if style.get("textAlign") in {"left", "center", "right"} else "left"
+    # The PDF lays a justified box out flush left (justification is later work); "justify" is kept so the DOCX can
+    # tell the box's alignment from a paragraph's own textAlign, which wins on the canvas.
+    align = style.get("textAlign") if style.get("textAlign") in {"left", "center", "right", "justify"} else "left"
     paragraphs, list_count = [], 0
 
     def inline(node, heading):
@@ -136,7 +149,11 @@ def content_model(value, style=None):
         return Run("break" if node["type"] == "hardBreak" else "text", node.get("text", ""),
                    base.bold or heading or "bold" in marks, base.italic or "italic" in marks,
                    base.underline or "underline" in marks or bool(href),
-                   _color(marks.get("textStyle", {}).get("color"), LINK_COLOR if href else base.color), href)
+                   _color(marks.get("textStyle", {}).get("color"), LINK_COLOR if href else base.color), href,
+                   font_family=marks.get("textStyle", {}).get("fontFamily"),
+                   font_size=marks.get("textStyle", {}).get("fontSize"), strike="strike" in marks,
+                   script="subscript" if "subscript" in marks else "superscript" if "superscript" in marks else None,
+                   highlight=marks.get("highlight", {}).get("color"))
 
     def block(node, path=(), marker=None):
         nonlocal list_count
@@ -162,11 +179,14 @@ def content_model(value, style=None):
                 runs[-1] = replace(run, text=runs[-1].text + run.text)
             else:
                 runs.append(run)
-        paragraphs.append(Paragraph(kind, level, family, size * HEADING_SCALE[level], align, path, marker, tuple(runs)))
+        attrs = node.get("attrs", {})
+        paragraphs.append(Paragraph(kind, level, family, size * HEADING_SCALE[level], attrs.get("textAlign", align),
+                                    path, marker, tuple(runs), attrs.get("indent", 0), attrs.get("spaceBefore", 0),
+                                    attrs.get("spaceAfter", 0), attrs.get("lineHeight", LINE_HEIGHT)))
 
     for node in envelope["doc"]["content"]:
         block(node)
-    return Content(tuple(paragraphs), size, base)
+    return Content(tuple(paragraphs), size, base, isinstance(value, dict) and value.get("schemaVersion") == 2)
 
 
 class _Fonts:
@@ -206,6 +226,11 @@ class _Atom:
     right: float
     ascent: float
     descent: float
+    family: str
+    shift: float
+    boxes: tuple
+    highlight_ascent: float
+    highlight_descent: float
 
 
 @dataclass(frozen=True)
@@ -224,6 +249,15 @@ class PositionedRun:
     rect: tuple[float, float, float, float]
     marker: bool = False
     hanging: bool = False  # white space hanging past a line end: never underlined or linked
+    font_family: str = "Arial"
+    strike: bool = False
+    script: str | None = None
+    highlight: str | None = None
+    highlight_rect: tuple = ()
+    underline_offset: float = 0
+    underline_width: float = 0
+    strike_offset: float = 0
+    strike_width: float = 0
 
 
 @dataclass(frozen=True)
@@ -247,13 +281,16 @@ class Layout:
     fonts: _Fonts = field(repr=False, compare=False)
 
 
-def layout_text(value, frame, style=None, *, fitz_module=None):
+def layout_text(value, frame, style=None, *, fitz_module=None, canvas_rounding=False):
     """Lay out into an (x0, y0, x1, y1) content box in PDF points, as the canvas does.
 
-    Lines follow the box CSS (LINE_HEIGHT, white-space: pre-wrap, overflow-wrap:
-    anywhere). Each line is LINE_HEIGHT times its font size, with the baseline at
-    the CSS half-leading. Preserved white space never wraps; at a line end it
-    hangs. A word that does not fit moves to the next line, and is split at glyph
+    Lines follow CSS (unitless line-height, white-space: pre-wrap, overflow-wrap:
+    anywhere). Line boxes union the paragraph strut and each inline font/size box at
+    a common baseline; relative script offsets move paint, not those boxes. Plain and
+    rich text use the canvas fonts' vertical metrics (rich_fonts); canvas_rounding
+    lays out as Blink rounds at device scale 1, for measurement only (rich_fonts.line_box).
+    Preserved white space never wraps; at a line
+    end it hangs. A word that does not fit moves to the next line, and is split at glyph
     boundaries only when it is wider than a whole line. No trimming, shrinking,
     clipping or implicit font substitution. Tabs advance four spaces in their
     run's font; literal CR advances one space (as in the browser). LF and
@@ -272,23 +309,44 @@ def layout_text(value, frame, style=None, *, fitz_module=None):
     fonts = _Fonts(fitz_module)
 
     def atoms(run, paragraph):
-        primary = _pdf_font(paragraph.font_family, 700 if run.bold else 400, "italic" if run.italic else "normal")
+        family = run.font_family or paragraph.font_family
+        primary = _pdf_font(canvas_font(family).pdf, 700 if run.bold else 400, "italic" if run.italic else "normal")
+        own_size = run.font_size if run.font_size is not None else paragraph.font_size
+        size = own_size * SCRIPT_SIZE if run.script else own_size
+        shift = own_size * (SUB_OFFSET if run.script == "subscript" else -SUP_OFFSET) if run.script else 0
+        metrics = canvas_font(family)
+
+        def vertical(points):
+            # The glyph content box (ascent, descent) at this size, as the canvas paints a run's background.
+            if canvas_rounding:
+                return rounded_metrics(points, family)
+            return metrics.ascent * points, metrics.descent * points
+
+        boxes = (line_box(own_size, family, paragraph.line_height, canvas_rounding=canvas_rounding),
+                 line_box(size, family, paragraph.line_height, canvas_rounding=canvas_rounding))
+        (glyph_ascent, glyph_descent), (mark_ascent, mark_descent) = vertical(size), vertical(own_size)
+        def hard_break():
+            font = fonts.get(primary)
+            if font is None:
+                raise DocumentEditError("unsupported_export_font", "The built-in PDF base font is unavailable.")
+            return _Atom("", replace(run, kind="break", text=""), primary, size, 0, 0, 0,
+                         glyph_ascent, glyph_descent, family, shift, boxes, mark_ascent, mark_descent)
         if run.kind == "break":
-            return [None]
+            return [hard_break()]
         result = []
         for char in unicodedata.normalize("NFC", run.text):
             if char == "\n":
-                result.append(None)
+                result.append(hard_break())
                 continue
             shown = " " * TAB_SPACES if char == "\t" else " " if char == "\r" else char
             key, font = fonts.choose(shown[0], primary)
             if font is None:
                 raise DocumentEditError("unsupported_export_font", "The built-in PDF base font is unavailable.")
-            advance = font.glyph_advance(ord(shown[0])) * paragraph.font_size * len(shown)
+            advance = font.glyph_advance(ord(shown[0])) * size * len(shown)
             # Like CSS, lines measure advances, never ink: glyph_bbox is the whole font box
             # for some built-in fonts (the CJK one), which would widen every ideograph by 12%.
-            result.append(_Atom(shown, run, key, paragraph.font_size, advance, 0.0, advance,
-                font.ascender * paragraph.font_size, -font.descender * paragraph.font_size))
+            result.append(_Atom(shown, run, key, size, advance, 0.0, advance, glyph_ascent, glyph_descent,
+                                family, shift, boxes, mark_ascent, mark_descent))
         return result
 
     def extents(items):
@@ -315,16 +373,17 @@ def layout_text(value, frame, style=None, *, fitz_module=None):
     for paragraph_index, paragraph in enumerate(content.paragraphs):
         body = [atom for run in paragraph.runs for atom in atoms(run, paragraph)]
         label = marker_atoms(paragraph) if paragraph.marker else []
-        indent = LIST_INDENT * len(paragraph.list_path)
+        list_indent = LIST_INDENT * len(paragraph.list_path)
+        indent = list_indent + paragraph.indent
+        top += paragraph.space_before
         available = x1 - x0 - indent
         bold = content.base_run.bold or paragraph.heading_level > 0
         metrics = fonts.get(_pdf_font(paragraph.font_family, 700 if bold else 400,
                                       "italic" if content.base_run.italic else "normal"))
         if metrics is None:
             raise DocumentEditError("unsupported_export_font", "The built-in PDF base font is unavailable.")
-        line_height = LINE_HEIGHT * paragraph.font_size
-        # CSS half-leading: the font's ascent plus descent sits centered in the line.
-        baseline_offset = (line_height + (metrics.ascender + metrics.descender) * paragraph.font_size) / 2
+        # Plain text boxes use the same canvas CSS and fonts as rich ones, so the same metrics (supervisor P3a-1).
+        strut = line_box(paragraph.font_size, paragraph.font_family, paragraph.line_height, canvas_rounding=canvas_rounding)
         current, first = [], True
 
         def flush():
@@ -341,20 +400,37 @@ def layout_text(value, frame, style=None, *, fitz_module=None):
                 overflow = True
             extra = max(0, available - width)
             offset = extra / 2 if paragraph.align == "center" else extra if paragraph.align == "right" else 0
+            boxes = [strut]
+            boxes.extend(box for atom in current for box in atom.boxes)
+            if first:
+                boxes.extend(box for atom in label for box in atom.boxes)
+            baseline_offset = max(box[0] for box in boxes)
+            line_height = baseline_offset + max(box[1] for box in boxes)
             baseline = top + baseline_offset
             positioned = []
 
             def place(items, pen, **flags):
                 for atom in items:
-                    rect = (pen + min(0, atom.left), baseline - atom.ascent,
-                            pen + max(atom.advance, atom.right), baseline + atom.descent)
-                    run = PositionedRun(atom.text, pen, baseline, atom.advance, atom.font, atom.size,
-                        atom.run.bold, atom.run.italic, atom.run.underline, atom.run.color, atom.run.href, rect, **flags)
-                    if positioned and replace(positioned[-1], text="", width=0, rect=(), x=0) == replace(run, text="", width=0, rect=(), x=0):
+                    if not atom.text:
+                        continue
+                    shifted = baseline + atom.shift
+                    rect = (pen + min(0, atom.left), shifted - atom.ascent,
+                            pen + max(atom.advance, atom.right), shifted + atom.descent)
+                    highlight_rect = (pen, baseline - atom.highlight_ascent, pen + atom.advance, baseline + atom.highlight_descent)
+                    underline = decoration(atom.family, atom.size, atom.run.bold, "underline", auto=not content.schema2)
+                    strike = decoration(atom.family, atom.size, atom.run.bold, "strike")
+                    run = PositionedRun(atom.text, pen, shifted, atom.advance, atom.font, atom.size,
+                        atom.run.bold, atom.run.italic, atom.run.underline, atom.run.color, atom.run.href, rect,
+                        font_family=atom.family, strike=atom.run.strike, script=atom.run.script, highlight=atom.run.highlight,
+                        highlight_rect=highlight_rect if atom.run.highlight else (), underline_offset=underline[0],
+                        underline_width=underline[1], strike_offset=strike[0], strike_width=strike[1], **flags)
+                    if positioned and replace(positioned[-1], text="", width=0, rect=(), highlight_rect=(), x=0) == replace(run, text="", width=0, rect=(), highlight_rect=(), x=0):
                         previous = positioned[-1]
                         positioned[-1] = replace(previous, text=previous.text + run.text, width=previous.width + run.width,
                             rect=(min(previous.rect[0], rect[0]), min(previous.rect[1], rect[1]),
-                                  max(previous.rect[2], rect[2]), max(previous.rect[3], rect[3])))
+                                  max(previous.rect[2], rect[2]), max(previous.rect[3], rect[3])),
+                            highlight_rect=(previous.highlight_rect[0], highlight_rect[1], highlight_rect[2], highlight_rect[3])
+                            if atom.run.highlight else ())
                     else:
                         positioned.append(run)
                     pen += atom.advance
@@ -362,7 +438,7 @@ def layout_text(value, frame, style=None, *, fitz_module=None):
 
             if first and label:
                 # The marker and its suffix space end where the item text starts.
-                start = x0 + indent - sum(atom.advance for atom in label)
+                start = x0 + list_indent - sum(atom.advance for atom in label)
                 if start < x0 - _EPSILON:
                     overflow = True  # a marker wider than its list indent would leave the box
                 place(label, start, marker=True)
@@ -374,7 +450,8 @@ def layout_text(value, frame, style=None, *, fitz_module=None):
         index = 0
         while index < len(body):
             atom = body[index]
-            if atom is None:
+            if atom.run.kind == "break":
+                current.append(atom)
                 if index < len(body) - 1:
                     flush()
                 index += 1
@@ -386,7 +463,7 @@ def layout_text(value, frame, style=None, *, fitz_module=None):
             # Wrap whole words across mark boundaries (and between ideographs); split an
             # overlong word only at glyph boundaries. Whitespace itself is never discarded.
             end = index + 1
-            while (end < len(body) and body[end] is not None and not _space(body[end])
+            while (end < len(body) and body[end].run.kind != "break" and not _space(body[end])
                    and not _break_between(body[end - 1], body[end])):
                 end += 1
             token = body[index:end]
@@ -400,6 +477,7 @@ def layout_text(value, frame, style=None, *, fitz_module=None):
                 current.append(item)
             index = end
         flush()  # includes empty paragraphs
+        top += paragraph.space_after
     height = top - y0
     overflow = overflow or height > y1 - y0 + _EPSILON
     return Layout(content, bounds, tuple(lines), height, overflow,
@@ -435,7 +513,7 @@ class ObjectLayout:
     layout: Layout
 
 
-def prepare_pdf_objects(fitz, document, page_size, *, rich_only=False):
+def prepare_pdf_objects(fitz, document, page_size, *, rich_only=False, canvas_rounding=False):
     """Preflight every applicable object before drawing or writing any artifact."""
     from ai_inspector.parts_manual.pdf import _document_object_style, _document_theme
 
@@ -454,7 +532,6 @@ def prepare_pdf_objects(fitz, document, page_size, *, rich_only=False):
                 raise DocumentEditError("invalid_export_layout", "Text object frame is not finite.", targets=[target])
             if abs(rotation) > 1e-9:
                 rotated.append(target)
-                continue
             bounds = (x * width, y * height, (x + w) * width, (y + h) * height)
             style = _document_object_style(theme, value)
             outline = "outlineColor" in (value.get("styleOverrides") or {})
@@ -462,7 +539,7 @@ def prepare_pdf_objects(fitz, document, page_size, *, rich_only=False):
             inset = PADDING + (max(0.0, float(style.get("lineWidth") or 0)) if outline else 0.0)
             try:
                 layout = layout_text(stored, (bounds[0] + inset, bounds[1] + inset, bounds[2] - inset, bounds[3] - inset),
-                                     style, fitz_module=fitz)
+                                     style, fitz_module=fitz, canvas_rounding=canvas_rounding)
             except DocumentEditError as error:
                 raise DocumentEditError(error.code, str(error), **{**error.details, "targets": [target]}) from error
             if layout.unrenderable:
@@ -474,14 +551,14 @@ def prepare_pdf_objects(fitz, document, page_size, *, rich_only=False):
                 overflowing.append({**target, "reasons": reasons, "measuredHeight": layout.measured_height,
                                     "frame": list(bounds)})
             page_plans[key] = ObjectLayout(target, bounds, style, outline, layout)
-    if rotated:
-        raise DocumentEditError("unsupported_export_rotation", "Rotated authored text is not supported by the rich PDF layout.", targets=rotated)
     if missing:
         raise DocumentEditError("unsupported_export_glyph", "No available built-in PDF font renders these characters.",
                                 targets=missing, codePoints=sorted({code for item in missing for code in item["codePoints"]}))
     if overflowing:
         raise DocumentEditError("layout_overflow", "Authored text must fit inside its text box, and the box must be on the "
                                 "page; enlarge or move the box, or shorten the text.", targets=overflowing)
+    if rotated:
+        raise DocumentEditError("unsupported_export_rotation", "Rotated authored text is not supported by the rich PDF layout.", targets=rotated)
     return result
 
 
@@ -504,6 +581,11 @@ def draw_pdf_object(fitz, page, plan):
         border = fitz.Rect(rect.x0 + outline_width / 2, rect.y0 + outline_width / 2,
                            rect.x1 - outline_width / 2, rect.y1 - outline_width / 2)
         page.draw_rect(border, color=_hex_rgb(style.get("outlineColor"), "#ABBAC4"), width=outline_width, stroke_opacity=opacity)
+    # Paint all inline backgrounds before any glyphs (including adjacent runs).
+    for line in plan.layout.lines:
+        for run in line.runs:
+            if run.highlight and run.width:
+                page.draw_rect(fitz.Rect(run.highlight_rect), color=None, fill=_hex_rgb(run.highlight), fill_opacity=opacity)
     registered = set()
     for line in plan.layout.lines:
         for run in line.runs:
@@ -526,10 +608,11 @@ def draw_pdf_object(fitz, page, plan):
                              color=color, fill_opacity=opacity, **options)
             if run.hanging:
                 continue
-            if run.underline and run.width:
-                page.draw_line((run.x, run.baseline + run.font_size * 0.1),
-                    (run.x + run.width, run.baseline + run.font_size * 0.1), color=color,
-                    width=max(0.5, run.font_size * 0.04), stroke_opacity=opacity)
+            for enabled, offset, thickness in ((run.underline, run.underline_offset, run.underline_width),
+                                                (run.strike, run.strike_offset, run.strike_width)):
+                if enabled and run.width:
+                    page.draw_line((run.x, run.baseline + offset), (run.x + run.width, run.baseline + offset),
+                                   color=color, width=thickness, stroke_opacity=opacity)
             if run.href and run.width:
                 page.insert_link({"kind": fitz.LINK_URI, "from": fitz.Rect(run.rect), "uri": run.href})
 

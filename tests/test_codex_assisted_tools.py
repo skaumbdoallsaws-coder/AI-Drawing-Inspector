@@ -25,6 +25,7 @@ def test_contract_has_no_commit_approval_or_shell_capability(setup):
                                                       "preview_planned_design", "preview_floor_plan_import",
                                                       "prepare_model_asset", "register_model_asset"}
     assert "apply_document_edits" not in {spec["name"] for spec in gateway.specs}
+    assert "find_document_text" not in {spec["name"] for spec in gateway.specs}
     assert all("replace_rich_text" not in repr(spec) for spec in gateway.specs)
     assert "propose_document_value_confirmation" not in {spec["name"] for spec in gateway.specs}
     assert "inspect_document_change" not in {spec["name"] for spec in gateway.specs}

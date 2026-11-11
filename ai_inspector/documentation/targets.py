@@ -197,8 +197,11 @@ def capabilities(target):
     if target["operation"] == "read_only":
         return []
     result = [target["operation"]]
+    if target["operation"] == "replace_text" and (
+            not (target.get("richField") or {}).get("isRichText") or rich_text_enabled()):
+        result.append("replace_range")
     if target.get("richField") is not None and rich_text_enabled():
-        result.append("replace_rich_text")
+        result.extend(["replace_rich_text", "format_range"])
     return result
 
 
@@ -315,7 +318,7 @@ class ReadBindings:
                 raise DocumentEditError("document_read_required", "Read the complete target before editing.",
                                         operationIndex=index, targetId=operation["targetId"])
             read = matches[-1]
-            if read["isExcerpt"]:
+            if read["isExcerpt"] and not (read.get("rangeRead") and operation["operation"] in {"replace_range", "format_range"}):
                 raise DocumentEditError("full_read_required", "Read this target in full before replacement.",
                                         operationIndex=index, targetId=operation["targetId"])
             if operation["operation"] == "replace_rich_text":

@@ -421,3 +421,156 @@ heavy job at a time.
   pages without rich content.
 - The smoke's "Target closed" asyncio messages (123 this run, 57 at P3a-2) are Playwright response-finished
   callbacks for pages the harness closed; they are not failures.
+
+
+## P3a-4
+
+CHANGED
+
+- Added `documentation/search.py`: literal, length-preserving case folding; code-point positions; the specified grapheme-boundary subset; scoped, revision-bound search; exact range replacement and mark formatting. Rich range edits preserve block/break IDs and untouched run marks, and save the minimal schema version.
+- Extended targets, the Sage tool specs/gateway, command validation, the scene repository and server routes. Search reads authorize range edits only. Ranges share one pre-image, reject overlap, and coalesce into one existing write per target. Batches retain hashes, conflicts, provenance, receipts and one document undo step. A marked range batch can replay up to 200 target writes; ordinary batches retain their 12-operation bound.
+- Added the workspace Find and Replace panel through `documentation_search.js` and the ribbon/Ctrl+F adapter in `index.html`. It lists contexts, selects targets, previews replace-all and sends visible groups of at most 100. Later groups use only hashes returned by this run's committed writes. A failure stops the remaining groups; transport retries reuse the exact request.
+- Added `documentation/symbols.py` and its JS mirror, plus the editor's grouped Symbol picker. Picks use the caret's marks and one editor transaction. The supplied table contains 69 entries and 68 distinct code points, retaining Omega in both groups.
+- Added `tests/test_documentation_search.py` and `tests/documentation_search.test.cjs`; updated tool inventories, the Sage guidance/progress label, and P3a smoke part 4. The smoke covers UI find/navigation, replacement-group undo, neighbouring marks, a symbol's canvas/PDF/DOCX output, and Sage find/range edits. Changed static asset URLs are versioned.
+
+TESTS
+
+- Static checks only: Python AST parsing passed for all 15 changed/new Python files; `node --check` passed for the three changed/new static JS files and the new Node test file; all four executable inline scripts in `index.html` compiled with `vm.Script`.
+- `git diff --check` passed. Changed/new files use LF; added server/index lines are ASCII; `server.py` retains its UTF-8 BOM.
+- No test suite, browser, smoke, baseline, export or glyph measurement was run. No commit or index/history mutation was made.
+
+NOT RUN
+
+Claude must run these commands in the equipped environment, using the repository's hidden-process launcher on Windows:
+
+```text
+python -m pytest -q tests/test_documentation_search.py tests/test_documentation_rich_blocks.py tests/test_documentation_typography.py tests/test_documentation_rich_text.py tests/test_documentation_rich_exports.py
+python -m pytest -q tests/test_documentation_transactions.py tests/test_documentation_provenance.py tests/test_documentation_change_undo.py tests/test_documentation_refresh.py tests/test_documentation_store_chokepoint.py tests/test_documentation_editor_smoke.py tests/test_documentation_conflicts_ui.py tests/test_codex_documentation_tools.py tests/test_codex_specification_sheet_tools.py tests/test_codex_readonly_pilot.py tests/test_codex_assisted_tools.py tests/test_codex_progress_steps.py
+python -m pytest -q tests/test_parts_manual.py tests/test_specification_sheet_workflow.py tests/test_operations_manual_workspace.py tests/test_work_instruction_workflow.py
+node --test tests/documentation*.test.cjs
+python tools/documentation_baseline.py --check
+python tools/documentation_baseline.py --local --check
+python tests/smoke_documentation_editor.py --phase P1a
+python tests/smoke_documentation_editor.py --phase P1b
+python tests/smoke_documentation_editor.py --phase P1c
+python tests/smoke_documentation_editor.py --phase P2a
+python tests/smoke_documentation_editor.py --phase P2b
+python tests/smoke_documentation_editor.py --phase P3a
+python -c "import glob,sys,pytest; sys.exit(pytest.main(['-q']+sorted({p for pattern in ('tests/test_documentation*.py','tests/test_parts_manual*.py','tests/test_operations_manual*.py','tests/test_specification_sheet*.py','tests/test_work_instruction*.py','tests/test_inspection_sheet*.py') for p in glob.glob(pattern)})))"
+python -c "import glob,sys,pytest; sys.exit(pytest.main(['-q']+sorted({p for pattern in ('tests/test_codex*.py','tests/test_facility*.py','tests/test_authored*.py','tests/test_sage*.py','tests/test_industrial*.py') for p in glob.glob(pattern)})))"
+```
+
+Review the new part-4 screenshots and PDF/DOCX artifacts, including the symbol's font and the Find panel's selection/navigation. They are produced by the smoke; none were produced by the builder.
+
+DEVIATIONS
+
+- No feature-scope deviation. Two insertions at the same position, or an insertion on another range's edge, are treated as overlapping to avoid ambiguous order. Whole-field and range edits cannot share a target in one batch.
+- Search results add `rangeRevision` for the scene owner (specification slots have a separate revision). Search's tool-output ceiling is 512 KiB to accommodate 200 Unicode matches with context; existing read tools retain 64 KiB. The existing 256 KiB write-request ceiling remains.
+- Persisted range batches carry an additive `rangeBatch` marker so they can reopen with more than twelve target writes; existing batches and document/rich schema versions are unchanged.
+
+OPEN QUESTIONS
+
+- Runtime and visual acceptance remain for the supervisor gate. In particular, verify real ribbon/panel geometry, multi-page navigation, group receipts/undo, and the picked symbol's inherited marks and export font.
+- GB9c Indic conjunct joining is intentionally not modelled, as directed. No additional symbols or Unicode normalization were introduced.
+
+
+## P3a-4 supervisor gate
+
+Reviewed, fixed and gated by Claude on 2026-11-11 on the worktree (doc-editor at 16ad322 plus this round). Codex
+built the round in 28 minutes and ran static checks only; every runtime gate below was run by the supervisor, one
+heavy job at a time.
+
+### Findings fixed by the supervisor
+
+1. Grapheme boundaries. The boundary rule let a range start or end inside a user-perceived character. Checked
+   against the `regex` module's `\X` on a generated corpus, 3898 positions were accepted inside a cluster, all
+   before U+200C (zero width non-joiner). Four more Extend code points that are not marks (U+0E33, U+0EB3, U+FF9E,
+   U+FF9F) and 15 Prepend code points were missing from the tables. Both are now in `search.py` and mirrored in
+   `documentation_search.js`. After the fix no accepted position is inside a cluster; the remaining differences are
+   the GB9c Indic conjunct rule (not modelled, as directed) and code points that differ between Unicode versions.
+   Python and JavaScript agree on 364,250 positions and on the whole table.
+2. Range edits stored split runs. A replace or a format inside a run left neighbouring text runs with equal marks
+   as separate nodes, so the same visible text could be stored in several shapes. Range edits now merge equal
+   neighbours after validation. An empty `format_range` (start equal to end) changed nothing and was accepted; it is
+   now refused with `invalid_text_range`.
+3. Find panel.
+   - The result list was unbounded: "e" on the operations manual built more than 2500 rows. The list now shows the
+     first 1000 matches and says so, and Replace all refuses an incomplete list ("Narrow the search").
+   - Read-only matches showed the server's reason code. They now read as text.
+   - The panel was appended to the page body, so it stayed on screen after the workspace closed and kept the old
+     document's results after a switch to another document. It is now inside `#documentationWorkspace` and closes
+     with the workspace or when the document changes.
+   - "1 groups" is now "1 group".
+4. Ribbon. Four compact commands in one stack overflowed the ribbon's height (Undo was clipped). Undo and Redo are
+   one stack; Find and Replace and Reset are a second.
+5. The Find and Replace button asked for a `search` icon that did not exist (404 on every ribbon draw).
+   `static/assets/documentation-ribbon-icons/search.svg` is added and `test_parts_manual_ui_contract.py` requires it.
+6. Symbol picker. The picker was a white panel whose group labels inherited the editing strip's light text, so the
+   three group names were invisible. It now uses the strip's colours.
+7. Smoke harness.
+   - The proof server's tool allowlist had no `find_document_text`, so the Sage find step stopped with HTTP 403.
+   - The snapshot copied only tracked static files, so a new icon was missing in the isolated server. New files
+     under `documentation-ribbon-icons` are now included.
+   - `p3a4_symbol_no_fallback` compared font names that PyMuPDF spells "Nimbus Sans Italic"; it now normalises the
+     name and requires the symbol to share its span with the text.
+   - `p3a2_reopen_keeps_canvas` compared two page loads with exact float equality. The fit-page scale of two loads
+     can differ at float32 precision (6e-8 relative, 0.00006 px on a glyph edge); the comparison now allows 0.01 px
+     and still requires identical text and structure.
+   - `p3a3_signal_immutable` sent Control+Home in the same moment the editor took focus. ProseMirror re-applies its
+     own selection 20 ms after a focus event, which undid the caret move, so Backspace removed the last character
+     (one run). The step now observes the editor's selection before pressing Backspace and keeps every observed
+     state. The editor itself is not at fault: three new checks (`p3a3_*_editor_takes_focus`) read the focus before
+     any key or click is sent, and the paragraph, the notice and the caption all hold it.
+   - New checks: `p3a4_bounded_list`, `p3a4_ctrl_f_opens_in_workspace`, `p3a4_panel_follows_document`,
+     `p3a4_symbol_picker_on_screen`.
+
+### Accepted
+
+- Specification-sheet slot text is found but never replaceable (`read_only_derived_field`): slots are typed values,
+  as the plan says. The panel lists those matches as read-only.
+- The panel is fixed at the top right of the workspace (370 px). It cannot be moved.
+- The panel reads at most five pages of 200 matches. Each page takes 0.5-1.0 s on the MMLE-50D operations manual
+  and work instructions; "e" (2566 matches) takes 8 s for the full count.
+- An identical retry of a `/ranges` request returns the stored receipt without `rangeBinding`. The panel never
+  continues from a retry, so nothing depends on it.
+- The persisted `rangeBatch` marker is additive (a range batch may hold up to 200 commands on reopen). No schema
+  number changes.
+
+### Visual review
+
+- Find panel on the operations manual: white, 370 px, at the top right, results with the match highlighted in
+  context, the "first 1000" message for "e" (2534 found), Previous and Next selecting the target on the page.
+- Ribbon: Undo/Redo and Find and Replace/Reset as two stacks, nothing clipped; the editing strip shows Symbol.
+- Symbol picker open under the strip: three labelled groups (Units and math, Greek, Arrows and marks), 69 buttons,
+  inside the window.
+- A picked plus-minus sign after an italic word: italic on the canvas, in the PDF (Nimbus Sans Italic, the same span
+  as the word) and in Word 16's render of the DOCX (Arial-ItalicMT, the same run). No fallback font in either.
+- Word 16 render of the smoke's operations DOCX: 41 pages, as at P3a-3.
+
+### Numbers
+
+- Node 296/296 (rich text 258, conflicts 18, search 20).
+- Focused suite: Codex's build 1366 passed, none failed; the final code 1374 passed, none failed.
+- Supervisor checks outside the suite: 1500 random documents and 4081 range edits (text exact, untouched marks and
+  node IDs kept, runs merged); every malformed find or ranges request answers 422 with a code and changes nothing;
+  a format on a plain eligible paragraph converts it, and a replace inside a bold run leaves one run.
+- Smoke P3a: run 1 187/189 (the symbol font check, and the missing icon with the proof tool's 403); run 2 stopped
+  in part 3 (the work-instruction Capture All passed its 240 s limit with about 2 GB of free memory); run 3 189/191
+  (the reopen float equality and the Control+Home timing); run 4 stopped on a wait the supervisor had added to the
+  smoke; run 5 191/191; the final run 194/194 on the final code, with the three new focus checks.
+- Smokes P2b 36/36, P2a 23/23, P1a 27/27, P1b 46/46, P1c 35/35.
+- Both baseline checks exit 0 (stores reopened unchanged).
+- Documentation suites 1431 passed plus the 1 pre-existing failure
+  (test_operations_manual_precoding_contracts::test_source_ids_references_and_local_hashes_are_closed).
+- Wide suites 170 failed / 9 errors / 3851 passed / 68 skipped: the same 179 failure IDs as at P3a-1, nothing new.
+- The round's product files were last written at 05:54 and the smoke at 06:25; the final smoke (06:27) and every
+  gate after it ran on that code.
+- Word 16 render of the smoke's operations DOCX (41 pages), checked against the canvas and the PDF.
+
+### Notes for later
+
+- P5a: a search reads every target of the scope for every page of results (0.5-1.0 s per page on MMLE-50D). If
+  documents grow, keep the folded text per revision.
+- The first key a script sends in the same frame as the editor's focus can be undone by ProseMirror's 20 ms
+  selection sync. A person cannot type that fast; smoke steps that send caret keys right after a mount should
+  observe the selection, as `p3a3_signal_immutable` now does.

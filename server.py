@@ -18703,6 +18703,37 @@ def specification_slot_history(assembly_number: str, direction: str, body: Dict[
         return _documentation_value_error(error)
 
 
+@app.post("/api/documentation/{document_type}/{assembly_number}/find")
+def documentation_text_find(document_type: str, assembly_number: str, body: Dict[str, Any]):
+    try:
+        if document_type not in _DocumentationAgentHost._TEXT_ROUTES:
+            raise DocumentEditError("invalid_document_operation", "This document has no text search capability.")
+        from ai_inspector.documentation.search import find_document_text
+        snapshot = _DocumentationAgentHost().document_snapshot(assembly_number, document_type)
+        result, _captured = find_document_text(snapshot["state"], snapshot["targets"], body)
+        return {"success": True, **result}
+    except DocumentEditError as error:
+        return _documentation_value_error(error)
+
+
+@app.post("/api/documentation/{document_type}/{assembly_number}/ranges")
+def documentation_text_ranges(document_type: str, assembly_number: str, body: Dict[str, Any]):
+    try:
+        if document_type not in _DocumentationAgentHost._TEXT_ROUTES:
+            raise DocumentEditError("invalid_document_operation", "This document has no range editing capability.")
+        from ai_inspector.documentation.search import RANGE_OPERATIONS
+        documentation_operation_store(body.get("operations"))
+        if (not {"documentId", "expectedRevision", "requestId", "sourceRevision", "manualPlanRevision", "sceneRevision"} <= body.keys()
+                or any(op.get("operation") not in RANGE_OPERATIONS
+                    or not {"targetId", "expectedContentHash", "start", "end", "expectedText"} <= op.keys()
+                    for op in body["operations"])):
+            raise DocumentEditError("invalid_document_operation", "Send the search binding and exact range pre-images.")
+        return {"success": True, **_DocumentationAgentHost().apply_document_edits(
+            assembly_number, document_type, body, actor="user")}
+    except DocumentEditError as error:
+        return _documentation_value_error(error)
+
+
 @app.get("/api/documentation/{document_type}/{assembly_number}/conflicts")
 def documentation_conflicts_get(document_type: str, assembly_number: str,
                                 start: int = Query(0, alias="from", ge=0), limit: int = Query(20, ge=1, le=100)):
@@ -41999,7 +42030,7 @@ class _DocumentationAgentHost:
         return {"changed": [{"pageId": e["pageId"], "targetId": e["targetId"]} for e in edits],
                 "receipt": result["receipt"]}
 
-    def apply_document_edits(self, assembly_number, document_type, observed):
+    def apply_document_edits(self, assembly_number, document_type, observed, *, actor="sage"):
         operations = observed["operations"]
         destination = documentation_operation_store(operations)
         if any(operation["operation"] == "replace_rich_text" for operation in operations):
@@ -42037,6 +42068,18 @@ class _DocumentationAgentHost:
             from ai_inspector.documentation.identity import check_alias_binding
 
             check_alias_binding(observed, snapshot["state"])
+            from ai_inspector.documentation.search import coalesce_ranges, RANGE_OPERATIONS
+            from ai_inspector.documentation.commands import check_preconditions
+            range_batch = any(op["operation"] in RANGE_OPERATIONS for op in operations)
+            if range_batch:
+                # Check every supplied pre-image, including repeated target hashes, before computing edits.
+                for op in operations:
+                    target = snapshot["targets"].get(op["targetId"])
+                    if target is not None and op["operation"] in RANGE_OPERATIONS and op["operation"] not in documentation_target_capabilities(target):
+                        raise DocumentEditError("read_only_derived_field", "This target does not permit this range edit.", targetId=op["targetId"])
+                    check_preconditions(scene, observed["expectedRevision"],
+                        {op["targetId"]: op["expectedContentHash"]}, snapshot["hashes"])
+                operations = coalesce_ranges(snapshot["targets"], operations)
             commands, expected = [], {}
             for index, operation in enumerate(operations):
                 target = snapshot["targets"].get(operation["targetId"])
@@ -42069,14 +42112,22 @@ class _DocumentationAgentHost:
                 base_revision=observed.get("sceneRevision"), expected_revision=observed["expectedRevision"],
                 request_id=observed["requestId"], commands=commands, page_targets=targets,
                 expected_hashes=expected, current_hashes=snapshot["hashes"],
-                hashes_revision=snapshot["state"]["sceneRevision"], actor="sage", payload=observed, identity_document=snapshot["identity_document"])
+                hashes_revision=snapshot["state"]["sceneRevision"], actor=actor, payload=observed,
+                identity_document=snapshot["identity_document"], range_batch=range_batch)
             if document_type == "work_instructions" and result["changed"]:
                 # Adopt legacy figure captures only after a committed mutation.
                 next_document = self._text_scene(assembly_number, document_type)["document"]
                 carry_draft_render_artifacts(
                     WORK_INSTRUCTION_ROOT, assembly_number, document, next_document
                 )
-            return {"receipt": result["receipt"], "changed": result["changed"]}
+            extra = {}
+            if range_batch:
+                after = self.document_snapshot(assembly_number, document_type)
+                extra["rangeBinding"] = {**documentation_binding_data(after["state"]),
+                    "sceneRevision": after["state"]["sceneRevision"],
+                    "rangeRevision": after["state"].get("scene", {}).get("editRevision", after["state"]["revision"]),
+                    "hashes": {key: after["hashes"][key] for key in expected}}
+            return {"receipt": result["receipt"], "changed": result["changed"], **extra}
 
     def export_specification_sheet(self, assembly_number, fillable=False):
         from ai_inspector.codex_runtime.policy import PilotError

@@ -471,6 +471,8 @@ def _step(name, args, names, edit_mode):
             args.get("operation"), "the specification rows")
     if name == "export_specification_sheet":
         return EXPORT, "the fillable specification PDF" if args.get("fillable") else "the specification sheet PDF"
+    if name == "find_document_text":
+        return READ, "literal matches in the document"
     if name == "read_document_pages":
         return READ, f"the {DOCUMENTS.get(args.get('documentType'), 'document')} pages"
     if name == "apply_document_edits":

@@ -1098,7 +1098,7 @@ def _leaf_commands(commands):
             continue
         if command.get("operation") == "batch":
             children = command.get("commands")
-            if (not isinstance(children, list) or not 1 <= len(children) <= 12
+            if (not isinstance(children, list) or not 1 <= len(children) <= (200 if command.get("rangeBatch") is True else 12)
                     or any(not isinstance(c, Mapping) or c.get("operation") == "batch" for c in children)
                     or command.get("actor") not in DOCUMENTATION_COMMAND_ACTORS
                     or not isinstance(command.get("requestId"), str)
@@ -1892,12 +1892,12 @@ class DocumentationSceneRepository:
     def apply_batch(self, assembly_number, source_revision, manual_plan_revision, *,
                     base_revision, expected_revision, request_id, commands, page_targets,
                     expected_hashes, current_hashes, hashes_revision, actor="sage", payload=None,
-                    allow_confirmation=False, identity_document=None):
+                    allow_confirmation=False, identity_document=None, range_batch=False):
         """One history entry and one replace. The host compiles/hash-checks under
         transaction_lock and supplies hashes_revision to reject an unlocked race.
         """
-        if not isinstance(commands, list) or not 1 <= len(commands) <= 12:
-            raise DocumentEditError("invalid_document_operation", "Submit 1-12 commands.")
+        if not isinstance(commands, list) or not 1 <= len(commands) <= (200 if range_batch else 12):
+            raise DocumentEditError("invalid_document_operation", "Too many commands in this batch.")
         if any(meta.get("confirmation") for command in commands
                for meta in (command.get("fieldMeta") or {}).values()) and not allow_confirmation:
             raise DocumentEditError("invalid_document_operation", "Use the human confirmation endpoint.")
@@ -1963,7 +1963,8 @@ class DocumentationSceneRepository:
             candidate["fieldMeta"] = replay_field_meta([*scene["commands"][:scene["historyCursor"]], *persisted])
             cursor = scene["historyCursor"]
             candidate["commands"] = list(scene["commands"][:cursor]) + [{
-                "operation": "batch", "commands": persisted, "requestId": request_id, "actor": actor}]
+                "operation": "batch", "commands": persisted, "requestId": request_id, "actor": actor,
+                **({"rangeBatch": True} if range_batch else {})}]
             candidate["historyCursor"] = cursor + 1
             candidate["commands"][-1]["change"] = change_record(scene, candidate,
                 scene_paths(scene, candidate, persisted), change_id=receipt["changeId"], actor=actor,

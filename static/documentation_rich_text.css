@@ -96,3 +96,20 @@
 .documentation-safety-copy:has(.documentation-rich-content) { min-width: 0; }
 .documentation-safety-copy .documentation-rich-editor,
 .documentation-safety-copy .documentation-rich-editor .tiptap { height: auto; }
+
+/* P3a-4 bounded find and approved symbol controls. */
+.documentation-find-panel { pointer-events: auto; position: fixed; right: 20px; top: 150px; z-index: 5000; width: 370px; max-height: calc(100vh - 180px); overflow: auto; padding: 14px; background: #fff; color: #18212a; border: 1px solid #9daab6; border-radius: 6px; box-shadow: 0 4px 18px #0003; font: 13px Arial, sans-serif; }
+.documentation-find-panel label { display: block; margin: 8px 0; }
+.documentation-find-panel input[type=text] { width: 100%; padding: 4px; border: 1px solid #9daab6; }
+.documentation-find-panel button { padding: 4px 8px; margin: 3px; border: 1px solid #9daab6; border-radius: 3px; background: #f4f7f9; color: #18212a; }
+.documentation-find-results { max-height: 260px; overflow: auto; list-style: none; }
+.documentation-find-results button { text-align: left; width: calc(100% - 6px); white-space: pre-wrap; }
+.documentation-find-results [aria-current=true] { background: #cce7fa; }
+.documentation-find-results mark { padding: 0; background: #ffeb80; color: inherit; }
+.documentation-find-panel [role=status] { margin: 8px 0; }
+/* The picker belongs to the editing strip: its colours, not white (the legends inherit the strip's light text). */
+.documentation-symbol-picker { position: fixed; z-index: 5001; width: 360px; max-height: 360px; overflow: auto; background: #122532; color: #eef6fc; padding: 8px; border: 1px solid #547083; border-radius: 4px; box-shadow: 0 3px 10px #0005; }
+.documentation-symbol-picker[hidden] { display: none; }
+.documentation-symbol-picker fieldset { display: flex; flex-wrap: wrap; padding: 4px; border: 0; }
+.documentation-symbol-picker legend { font: 12px Arial, sans-serif; color: #b9cfdf; padding: 0 2px; }
+.documentation-symbol-picker button { font: 18px Arial, sans-serif; min-width: 30px; min-height: 30px; }

@@ -242,5 +242,6 @@ def test_confirmation_proposal_does_not_add_a_specification_acceptance_tool():
     assert tools["undo_document_change"]["read_only"] is False
     assert tools["resolve_document_conflicts"]["read_only"] is False
     assert tools["read_document_conflicts"]["read_only"] is True
+    assert tools["find_document_text"]["read_only"] is True
     assert tools["accept_specification_values"]["read_only"] is False
     assert "confirm_document_values" not in tools

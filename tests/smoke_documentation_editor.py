@@ -230,6 +230,8 @@ class IsolatedDocumentationServer:
         names.update(p.relative_to(ROOT).as_posix() for p in (ROOT / "ai_inspector/documentation").glob("*.py"))
         names.update(p.relative_to(ROOT).as_posix() for p in (ROOT / "static").glob("documentation_*.js"))
         names.update(p.relative_to(ROOT).as_posix() for p in (ROOT / "static").glob("documentation_*.css"))
+        names.update(p.relative_to(ROOT).as_posix()
+                     for p in (ROOT / "static/assets/documentation-ribbon-icons").glob("*.svg"))
         names.update(inputs["inputFiles"])
         # Work instructions accept the function-ready MMLE package only in semantic-knowledge prototype mode, which
         # this ignored engineering contract defines (no credentials; its review receipt is in docs/semantic-knowledge).
@@ -1316,6 +1318,21 @@ box => {
 """
 
 
+def same_canvas(first, second, tolerance=0.01):
+    """Two measurements of one canvas box from separate page loads: the same text and structure, numbers within a
+    hundredth of a pixel. The fit-page scale of two loads differs at float32 precision (6e-8 relative, measured), so
+    exact equality fails on differences of 0.00006 px."""
+    if isinstance(first, dict) and isinstance(second, dict):
+        return first.keys() == second.keys() and all(same_canvas(first[key], second[key], tolerance) for key in first)
+    if isinstance(first, list) and isinstance(second, list):
+        return len(first) == len(second) and all(same_canvas(a, b, tolerance) for a, b in zip(first, second))
+    if isinstance(first, bool) or isinstance(second, bool):
+        return first is second
+    if isinstance(first, (int, float)) and isinstance(second, (int, float)):
+        return abs(first - second) <= tolerance
+    return first == second
+
+
 def canvas_matches_layout(snapshot, page_id, key, label, measured, record, page_size=None, *, typography=False):
     """Shared real-canvas check. P3a adds glyph content boxes and every mark fragment."""
     import fitz
@@ -1890,6 +1907,7 @@ def run_p3a(page, request, server, output, report, record, begin_edit, tool, fre
     report["p3aComparison"] = (output / "p3a-comparison.json").relative_to(ROOT).as_posix()
     run_p3a_editor(page, h, page_id, keys, output, report, record, tool)
     run_p3a_narrative(h, output, report, record, tool)
+    run_p3a_search(h, output, report, record, tool)
     report["p3aScenePosts"] = h.posts
 
 def run_p3a_editor(page, h, page_id, prior_keys, output, report, record, tool):
@@ -2138,7 +2156,8 @@ def run_p3a_editor(page, h, page_id, prior_keys, output, report, record, tool):
     page = h.open_document(h.spec, page_id)
     record("p3a2_reopen_keeps_envelope", h.field(h.scene(), key)["richText"] == pasted)
     after_canvas = h.canvas_lines(key)
-    record("p3a2_reopen_keeps_canvas", before_canvas == after_canvas)
+    record("p3a2_reopen_keeps_canvas", same_canvas(before_canvas, after_canvas),
+           None if same_canvas(before_canvas, after_canvas) else {"before": before_canvas, "after": after_canvas})
     read = tool("read_document_pages", {"documentType": h.spec, "targets": [{"pageId": page_id, "targetId": key}]})
     assert read.get("ok"), read
     record("p3a2_read_capabilities", read["data"]["targets"][0]["richTextCapabilities"] == {
@@ -2197,6 +2216,20 @@ def run_p3a_narrative(h, output, report, record, tool):
         before[alias] = deepcopy(override(ops, alias))
         current = field(ops, alias)
         editor = h.mount(alias, generated=True)
+        # Opening a block for editing must leave the caret in it: a person types straight away. Observed before any
+        # key or click is sent (Playwright's own key helpers focus the element, which would hide a missing focus).
+        focus = None
+        for _ in range(20):
+            focus = page.evaluate("""() => {
+                const editor = DocumentationRichText.active.editor, active = document.activeElement;
+                return {focused: editor.isFocused, active: active === editor.view.dom, documentFocus: document.hasFocus(),
+                        activeTag: active?.tagName || null, activeId: active?.id || null,
+                        activeClass: String(active?.className || '').slice(0, 80)};
+            }""")
+            if focus["focused"] and focus["active"]:
+                break
+            page.wait_for_timeout(250)
+        record("p3a3_" + kind + "_editor_takes_focus", focus["focused"] and focus["active"], focus)
         controls = page.locator('.documentation-rich-controls')
         record("p3a3_" + kind + "_no_style", controls.get_by_label("Style", exact=True).count() == 0)
         if kind != "paragraph":
@@ -2206,10 +2239,30 @@ def run_p3a_narrative(h, output, report, record, tool):
                 for label in ("Bullets", "Numbering", "Align center", "Increase indent")))
         word = re.search(r"[A-Za-z]+", current["text"]).group()
         if kind == "note":
-            editor.press("Control+Home"); editor.press("Backspace")
+            # The mount focuses the editor in an animation frame, and ProseMirror re-applies its own selection 20 ms
+            # after a focus event. A key sent inside that window can be undone by the re-applied selection, so the
+            # caret stays at the end and Backspace removes the last character (run p3a4c lost the final period).
+            # Send Control+Home until the editor's own selection is the start of the text, then press Backspace.
+            caret, attempts = None, []
+            for _ in range(10):
+                editor.press("Control+Home")
+                page.wait_for_timeout(150)
+                caret = page.evaluate("""() => {
+                    const editor = DocumentationRichText.active.editor, selection = editor.state.selection;
+                    return {from: selection.from, to: selection.to,
+                            start: selection.constructor.atStart(editor.state.doc).from,
+                            focused: editor.isFocused, active: document.activeElement === editor.view.dom};
+                }""")
+                attempts.append(caret)
+                if caret["from"] == caret["to"] == caret["start"]:
+                    break
+            at_start = caret["from"] == caret["to"] == caret["start"]
+            if at_start:
+                editor.press("Backspace")
             stored_text = page.evaluate("() => DocumentationRichTextCore.plainText(DocumentationRichText.active.editor.getJSON())")
-            record("p3a3_signal_immutable", stored_text == current["text"]
-                   and editor.locator('.documentation-rich-signal:visible').inner_text() == current["richTextStyle"]["signalWord"])
+            record("p3a3_signal_immutable", at_start and stored_text == current["text"]
+                   and editor.locator('.documentation-rich-signal:visible').inner_text() == current["richTextStyle"]["signalWord"],
+                   attempts)
         rich_select_word(page, editor, word)
         mark = "Italic" if kind == "note" else "Bold"
         controls.get_by_role("button", name=mark, exact=True).click()
@@ -2315,6 +2368,148 @@ def run_p3a_narrative(h, output, report, record, tool):
     export_proofs(wi, {"paragraph": (wi_page, wi_block)}, "p3a3-work-instructions", capture_first=False)
     report["p3a3Exports"] = proofs
     write_json(output / "p3a3-comparison.json", proofs)
+
+
+def run_p3a_search(h, output, report, record, tool):
+    """Part 4: real find UI, bounded group undo, symbols and Sage range tools."""
+    from copy import deepcopy
+    from ai_inspector.documentation.rich_text import from_plain, plain_text, node_ids
+    from ai_inspector.documentation.rich_layout import content_model
+    from tests.documentation_rich_export_support import compare_pdf, compare_docx
+    import fitz
+
+    kind = "operations_and_maintenance_manual"
+    snapshot = h.scene(kind)
+    row = next(f for f in snapshot["richTextFields"] if f["isRichText"]
+               and f.get("richTextCapabilities", {}).get("listDepth") == 6 and f["targetId"].startswith("gen-"))
+    alias, page_id, stable = row["legacyTargetId"], row["pageId"], row["targetId"]
+    key = "document-object-p3a4"
+    h.create(kind, key, "Rangepin rangepin", frame={"x": .12, "y": .78, "width": .6, "height": .08}, style={"fontSize": 10})
+    read = tool("read_document_pages", {"documentType": kind, "targets": [{"targetId": stable}]})
+    assert read.get("ok"), read
+    full = read["data"]["targets"][0]
+    value = from_plain("Rangepin rangepin")
+    value["doc"]["content"][0]["content"] = [
+        {"type": "text", "text": "Rangepin ", "marks": [{"type": "bold"}]},
+        {"type": "text", "text": "rangepin", "marks": [{"type": "italic"}]}]
+    seeded = tool("apply_document_edits", {"documentId": read["data"]["documentId"],
+        "expectedRevision": full["binding"]["revision"], "requestId": "p3a4-seed", "operations": [{
+            "operation": "replace_rich_text", "targetId": stable, "expectedContentHash": full["contentHash"], "richText": value}]})
+    assert seeded.get("ok"), seeded
+    page = h.open_document(kind, page_id, pointer_refresh=True)
+    page.locator("#documentationFindRibbon").click()
+    panel = page.get_by_role("region", name="Find and Replace")
+    # section with an accessible name is a region; use only visible pointer/input controls.
+    # Supervisor: the list is bounded, and Replace all refuses an incomplete list.
+    panel.get_by_label("Find text", exact=True).fill("e")
+    panel.get_by_role("button", name="Find", exact=True).click()
+    page.wait_for_function("""() => /^Showing the first 1000 of [0-9]+ matches[.]/.test(
+        document.querySelector('.documentation-find-panel [role=status]')?.textContent || '')""", timeout=180000)
+    panel.get_by_role("button", name="Replace all", exact=True).click()
+    bounded = panel.get_by_role("status").inner_text()
+    record("p3a4_bounded_list", panel.locator('.documentation-find-results li').count() == 1000
+           and bounded.startswith("Replace all needs every match")
+           and panel.get_by_role("button", name="Apply replacement groups", exact=True).is_hidden(), bounded)
+    h.screenshot("part4-bounded-list")
+    panel.get_by_label("Find text", exact=True).fill("rangepin")
+    panel.get_by_role("button", name="Find", exact=True).click()
+    page.wait_for_function("() => document.querySelector('.documentation-find-panel [role=status]')?.textContent === '4 matches.'")
+    record("p3a4_find_plain_and_rich", panel.locator('.documentation-find-results li').count() == 4)
+    selected = set()
+    for _ in range(4):
+        page.wait_for_function("() => !document.querySelector('.documentation-find-panel [aria-label=Next]').disabled")
+        selected.add(page.evaluate("() => { const s = window.__compareDbg.state; return JSON.stringify(s.partsManualDocumentationSelection); }"))
+        panel.get_by_role("button", name="Next", exact=True).click()
+    record("p3a4_next_selects_targets", len(selected) == 2, sorted(selected))
+    panel.get_by_label("Replace with", exact=True).fill("Pin")
+    panel.get_by_role("button", name="Replace", exact=True).click()
+    page.wait_for_function("() => document.querySelector('.documentation-find-panel [role=status]')?.textContent === 'Applied 1 of 1 group.'", timeout=120000)
+    before = h.scene(kind)
+    before_rich, before_plain = deepcopy(h.field(before, alias)), deepcopy(h.field(before, key))
+    record("p3a4_replace_one", sum(f["text"].lower().count("rangepin") for f in [before_rich, before_plain]) == 3)
+    panel.get_by_role("button", name="Replace all", exact=True).click()
+    record("p3a4_preview", '3 matches; 3 replaceable; 0 read-only. 1 group, one undo step' in panel.get_by_role("status").inner_text())
+    h.screenshot("part4-preview")
+    panel.get_by_role("button", name="Apply replacement groups", exact=True).click()
+    page.wait_for_function("() => document.querySelector('.documentation-find-panel [role=status]')?.textContent === 'Applied 1 of 1 group.'", timeout=120000)
+    after = h.scene(kind)
+    rich_after = h.field(after, alias)
+    record("p3a4_replace_group", rich_after["text"] == "Pin Pin" and h.field(after, key)["text"] == "Pin Pin")
+    leaves = rich_after["richText"]["doc"]["content"][0]["content"]
+    record("p3a4_neighbor_marks", node_ids(rich_after["richText"]) == node_ids(value)
+           and leaves[0]["marks"] == [{"type": "bold"}] and leaves[-1]["marks"] == [{"type": "italic"}])
+    panel.get_by_role("button", name="Close find", exact=True).click()
+    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith('/documentation-scene/undo'), timeout=120000) as response:
+        page.locator("#documentationUndoRibbon").click()
+    response.value.finished(); h.idle()
+    restored = h.scene(kind)
+    record("p3a4_group_one_undo", h.field(restored, alias)["richText"] == before_rich["richText"]
+           and h.field(restored, key)["text"] == before_plain["text"])
+    # Supervisor: Ctrl+F opens the panel inside the workspace, and it leaves with the document.
+    page.locator("#documentationPublicationSurface").click(position={"x": 4, "y": 4})
+    page.keyboard.press("Control+f")
+    panel.wait_for(state="visible", timeout=30000)
+    record("p3a4_ctrl_f_opens_in_workspace", page.locator("#documentationWorkspace .documentation-find-panel").count() == 1)
+    h.switch("work_instructions")
+    h.idle()
+    record("p3a4_panel_follows_document", page.locator(".documentation-find-panel").count() == 0)
+
+    page = h.open_document(kind, page_id, pointer_refresh=True)
+    editor = h.mount(alias, generated=True)
+    editor.press("Control+End")
+    page.locator('.documentation-rich-controls').get_by_role("button", name="Symbol", exact=True).click()
+    h.screenshot("part4-symbol-picker")
+    picker = page.locator('.documentation-symbol-picker')
+    viewport = page.viewport_size
+    inside = picker.bounding_box()
+    record("p3a4_symbol_picker_on_screen", picker.locator('button').count() == 69 and inside is not None
+           and inside["x"] >= 0 and inside["y"] >= 0 and inside["x"] + inside["width"] <= viewport["width"]
+           and inside["y"] + inside["height"] <= viewport["height"], inside)
+    page.get_by_role("button", name="PLUS-MINUS SIGN", exact=True).click()
+    h.screenshot("part4-symbol-editor")
+    h.finish()
+    symbol_field = h.field(h.scene(kind), alias)
+    record("p3a4_symbol_stored_with_marks", symbol_field["text"].endswith("\u00b1") and
+           symbol_field["richText"]["doc"]["content"][0]["content"][-1]["marks"] == [{"type": "italic"}])
+    # Captures from part 3 are reusable after text-only edits; capture any newly materialized figure.
+    page.locator("#documentationCaptureAllRibbon").click(no_wait_after=True)
+    page.wait_for_function("""() => {
+        const pages = window.__compareDbg.state.partsManualDocumentation?.document?.pages || [];
+        return pages.filter(p => p.renderRequest).every(p => p.renderRequest.image?.status === 'ready')
+            && !document.querySelector('#documentationWorkspace.busy');
+    }""", timeout=240000)
+    artifacts = {}
+    for format in ("pdf", "docx"):
+        response, result = h.press_export(kind, format)
+        assert response.ok, result
+        artifacts[format] = h.download(result[format], "p3a4-operations." + format)
+    current = h.scene(kind)
+    h.navigate(page_id)
+    box = h.box(alias, generated=True)
+    measured = box.evaluate(CANVAS_LINES_JS)
+    h.screenshot("part4-symbol-canvas")
+    box.screenshot(path=str(output / "p3a4-symbol-canvas.png"))
+    canvas = canvas_matches_layout(current["document"], page_id, alias, "p3a4-symbol", measured, record, typography=True)
+    pdf = compare_pdf(artifacts["pdf"], current["document"], page_id, alias, output / "p3a4-symbol-pdf.png")
+    docx = compare_docx(artifacts["docx"], stable, content_model(symbol_field["richText"], symbol_field["richTextStyle"]))
+    with fitz.open(stream=artifacts["pdf"], filetype="pdf") as exported:
+        spans = [span for p in exported for block in p.get_text('dict')["blocks"] for line in block.get('lines', []) for span in line['spans'] if "\u00b1" in span['text']]
+        # PyMuPDF names the built-in Helvetica faces "Nimbus Sans ..."; the symbol shares its span with the text.
+        record("p3a4_symbol_no_fallback", bool(spans) and all(
+            span['font'].lower().replace(' ', '').startswith(('helvetica', 'nimbussans')) and span['text'].strip() != "\u00b1"
+            for span in spans), [(span['font'], span['text']) for span in spans])
+    found = tool("find_document_text", {"documentType": kind, "query": "rangepin", "scopeIds": [stable]})
+    assert found.get("ok"), found
+    data = found["data"]
+    edits = [{"operation": "replace_range", "targetId": item["targetId"], "expectedContentHash": item["contentHash"],
+              "start": item["start"], "end": item["end"], "expectedText": item["match"], "text": "Sagepin"} for item in data["matches"]]
+    assert edits
+    result = tool("apply_document_edits", {"documentId": data["documentId"], "expectedRevision": data["rangeRevision"],
+        "requestId": "p3a4-sage-range", "operations": edits})
+    assert result.get("ok"), result
+    record("p3a4_sage_find_batch", "Sagepin" in h.field(h.scene(kind), alias)["text"] and result["data"]["receipt"]["undoable"])
+    report["p3a4Exports"] = {"canvas": canvas, "pdf": pdf, "docx": docx}
+    write_json(output / "p3a4-comparison.json", report["p3a4Exports"])
 
 
 def main():

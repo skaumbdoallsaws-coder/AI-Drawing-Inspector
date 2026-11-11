@@ -52,7 +52,10 @@ Document text/value edits commit synchronously and return a receipt; browser gen
 Before replacing text, read every target in this turn. A summary marked isExcerpt is not replacement material:
 use read_document_pages with targets for exact, uncollapsed full text. edit_document_text keeps its existing inputs
 and binds omitted preconditions to those reads. apply_document_edits accepts explicit document/revision/hash/request
-bindings. Send text and value edits as separate requests. A text batch is atomic and one undo step; a slot batch is
+bindings. find_document_text returns literal matches with code-point ranges and exact hashes; these reads authorize
+replace_range and format_range only, not whole-field replacement. Keep all offsets in a batch relative to the same
+pre-image, with no overlapping ranges or line breaks in replace_range. Use only the target's format features.
+Send text and value edits as separate requests. A text batch is atomic and one undo step; a slot batch is
 atomic inside the slot store (slot undo comes later). Report success only from the returned receipt. Retry the same
 request ID and payload after transport failure. On a stale/hash conflict, read again and preserve the user's newer
 content; do not force the old replacement. Edits never approve source evidence or release a publication.

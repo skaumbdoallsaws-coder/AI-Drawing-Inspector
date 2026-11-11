@@ -13,8 +13,10 @@
     <script src="/static/documentation_commands.js?v=20261109-p1b-3"></script>
     <script src="/static/documentation_conflicts.js?v=20261110-p2a-1"></script>
     <script src="/static/documentation_rich_text_core.js?v=20261110-p3a-3"></script>
-    <script type="module" src="/static/documentation_rich_text.js?v=20261110-p3a-3"></script>
-    <link rel="stylesheet" href="/static/documentation_rich_text.css?v=20261110-p3a-3">
+    <script src="/static/documentation_symbols.js?v=20261111-p3a-4"></script>
+    <script src="/static/documentation_search.js?v=20261111-p3a-4"></script>
+    <script type="module" src="/static/documentation_rich_text.js?v=20261111-p3a-4"></script>
+    <link rel="stylesheet" href="/static/documentation_rich_text.css?v=20261111-p3a-4">
     <script src="/static/cad_viewport.js"></script>
     <script>
         // Theme bootstrap — set data-theme BEFORE the stylesheet is parsed
@@ -39027,8 +39029,38 @@
             };
         }
 
+        function _documentationOpenFind() {
+            const review = _documentationReviewHost();
+            DocumentationSearch.open({
+                context: review.context,
+                reload: review.reload,
+                request: (action, body) => {
+                    const context = review.context();
+                    return _partsManualApi('/api/documentation/' + context.kind + '/' + encodeURIComponent(context.number)
+                        + '/' + action, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                },
+                label: item => {
+                    const page = _documentationAllPages().find(p => p.pageId === item.pageId);
+                    return 'Page ' + (page?.pageNumber || item.pageId) + ', ' + (review.label(item) || item.targetLabel);
+                },
+                focus: async item => {
+                    await _documentationActivatePage(item.pageId);
+                    const aliases = _documentationPayload()?.document?.aliasMap?.[item.pageId] || {};
+                    const alias = Object.keys(aliases).find(key => (aliases[key]?.targetId || aliases[key]) === item.targetId)
+                        || item.targetId;
+                    const target = _documentationTargetsForPage(_documentationActivePage()).find(t => t.targetId === alias);
+                    if (target) _documentationSelectTarget(target);
+                    const selector = '[data-documentation-edit-target="' + CSS.escape(alias) + '"], [data-documentation-object-id="'
+                        + CSS.escape(alias) + '"]';
+                    document.querySelector('#documentationPublicationSurface ' + selector)?.scrollIntoView({ block: 'center' });
+                },
+            });
+        }
+
         function _documentationSyncReview() {
-            DocumentationConflicts.sync(_documentationReviewHost());
+            const host = _documentationReviewHost();
+            DocumentationConflicts.sync(host);
+            window.DocumentationSearch?.sync(host.context());
         }
 
         function _documentationRefreshPartsFromSource(payload) {
@@ -44286,6 +44318,7 @@
 
         function _closeDocumentationWorkspace() {
             window.DocumentationRichText?.dispose();
+            window.DocumentationSearch?.close();
             documentationRichReadCache = null;
             documentationRichFields.clear();
             state.documentationRichLastPress = null;
@@ -44771,8 +44804,13 @@
                         || target?.tagName === 'TEXTAREA'
                         || target?.tagName === 'SELECT'
                         || target?.isContentEditable;
-                    if (typing || window.DocumentationRichText?.active?.ownsFocus(target)) return;
                     const modifier = event.ctrlKey || event.metaKey;
+                    if (modifier && event.key.toLowerCase() === 'f' && !window.DocumentationRichText?.active
+                        && !_documentationIsInspectionSheet() && (target?.closest('.documentation-workspace, #documentationPublicationSurface, #contextRibbon.documentation-workflow-ribbon, .documentation-find-panel')
+                            || !typing && target === document.body)) {
+                        event.preventDefault(); _documentationOpenFind(); return;
+                    }
+                    if (typing || window.DocumentationRichText?.active?.ownsFocus(target)) return;
                     if (modifier && !event.shiftKey && event.key.toLowerCase() === 'z') {
                         event.preventDefault();
                         _documentationMoveHistory('undo');
@@ -47027,9 +47065,11 @@
                 ? [baseline(), _documentationRibbonStack([refresh(), libraryMachine()], { secondary: true })]
                 : [baseline(), refresh()]);
             appendGroup('edit', 'Edit', [
+                // Two rows per stack: a fourth compact command in one stack overflows the ribbon's height.
+                _documentationRibbonStack([undo(), redo()]),
                 _documentationRibbonStack([
-                    undo(),
-                    redo(),
+                    _documentationRibbonButton('search', 'Find and Replace', 'Find literal document text (Ctrl+F)',
+                        'documentationFindRibbon', _documentationOpenFind, { compact: true, size: 'compact' }),
                     _documentationResetMenu({ size: 'compact' }),
                 ]),
             ]);

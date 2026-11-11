@@ -133,8 +133,12 @@ def test_the_tool_set_is_exact_typed_and_closed():
     assert {s["name"] for s in specs if s["name"] in {"read_document_pages", "edit_document_text", "apply_document_edits"}} == {"read_document_pages", "edit_document_text", "apply_document_edits"}
     batch = next(s for s in specs if s["name"] == "apply_document_edits")
     assert batch["read_only"] is False
+    assert batch["input_schema"]["properties"]["operations"]["maxItems"] == 200
+    finder = next(s for s in specs if s["name"] == "find_document_text")
+    assert finder["read_only"] is True
+    assert finder["input_schema"]["properties"]["limit"]["maximum"] == 200
     variants = batch["input_schema"]["properties"]["operations"]["items"]["anyOf"]
-    assert {item["properties"]["operation"]["enum"][0] for item in variants} == {"replace_text", "set_slot_value", "replace_rich_text"}
+    assert {item["properties"]["operation"]["enum"][0] for item in variants} == {"replace_text", "set_slot_value", "replace_rich_text", "replace_range", "format_range"}
     rich = next(v for v in variants if v["properties"]["operation"]["enum"] == ["replace_rich_text"])
     schema = rich["properties"]["richText"]["properties"]
     assert schema["schemaVersion"]["enum"] == [1, 2]
@@ -163,7 +167,7 @@ def test_the_tool_set_is_exact_typed_and_closed():
     assert {spec["name"] for spec in specs if spec.get("read_only", True)} == {
         "inspect_documentation_context", "inspect_documentation_type", "inspect_parts_manual_bom",
         "find_library_machines", "list_appearances", "list_part_faces", "list_signs_and_scenes",
-        "read_document_pages", "propose_document_value_confirmation", "inspect_document_change", "read_document_conflicts"}
+        "find_document_text", "read_document_pages", "propose_document_value_confirmation", "inspect_document_change", "read_document_conflicts"}
 
 
 def test_public_research_joins_the_tools_behind_its_flag(monkeypatch):

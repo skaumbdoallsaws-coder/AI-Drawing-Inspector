@@ -142,7 +142,7 @@ def main():
         if request.client.host not in {"127.0.0.1", "::1"}:
             return JSONResponse(status_code=403, content={"error": "loopback only"})
         data = await request.json()
-        if data.get("name") not in {"read_document_pages", "edit_document_text", "apply_document_edits",
+        if data.get("name") not in {"find_document_text", "read_document_pages", "edit_document_text", "apply_document_edits",
                                     "propose_document_value_confirmation", "inspect_document_change", "undo_document_change",
                                     "read_document_conflicts", "resolve_document_conflicts"}:
             return JSONResponse(status_code=403, content={"error": "proof tool denied"})

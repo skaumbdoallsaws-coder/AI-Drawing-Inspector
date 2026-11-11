@@ -782,6 +782,30 @@ function mount(element, options) {
         commands.setTextSelection(caret == null ? { from: a, to: b } : mapping().map(caret));
         return true;
     })));
+    const symbols = document.createElement('span');
+    symbols.className = 'documentation-symbol-picker'; symbols.hidden = true;
+    const symbolToggle = button(toolbar, 'Symbol', () => {
+        symbols.hidden = !symbols.hidden; symbolToggle.setAttribute('aria-expanded', String(!symbols.hidden));
+        const rect = symbolToggle.getBoundingClientRect();
+        symbols.style.top = Math.min(rect.bottom + 4, window.innerHeight - 370) + 'px';
+        symbols.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 380)) + 'px';
+    });
+    symbolToggle.setAttribute('aria-expanded', 'false');
+    for (const group of window.DocumentationSymbols || []) {
+        const section = document.createElement('fieldset'), legend = document.createElement('legend');
+        legend.textContent = group.group; section.appendChild(legend);
+        for (const symbol of group.symbols) {
+            const pick = button(section, symbol.text, () => {
+                perform(chain => chain.command(({ tr }) => {
+                    tr.replaceSelectionWith(editor.schema.text(symbol.text), true); return true;
+                }));
+                symbols.hidden = true; symbolToggle.setAttribute('aria-expanded', 'false');
+            }, 'symbol-' + symbol.text.codePointAt(0).toString(16));
+            pick.title = symbol.name; pick.setAttribute('aria-label', symbol.name);
+        }
+        symbols.appendChild(section);
+    }
+    toolbar.appendChild(symbols);
     for (const host of [element, panel, toolbar]) {
         listen(host, 'keydown', event => {
             if (event.key === 'Escape') { event.preventDefault(); if (!saving) close(); }

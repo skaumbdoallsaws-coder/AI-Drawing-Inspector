@@ -202,7 +202,7 @@ def test_old_scene_no_rewrite(tmp_path, version):
     raw = ("  " + json.dumps(original, indent=2) + "\n").encode("ascii")
     scene.path.write_bytes(raw)
     loaded = scene.load()
-    assert loaded["scene"]["schemaVersion"] == 6
+    assert loaded["scene"]["schemaVersion"] == 7
     assert isinstance(scene.value(), str) and scene.path.read_bytes() == raw
     assert not scene.path.with_name("documentation-scene.v4.json").exists()
     scene.command({"operation": "update_text", "text": "A plain edit"})

@@ -6,7 +6,7 @@ from .commands import DocumentEditError
 from .rich_fonts import font
 from .rich_layout import authored_objects, content_model, PADDING, LIST_INDENT
 
-DOCX_RENDERER_VERSION = "rich-text-docx-5"
+DOCX_RENDERER_VERSION = "rich-text-docx-6"
 
 
 def font_family(value):
@@ -157,6 +157,7 @@ class ObjectContent:
     style: dict
     outline: bool
     content: object
+    value: dict | None = None
 
 
 def prepare_objects(document, page_size):
@@ -166,12 +167,20 @@ def prepare_objects(document, page_size):
     width, height = page_size
     for page in document.get("pages", []):
         objects = result.setdefault(page["pageId"], [])
-        for key, value, stored in authored_objects(page):
+        from .objects import ordered_objects, image_angle
+        text = {key: stored for key, value, stored in authored_objects(page)}
+        for key, value in ordered_objects(page):
+            stored = text.get(key)
             target = {"pageId": page["pageId"], "targetId": key}
             frame = value.get("frame") or {}
             x, y, w, h, rotation = (float(frame.get(name) or 0) for name in ("x", "y", "width", "height", "rotation"))
             if not all(math.isfinite(n) for n in (x, y, w, h, rotation)) or w <= 0 or h <= 0:
                 raise DocumentEditError("invalid_export_layout", "Text object frame must be finite and have positive dimensions.", targets=[target])
+            if value.get("type") != "text":
+                image_angle(value, frame, export=True)
+                objects.append(ObjectContent(target, (x * width, y * height, w * width, h * height),
+                               _document_object_style(theme, value), False, None, value))
+                continue
             if abs(rotation) > 1e-9:
                 rotated.append(target)
                 continue
@@ -203,13 +212,18 @@ def artifact_metadata(document, page_size, horizontal_margins):
     # Word stores page size and each margin in whole twips. Match the actual
     # section width, including the half-twip rounding at the cap boundary.
     available = (round(page_size[0] * 20) - 2 * round(horizontal_margins * 10)) / 20
-    return {"rendererVersion": DOCX_RENDERER_VERSION, "authoredText": {"placement": "flowing_single_cell_tables",
+    metadata = {"rendererVersion": DOCX_RENDERER_VERSION, "authoredText": {"placement": "flowing_single_cell_tables",
         "widthCaps": [{**item.target, "requestedWidthPt": item.frame[2], "widthPt": available}
-                      for item in objects if item.frame[2] > available]}}
+                      for item in objects if item.value is None and item.frame[2] > available]}}
+    if any(item.value is not None for item in objects):
+        metadata["authoredObjects"] = {"placement": "flow_top_left_id", "overlapAndStacking": False,
+                                       "shapes": "individual_transparent_pictures"}
+    return metadata
 
 
 class DocxObjects:
-    def __init__(self, output, document, page_size, *, shade_cell, border_cell, clear_borders):
+    def __init__(self, output, document, page_size, *, shade_cell, border_cell, clear_borders, asset_root=None, assembly_number=None):
+        self.asset_root, self.assembly_number = asset_root, assembly_number
         self.output = output
         self.pages = prepare_objects(document, page_size)
         self.numbering = _Numbering(output)
@@ -221,6 +235,13 @@ class DocxObjects:
             self._write(pending.pop(0))
 
     def _write(self, item):
+        if item.value is not None:
+            from .objects import docx_image, docx_shape
+            if item.value["type"] == "image":
+                docx_image(self.output, item.value, item.style, item.frame[2:], self.asset_root, self.assembly_number)
+            else:
+                docx_shape(self.output, item.value, item.style, item.frame[2:])
+            return
         from dataclasses import replace
         from docx.oxml.ns import qn
         from docx.opc.constants import RELATIONSHIP_TYPE as RT
@@ -261,6 +282,15 @@ class DocxObjects:
         write_content(self.output, item.content, item.target, cell.add_paragraph,
                       first=cell.paragraphs[0], numbering=self.numbering, container=cell,
                       table_width=width - 2 * (PADDING + outline))
+        opacity = float(item.style.get("opacity", 1))
+        if opacity < 1:
+            # Native Word text has no run alpha. In the white flow, blend direct colours with paper.
+            for element in cell._tc.iter():
+                for attribute in ({"w:color", "w:fill", "w:val"} if element.tag == qn("w:color") else {"w:color", "w:fill"}):
+                    value = element.get(qn(attribute))
+                    if value and len(value) == 6 and all(c in "0123456789abcdefABCDEF" for c in value):
+                        element.set(qn(attribute), "".join(f"{round(int(value[i:i+2], 16) * opacity + 255 * (1-opacity)):02X}"
+                                                        for i in (0, 2, 4)))
 
 
 def _write_table(output, model, target, container, width, numbering):

@@ -16,7 +16,7 @@ from .commands import DocumentEditError
 from .rich_text import from_plain, is_rich, validate
 from .rich_fonts import font as canvas_font, line_box, decoration, rounded_metrics, NAMED_STYLES, SCRIPT_SIZE, SUB_OFFSET, SUP_OFFSET
 
-PDF_RENDERER_VERSION = "rich-text-pdf-5"
+PDF_RENDERER_VERSION = "rich-text-pdf-6"
 # The PDF mirrors the canvas: documentation_rich_text.js render() inside a
 # .documentation-object.text box, where one page px is one PDF point. These are
 # that box's CSS and the browser defaults it relies on.
@@ -656,8 +656,8 @@ def authored_objects(descriptor):
     display = descriptor.get("documentationObjects") or {}
     composition = descriptor.get("documentationComposition") or (descriptor.get("renderRequest") or {}).get("composition") or {}
     canonical = composition.get("documentObjects") or {}
-    for key in dict.fromkeys([*display, *canonical]):
-        value = display.get(key) or canonical[key]
+    from .objects import ordered_objects
+    for key, value in ordered_objects(descriptor):
         if value.get("type") != "text":
             continue
         stored = canonical.get(key, value).get("content", "")
@@ -795,9 +795,18 @@ def draw_pdf_object(fitz, page, plan):
                 page.insert_link({"kind": fitz.LINK_URI, "from": fitz.Rect(run.rect), "uri": run.href})
 
 
-def draw_pdf_objects(fitz, page, descriptor, plans):
-    for plan in plans.get(descriptor["pageId"], {}).values():
-        draw_pdf_object(fitz, page, plan)
+def draw_pdf_objects(fitz, page, descriptor, plans, *, document=None, asset_root=None, assembly_number=None):
+    from .objects import ordered_objects, draw_pdf_image, draw_pdf_shape
+    from ai_inspector.parts_manual.pdf import _document_theme, _document_object_style
+    theme = _document_theme(document or {})
+    page_plans = plans.get(descriptor["pageId"], {})
+    for key, value in ordered_objects(descriptor):
+        if key in page_plans:
+            draw_pdf_object(fitz, page, page_plans[key])
+        elif value.get("type") == "image":
+            draw_pdf_image(fitz, page, value, _document_object_style(theme, value), asset_root, assembly_number)
+        elif value.get("type") == "shape":
+            draw_pdf_shape(fitz, page, value, _document_object_style(theme, value))
 
 
 def finish_pdf_fonts(pdf, plans):

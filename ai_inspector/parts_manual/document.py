@@ -382,6 +382,12 @@ def _apply_scene(document, scene):
             if isinstance(composition.get("documentObjects"), Mapping)
             else {}
         )
+        # Pages without authored objects keep the document they had before object order existed.
+        object_order = list(composition.get("objectOrder", page["documentationObjects"]))
+        if object_order:
+            page["documentationObjectOrder"] = object_order
+        else:
+            page.pop("documentationObjectOrder", None)
         page_type = str(page.get("pageType") or "")
         page["pageMasterId"] = next(
             (

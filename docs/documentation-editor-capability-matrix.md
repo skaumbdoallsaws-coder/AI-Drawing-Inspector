@@ -69,18 +69,20 @@ This matrix describes implementation found in the source, not newly executed UI 
 
 ## D. Images, Drawings and Graphics
 
+Object rows updated for P4a-1 (2026-11-11); implementation is awaiting the supervisor runtime gate. PDFs preserve page stacking. DOCX places authored objects in top/left/ID reading order, without overlap or stacking; images remain native pictures and each shape is its own transparent 4 px/pt picture.
+
 | Capability | Word / PowerPoint reference | InspectorPro today and implementation | Improvement and effort |
 |---|---|---|---|
-| Image insertion | Both | **Implemented for managed PNG/JPEG objects**, plus generated CAD figures. Cross-document export coverage must be tested. [R1], [R2], [R11] | Preserve managed assets; add paste/drop if needed with validation. **S-M** |
-| Image resizing | Both | **Implemented for page objects.** Normalized frames and resize handles. [R1], [R2] | Aspect-lock presets, physical units and export parity. **M** |
-| Image cropping | Both | **Partial.** `contain`/`cover` content mode is present; no interactive crop rectangle/focal control. [R2], [R11] | Explicit crop coordinates shared with exporters. **M** |
-| Image rotation | Both | **Partial.** Object rotation/90-degree command; PDF image path quantizes rotation. [R1], [R11] | Define supported angle policy and consistent rendering/export. **M** |
+| Image insertion | Both | Managed PNG/JPEG objects now draw in parts, operations, work-instruction and specification PDFs (including fillable), and the three existing DOCX formats. [R20] | No parts DOCX or inspection-sheet objects. Runtime matrix pending. |
+| Image resizing | Both | Complete frame and aspect-lock model; Sage partial-frame edits preserve the ratio for a lone width/height. Legacy resize also enforces the lock. [R20] | Workspace aspect-lock and new handles are P4a-2. |
+| Image cropping | Both | Fractional source crop, contain and centred cover share the page/PDF/DOCX placement rule. Sage can set or clear crop. [R20] | Workspace crop mode is P4a-2. |
+| Image rotation | Both | Clockwise frame-centred quarter turns; old free-angle images remain readable but refuse export by object ID. [R20] | Free-angle images remain outside scope. |
 | Text wrapping | Word: anchored wrap modes; PowerPoint: mainly independent boxes | **Missing.** Absolute image frames do not cause narrative text to flow around them. [R2], [R5] | Defer Word-style float layout unless required; block/inline images first. **L-XL** |
-| Image alignment/anchoring | Both, different models | **Partial.** Page-relative frames and CAD anchors; no full paragraph/image anchoring behavior. [R2] | Explicit page/block anchor types and controls. **M-L** |
-| Shapes, arrows, lines and callouts | Both | **Partial.** Limited shapes, CAD balloons/leaders, routing and end conditions; not a general diagram library. [R2] | Reuse existing shapes/callouts; add only demanded primitives and export tests. **M** |
-| Text boxes | Both | **Implemented.** Added text objects with frame/style/rotation. [R1], [R2] | Rich text inside the existing object, not a new canvas. **M** |
-| Grouping and layering | Both; stronger slide/object workflow in PowerPoint | **Missing as general page-object group/ungroup and z-order tools.** CAD manual groups are not equivalent. [R2] | Stable group hierarchy, transforms and ordering; use a canvas library only if justified. **L** |
-| Object alignment/distribution | Both | **Partial.** Arrange operations and CAD-focused selection controls exist, but not uniform arbitrary page-object behavior. [R2], [R15] | Extend existing command semantics to supported object sets; test coordinate spaces. **M-L** |
+| Image alignment/anchoring | Both, different models | Page-relative frames and server alignment/distribution include rotated objects. CAD anchors are unchanged. [R20] | No paragraph anchoring or text wrap. Workspace controls are P4a-2. |
+| Shapes, arrows, lines and callouts | Both | Rectangle, ellipse, arrow, revision cloud and detail box share the canvas paths in all PDFs; DOCX uses one transparent picture per shape. Opacity applies to all authored object types. CAD callouts are unchanged. [R20] | Runtime pixels and Word render pending. |
+| Text boxes | Both | P3 rich text and authored tables remain supported. P4a adds aspect lock, frame/order operations and opacity in the object flow. [R20] | PDF/DOCX rich-text rotation refusals remain; DOCX text flows in a native table. |
+| Grouping and layering | Both; stronger slide/object workflow in PowerPoint | Persisted bottom-to-top order and undo, with Sage bring/send operations. No general object grouping. [R20] | Workspace layer controls are P4a-2; groups remain later. |
+| Object alignment/distribution | Both | Eight server-computed arrangements use rotated page boxes, equal gaps and atomic undo. Sage exposes them with object hashes. [R20] | Workspace controls and multi-selection are P4a-2. |
 | Captions/figure numbering | Word: caption/reference fields; PowerPoint: largely manual | **Partial.** Generated figure captions and numbers; editable caption text, no arbitrary cross-reference fields. [R4], [R9], [R12] | Stable figure IDs and automatic reference resolution. **M-L** |
 | CAD-generated/exploded illustrations | Requires CAD tooling outside standard Office | **Implemented.** CAD visualization, explosion/callout commands, revision-bound captures and selective refresh. [R2], [R4], [R8] | Retain; validate links after edits and preserve unaffected captures. **M** |
 
@@ -90,10 +92,10 @@ This matrix describes implementation found in the source, not newly executed UI 
 |---|---|---|---|
 | Slide/canvas editing | Word: page/flow; PowerPoint: full slide canvas | **Partial.** Positioned publication pages and objects, not a separate slide document model. [R2], [R5] | Distinct presentation layout mode if justified; reuse page object IDs/commands. **L-XL** |
 | Drag/drop object positioning | Word: anchored objects; PowerPoint: free placement | **Implemented for supported document objects/CAD controls.** Not evidence that every generated block is freely draggable. [R1], [R2] | Consistent frame/property controls and keyboard nudging. **M** |
-| Independent text/graphics | Both | **Implemented for text/image/shape objects**, with limited format/export coverage. [R2] | Rich text and export coverage before expanding types. **M** |
+| Independent text/graphics | Both | Text, image and shape objects share the ordered page/PDF walk. DOCX keeps editable text, native images and individual shape pictures in reading order. [R20] | DOCX overlap and stacking are intentionally not reproduced. |
 | Shapes and diagrams | Both; PowerPoint has richer diagram workflows | **Partial.** Basic shapes and engineering callouts, no general connector/diagram editing system. [R2] | Scoped connectors/diagram library only on actual demand. **L** |
 | Alignment guides/snapping | Word: object guides; PowerPoint: slide alignment guides | **Partial.** Existing snap-guide and arrangement helpers primarily serve documentation/CAD selections. [R15] | Uniform object edges/centers and explicit page units; no CAD-coordinate leakage. **M-L** |
-| Layer ordering | Both | **Missing as exposed general page-object controls.** Render order is not an editable layer system. [R2] | Bring/send operations with persisted order and correct hit testing. **M** |
+| Layer ordering | Both | Schema-7 objectOrder drives the canvas and every PDF, and restores deleted objects at their old depth. DOCX retains flow order. [R20] | Workspace bring/send controls are P4a-2. |
 | Group/ungroup | Both | **Missing for arbitrary page objects.** Manual CAD section/group ownership is a different concept. [R2] | Group identity, nested transforms, undo and export support. **L** |
 | Slide templates/master layouts | Word: templates; PowerPoint: slide masters/layouts | **Partial.** Publication templates/masters, not presentation slide masters. [R2], [R1] | Extend only for a presentation document type; avoid redefining manuals as slides. **L** |
 | Presentation export | PowerPoint: PPTX/PDF; Word: DOCX/PDF | **Missing PPTX export in the inspected documentation paths.** | Add one native PPTX generator with a declared editable-object subset; do not rasterize whole slides by default. **L** |
@@ -124,7 +126,7 @@ This matrix describes implementation found in the source, not newly executed UI 
 | Programmatic text replacement | Office range/object operations | **Implemented for authorized existing text targets**, but read/write race and truncation risks remain. [R9], [R10] | Full targeted read, observed hash/revision and atomic batch. **M-L** |
 | Programmatic formatting | Office style/range APIs | **Partial below Sage.** Scene `update_style` exists, but the generic text tool exposes no format operation. [R2], [R9] | Expose allowlisted semantic styles/marks through the shared service, not raw script. **M** |
 | Table generation/modification | Office table APIs | **Partial.** Deterministic BOM and generated tables; specialized specification tools, not generic cell/row/column editing tools. [R4], [R6], [R8] | Table operations with stable IDs; distinguish authored and derived tables. **M-L** |
-| Image/CAD-view placement | Office image/shape APIs; CAD requires integration | **Partial.** Generation/figure workflows and scene image objects exist; no uniform generic asset-placement tool in the inspected text catalog. [R2], [R8] | Managed-asset and CAD-view commands plus completion receipts. **M-L** |
+| Image/CAD-view placement | Office image/shape APIs; CAD requires integration | read_document_objects plus frame, crop, order and arrangement operations use managed asset IDs and pre-image hashes. One page, at most twelve object operations per atomic batch. [R20] | Sage cannot add/delete objects. CAD transforms/captures are unchanged. |
 | Document reorganization | Office sections/slides/paragraph moves | **Partial.** Parts-section moves have dedicated validation; no general block/page reorganization tool. [R8] | Reuse section logic; add stable block/page moves only where supported. **M-L** |
 | Targeted section updates | Office ranges/content controls; identity policy is application work | **Partial.** Page/target IDs and definition-keyed part text, but table/list targets are positional. [R4], [R9] | Stable element IDs and three-way generated/manual merge. **L** |
 | Agent-change undo/redo | Depends on API/host transaction behavior | **Partial.** Scene history covers committed scene commands; generic agent text batches are multiple commits, slots separate. [R3], [R6], [R10], [R16] | One atomic change group and conflict-aware targeted undo. **L** |
@@ -170,3 +172,4 @@ The [main report's source index](documentation-editor-audit-and-strategy.md#22-s
 [R17]: C:/Users/might/OneDrive/Desktop/InspectorPro/AI-Drawing-Inspector/requirements.txt:25
 [R18]: C:/Users/might/OneDrive/Desktop/InspectorPro/AI-Drawing-Inspector/ai_inspector/inspection_sheet/document.py:208
 [R19]: C:/Users/might/OneDrive/Desktop/InspectorPro/AI-Drawing-Inspector/server.py:17048
+[R20]: ../ai_inspector/documentation/objects.py

@@ -113,7 +113,7 @@ def test_live_api_requires_capture_then_exports_one_page_pdf(
     assert result["docx"]["pageCount"] == 1
     assert result["docx"]["controlledRelease"] is False
     assert result["docx"]["documentRevision"] == result["pdf"]["documentRevision"]
-    assert result["docx"]["rendererVersion"] == "specification-sheet-docx-v1"
+    assert result["docx"]["rendererVersion"] == "specification-sheet-docx-v2"
 
     downloaded = client.get(result["pdf"]["url"])
     assert downloaded.status_code == 200

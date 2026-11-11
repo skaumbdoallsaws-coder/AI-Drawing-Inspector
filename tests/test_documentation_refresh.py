@@ -129,7 +129,7 @@ def test_old_shape_no_save_on_read(tmp_path, version):
     path, raw = install_old(tmp_path, version=version)
     repo = DocumentationSceneRepository(tmp_path, KIND)
     loaded = load(repo, document)
-    assert loaded["scene"]["schemaVersion"] == 6
+    assert loaded["scene"]["schemaVersion"] == 7
     stable = compiled_target(document, "table.r0.c1")
     command = loaded["scene"]["commands"][0]
     assert command["targetId"] == stable

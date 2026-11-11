@@ -98,7 +98,10 @@ def text_targets(state: Mapping[str, Any], document: Mapping[str, Any]) -> dict[
         objects = (state.get("scene", {}).get("pages", {}).get(page["pageId"], {}).get("documentObjects")
                    or (page.get("documentationComposition") or {}).get("documentObjects")
                    or page.get("documentationObjects") or {})
-        for object_id, item in objects.items():
+        from .objects import ordered_objects
+        order = (state.get("scene", {}).get("pages", {}).get(page["pageId"], {}).get("objectOrder")
+                 or page.get("documentationObjectOrder") or (page.get("documentationComposition") or {}).get("objectOrder"))
+        for object_id, item in ordered_objects({"documentObjects": objects, **({"objectOrder": order} if order is not None else {})}):
             if item.get("type") == "text":
                 add(page, object_id, item.get("content"), item,
                     kind="read_only" if item.get("locked") else "replace_text", target_type="document_object")
@@ -267,9 +270,14 @@ class ReadBindings:
     def __init__(self, turn_id: str):
         self.turn_id = turn_id
         self.targets: dict[tuple[str, str, str], dict] = {}
+        self.objects: dict[tuple[str, str], dict] = {}
+        self.object_requests: dict[tuple[str, str], dict] = {}
 
     def record(self, document_type: str, read: dict) -> None:
-        for item in read["targets"]:
+        for page in read.get("objectPages", []):
+            self.objects[(document_type, page["pageId"])] = {**deepcopy(page),
+                "binding": {**binding(read), "sceneRevision": read["sceneRevision"]}}
+        for item in read.get("targets", []):
             captured = {**deepcopy(item), "binding": {
                 **binding(read), **item.get("binding", {}), "owner": item.get("owner", "slots" if item["targetId"].startswith("slot:") else "scene"),
                 "sceneRevision": read.get("sceneRevision"), "structureHash": read.get("structureHash"), "aliasRevision": read.get("aliasRevision")}}
@@ -312,7 +320,35 @@ class ReadBindings:
             {"turn": self.turn_id, "read": captured, "arguments": result})
         return result
 
+
+    def bind_objects(self, document_type: str, arguments: dict) -> dict:
+        from .objects import object_batch
+        object_batch(arguments["operations"])
+        page_id = arguments["operations"][0]["pageId"]
+        read = self.objects.get((document_type, page_id))
+        if read is None:
+            raise DocumentEditError("document_read_required", "Read this page's objects before editing.")
+        known = {row["objectId"] for row in read["objects"]}
+        for operation in arguments["operations"]:
+            ids = operation.get("objectIds", [operation["objectId"]] if "objectId" in operation else operation.get("order", []))
+            if any(key not in known for key in ids):
+                raise DocumentEditError("document_read_required", "Read all selected objects before editing.")
+        if arguments["documentId"] != read["binding"]["documentId"]:
+            raise DocumentEditError("document_binding_changed", "The read belongs to another document.")
+        observed = self.object_requests.setdefault((document_type, arguments["requestId"]), deepcopy(read["binding"]))
+        result = {**deepcopy(observed), **deepcopy(arguments)}
+        result.pop("revision", None)
+        return result
+
+    def update_objects(self, document_type: str, result: dict) -> None:
+        for (kind, _page), read in self.objects.items():
+            if kind == document_type:
+                read["binding"].update(result)
+
     def bind_operations(self, document_type: str, arguments: dict) -> dict:
+        from .commands import operation_store
+        if operation_store(arguments["operations"]) == "objects":
+            return self.bind_objects(document_type, arguments)
         captured, operations = [], []
         for index, operation in enumerate(arguments["operations"]):
             matches = [read for (kind, _page, _alias), read in self.targets.items()

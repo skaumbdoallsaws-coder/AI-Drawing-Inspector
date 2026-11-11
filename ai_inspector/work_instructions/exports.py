@@ -29,7 +29,7 @@ class WorkInstructionExportError(RuntimeError):
 
 _SAFE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,180}$")
 _EXPORT_LOCK = threading.RLock()
-_DOCX_RENDERER_VERSION = "work-instructions-docx-rich-v2"
+_DOCX_RENDERER_VERSION = "work-instructions-docx-rich-v3"
 
 
 def _safe(value: Any, label: str) -> str:
@@ -106,6 +106,7 @@ def store_review_pdf(
     root: str | Path,
     assembly_number: str,
     document: Mapping[str, Any],
+    asset_root: str | Path | None = None,
 ) -> Dict[str, Any]:
     document = export_document(document)
     check_export(document, document.get("exportMode", "review"))
@@ -116,7 +117,7 @@ def store_review_pdf(
             f"capture {readiness['requiredCaptureCount']} technical figure(s) before export"
         )
     try:
-        payload = build_prototype_pdf_bytes(root, assembly_number, document)
+        payload = build_prototype_pdf_bytes(root, assembly_number, document, asset_root=asset_root)
     except OperationsManualExportError as exc:
         raise WorkInstructionExportError(str(exc)) from exc
     revision = _safe(document.get("documentRevision"), "document revision")
@@ -142,9 +143,10 @@ def store_review_pdf(
                 f"{revision}/pdf"
             ),
         }
-        from ai_inspector.documentation.rich_layout import PDF_RENDERER_VERSION, has_text_objects
+        from ai_inspector.documentation.rich_layout import PDF_RENDERER_VERSION
+        from ai_inspector.documentation.objects import has_objects
         from ai_inspector.documentation.rich_blocks import has_rich_blocks
-        if has_text_objects(document) or has_rich_blocks(document):
+        if has_objects(document) or has_rich_blocks(document):
             artifact["rendererVersion"] = PDF_RENDERER_VERSION
         _write_atomic(
             metadata_path,
@@ -167,6 +169,7 @@ def store_review_docx(
     root: str | Path,
     assembly_number: str,
     document: Mapping[str, Any],
+    asset_root: str | Path | None = None,
 ) -> Dict[str, Any]:
     document = export_document(document, format="docx")
     check_export(document, document.get("exportMode", "review"), format="docx")
@@ -177,7 +180,7 @@ def store_review_docx(
             f"capture {readiness['requiredCaptureCount']} technical figure(s) before export"
         )
     try:
-        payload = build_prototype_docx_bytes(root, assembly_number, document)
+        payload = build_prototype_docx_bytes(root, assembly_number, document, asset_root=asset_root)
     except OperationsManualExportError as exc:
         raise WorkInstructionExportError(str(exc)) from exc
     revision = _safe(document.get("documentRevision"), "document revision")

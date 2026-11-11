@@ -45,6 +45,8 @@ def command_targets(command):
     for target in command.get("transforms") or []:
         targets.extend([target.get("targetId"), scene_field_key(str(command.get("pageId") or ""),
             str(target.get("targetType") or ""), str(target.get("targetId") or ""))])
+    for row in command.get("frames") or []:
+        targets.extend([row["targetId"], scene_field_key(command["pageId"], "document_object", row["targetId"])])
     for key, meta in (command.get("fieldMeta") or {}).items():
         targets.extend([key, *((meta or {}).get("aliases") or [])])
     return targets

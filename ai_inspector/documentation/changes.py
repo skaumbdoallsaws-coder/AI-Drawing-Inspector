@@ -201,6 +201,8 @@ def scene_paths(before, after, commands):
                 paths.add(("pageMasters",))
         elif operation in {"clear_callouts", "add_callout", "remove_callout", "restore_callouts"}:
             paths.add(("pages", page, "manualCalloutItems"))
+        elif operation == "set_object_order":
+            paths.add(("pages", page, "objectOrder"))
         elif operation != "reset_page":
             targets = command.get("transforms", []) if operation == "arrange" else [command]
             for target in targets:

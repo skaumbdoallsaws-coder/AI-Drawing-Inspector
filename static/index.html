@@ -1883,6 +1883,18 @@
         }
         .documentation-object.image.contain img { object-fit: contain; }
         .documentation-object.image.cover img { object-fit: cover; }
+        /* A cropped picture: the <img> is the kept part's box (the largest box of the crop's proportions
+           that fits the frame, centred), so nothing beyond the crop can show beside it. */
+        .documentation-object.image.cropped { container-type: size; }
+        .documentation-object.image.cropped img {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            width: min(100cqw, calc(100cqh * var(--documentation-crop-ratio, 1)));
+            height: min(100cqh, calc(100cqw / var(--documentation-crop-ratio, 1)));
+            transform: translate(-50%, -50%);
+            object-fit: fill;
+        }
         .documentation-object.shape svg {
             width: 100%;
             height: 100%;
@@ -36758,7 +36770,6 @@
                 stroke: style.outlineColor || '#ABBAC4',
                 'stroke-width': String(Math.max(0, Number(style.lineWidth) || 0) * 1.5),
                 'vector-effect': 'non-scaling-stroke',
-                opacity: String(style.opacity ?? 1),
             };
             let shape;
             if (shapeType === 'ellipse') {
@@ -36798,9 +36809,15 @@
                 || { width: 792, height: 612 };
             const publicationWidth = Number(publicationPage.width) || 792;
             const publicationHeight = Number(publicationPage.height) || 612;
-            Object.values(objects).forEach(value => {
+            // The server's order names every object; one it missed is still drawn, on top.
+            const order = [...new Set([...(page?.documentationObjectOrder ?? []), ...Object.keys(objects)])];
+            let beforeRetained = !!retained;
+            order.map(id => objects[id]).forEach(value => {
                 if (!value?.objectId || !value?.frame) return;
-                if (retained?.dataset.documentationObjectId === value.objectId) return;
+                if (retained?.dataset.documentationObjectId === value.objectId) {
+                    beforeRetained = false;
+                    return;
+                }
                 const frame = value.frame;
                 const element = document.createElement('div');
                 element.className = `documentation-object ${value.type || ''}`
@@ -36846,6 +36863,24 @@
                     image.src = value.asset?.url || '';
                     image.alt = value.altText || value.name || '';
                     image.draggable = false;
+                    if (value.crop) {
+                        const { x, y, width, height } = value.crop;
+                        image.style.objectViewBox = `inset(${y * 100}% ${(1 - x - width) * 100}% ${(1 - y - height) * 100}% ${x * 100}%)`;
+                        // A view box pans and zooms but does not clip: an <img> filling a frame of other
+                        // proportions would show the picture beyond the crop in the bands beside it. The
+                        // stylesheet gives a cropped <img> exactly the kept part's box, from this ratio.
+                        element.classList.add('cropped');
+                        image.style.visibility = 'hidden';
+                        const fit = () => {
+                            const ratio = (width * image.naturalWidth) / (height * image.naturalHeight);
+                            if (ratio > 0 && Number.isFinite(ratio)) {
+                                image.style.setProperty('--documentation-crop-ratio', String(ratio));
+                            }
+                            image.style.visibility = '';
+                        };
+                        if (image.complete && image.naturalWidth) fit();
+                        else image.addEventListener('load', fit, { once: true });
+                    }
                     element.appendChild(image);
                 } else if (value.type === 'shape') {
                     element.appendChild(_documentationShapeSvg(value, style));
@@ -36866,7 +36901,8 @@
                 if (_documentationSelectedTargets().some(
                     selected => _documentationSelectionKey(selected) === _documentationSelectionKey(target)
                 )) element.classList.add('documentation-selected');
-                layer.appendChild(element);
+                if (beforeRetained) layer.insertBefore(element, retained);
+                else layer.appendChild(element);
             });
         }
 
@@ -36921,8 +36957,9 @@
                     });
                 }
             });
-            Object.values(page.documentationObjects || {}).forEach(value => {
-                const target = _documentationObjectTarget(value);
+            const authoredObjects = page.documentationObjects || {};
+            [...new Set([...(page.documentationObjectOrder ?? []), ...Object.keys(authoredObjects)])].forEach(id => {
+                const target = authoredObjects[id] && _documentationObjectTarget(authoredObjects[id]);
                 if (target) targets.push(target);
             });
             // A parts list's part number and description cells, edited on the page (part: not in the list of the

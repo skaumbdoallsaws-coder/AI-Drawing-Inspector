@@ -50,6 +50,8 @@ KNOWN_FIXTURE_LIMITATIONS = [
     "Drawing-map, drawing-pdf, part-features and process-map preview GETs may return 404 in the sanitized MMLE copy.",
     "Reference-views GET may return 500 because this copy has no MMLE drawings.",
     "A page reload aborts GETs still in flight (bridge status poll, static assets, figure images): net::ERR_ABORTED.",
+    "Publishing the parts manual sends the browser to the PDF, an attachment: the navigation ends as a download and "
+    "headless Chromium reports it as net::ERR_ABORTED. P4a accepts that once, for the URL the publish answered with.",
     "The isolated parts manual has no CAD captures, so it is not publication-ready and its Publish button stays "
     "disabled; P2b proves the parts region on the canvas and through Sage, and its PDF path in "
     "tests/test_documentation_rich_exports.py.",
@@ -113,9 +115,15 @@ def classify_failures(report):
         else:
             unexpected_console.append(item)
     unexpected_network = []
+    handoffs = list(report.get("exportDownloadHandoffs", [])) if report.get("phase") == "P4a" else []
     for item in report["networkFailures"]:
+        route = urlsplit(item.get("url", "")).path
         if known_network_failure(item):
             known.append({"kind": "network", **item, "reason": "GET aborted by the smoke's own page reload"})
+        elif item.get("error") == "net::ERR_ABORTED" and item.get("method", "GET") == "GET" and route in handoffs:
+            handoffs.remove(route)  # Exactly one per publish.
+            known.append({"kind": "network", **item,
+                          "reason": "The page sent the browser to the published parts PDF (a download)"})
         else:
             unexpected_network.append(item)
     report["knownFixtureFailures"] = known
@@ -202,7 +210,7 @@ def write_json(path, value):
 class IsolatedDocumentationServer:
     def __init__(self, output, phase=None):
         self.output = output
-        self.rich_text = phase in {"P2a", "P2b", "P3a", "P3b"}
+        self.rich_text = phase in {"P2a", "P2b", "P3a", "P3b", "P4a"}
         self.temporary = self.process = self.log = None
         self.original = {}
 
@@ -3005,14 +3013,57 @@ def run_p3b_editor(page, request, server, output, report, record, begin_edit, to
     record("p3b2_delete_column_count", len(table(value)["attrs"]["columns"]) == 3)
     # The final table has no trailing paragraph. Arrow out into the gap, then type there.
     last_cell = table(value)["content"][-1]["content"][-1]["attrs"]["id"]
+    # Supervisor (P4a-1 gate), after three experiments on this harness (click, keys and the selection logged):
+    # - A click and a native caret key reach the editor on the browser's selectionchange event, after the key.
+    #   One regression run pressed ArrowDown before the click had arrived: the table's arrow handler moved from
+    #   the old caret cell to the cell below it and the text was typed there.
+    # - Ctrl+End already lands in the gap. ArrowDown pressed AT the gap is not handled by the editor: the
+    #   browser moves its own caret out of the editor for some milliseconds, and text sent in that time is lost.
+    # - At a gap the editor inserts typed text itself, from the keypress (the new paragraph after the table).
+    #   keyboard.insert_text sends no key events: the browser puts that text at its own caret, which the editor
+    #   leaves at the end of the last cell after ArrowDown (an equivalent position for it). Text that arrives
+    #   without key events (IME, dictation, the emoji panel) therefore goes into the last cell: see the report.
+    # So: wait for the editor's own selection after the click and after each key, arrow out of the last cell
+    # into the gap, and type with real key presses. Nothing here is fatal; the check records each step.
+    def caret_settles(test, arg=None):
+        return page.evaluate("""arg => new Promise(resolve => {
+            const test = s => { TEST }, started = performance.now();
+            const tick = () => {
+                const active = window.DocumentationRichText && DocumentationRichText.active;
+                if (active && test(active.editor.state)) resolve(true);
+                else if (performance.now() - started > 10000) resolve(false);
+                else setTimeout(tick, 10);
+            };
+            tick();
+        })""".replace("TEST", test), arg)
+
+    in_gap = "s.selection.empty && s.selection.$from.depth === 0 && s.selection.from === s.doc.content.size"
     cell(last_cell).click()
-    page.keyboard.press("Control+End"); page.keyboard.press("ArrowDown")
-    gap = page.evaluate("() => DocumentationRichText.active.editor.state.selection.constructor.name")
-    page.keyboard.insert_text("After the table")
-    h.finish()
+    settled = [caret_settles("""for (let d = s.selection.$from.depth; d > 0; d--) {
+            const n = s.selection.$from.node(d);
+            if (['tableCell','tableHeader'].includes(n.type.name)) return n.attrs.id === arg;
+        }
+        return false;""", last_cell)]
+    for _ in range(4):  # The cell holds two lines; the click may land on either.
+        if page.evaluate("() => { const s = DocumentationRichText.active.editor.state; return " + in_gap + "; }"):
+            break
+        before = page.evaluate("() => DocumentationRichText.active.editor.state.selection.from")
+        page.keyboard.press("ArrowDown")
+        settled.append(caret_settles("return s.selection.from !== arg;", before))
+    settled.append(caret_settles("return " + in_gap + ";"))
+    gap = page.evaluate("() => DocumentationRichText.active.editor.state.selection.toJSON().type")
+    page.keyboard.type("After the table")
+    settled.append(caret_settles("const last = s.doc.lastChild; return last.type.name === 'paragraph'"
+                                 " && last.textContent === 'After the table';"))
+    if settled[-1]:
+        h.finish()
+    else:  # Nothing to save, or text in the wrong place: discard the draft so that the later steps still run.
+        editor().press("Escape")
+        page.wait_for_function("() => window.DocumentationRichText.mountedCount === 0", timeout=120000)
+        h.idle()
     value = stored()
-    record("p3b2_type_after_final_table", value["doc"]["content"][-1]["type"] == "paragraph"
-           and cell_text(value["doc"]["content"][-1]) == "After the table", {"selection": gap, "value": value})
+    record("p3b2_type_after_final_table", all(settled) and gap == "gapcursor" and value["doc"]["content"][-1]["type"] == "paragraph"
+           and cell_text(value["doc"]["content"][-1]) == "After the table", {"selection": gap, "settled": settled, "value": value})
     h.mount(key)
     cell(table(value)["content"][0]["content"][0]["attrs"]["id"]).click()
     pre_delete, deleted, _ = action("Delete table", "delete_table")
@@ -3061,6 +3112,273 @@ def run_p3b_editor(page, request, server, output, report, record, begin_edit, to
     proof["final"] = value
     write_json(output / "p3b2-editor.json", proof)
 
+
+
+def run_p4a(page, request, server, output, report, record, begin_edit, tool, fresh_page):
+    """P4a part 1: real managed asset, Sage operations, four canvas/PDF/DOCX paths."""
+    from copy import deepcopy
+    import io
+    import math
+    import zipfile
+    import fitz
+    from PIL import Image
+    from lxml import etree
+    from ai_inspector.documentation import objects
+    from ai_inspector.documentation.commands import canonical_bytes
+    from tests.test_documentation_export_matrix import quadrant_png, camera_jpeg, ORIENTED, COLORS
+
+    h = rich_browser_helpers(page, request, server, output, report, begin_edit, fresh_page, "P4a")
+    evidence = {}
+    report["p4aDocumentTypes"] = []
+    kinds = (DOC_TYPE, "operations_and_maintenance_manual", "work_instructions", "product_specification_sheet")
+    for number, kind in enumerate(kinds):
+        prefix = "p4a-" + str(number)
+        before = h.scene(kind)
+        page_id = before["document"]["pages"][0]["pageId"]
+        size = objects.page_size(before["document"])
+        upload = request.post(server.url + "/api/parts-manual/" + ASSEMBLY + "/documentation-assets",
+            multipart={"file": {"name": "quadrants.png", "mimeType": "image/png", "buffer": quadrant_png()}}, timeout=120000)
+        assert upload.ok, upload.text()
+        asset = upload.json()["asset"]
+        keys = ["document-object-p4a-" + suffix for suffix in ("image", "shape", "text")]
+        rows = [
+            {"objectId": keys[0], "type": "image", "name": "Quadrants", "asset": asset, "contentMode": "cover",
+             "altText": "Four colour quadrants", "frame": {"x": .2, "y": .28, "width": .4, "height": .3}},
+            {"objectId": keys[1], "type": "shape", "name": "Red rectangle", "shapeType": "rectangle",
+             "frame": {"x": .32, "y": .38, "width": .3, "height": .27},
+             "styleOverrides": {"fill": "#ff0000", "outlineColor": "#000000", "lineWidth": 1}},
+            {"objectId": keys[2], "type": "text", "name": "Object order proof", "content": "P4a object proof",
+             "frame": {"x": .48, "y": .57, "width": .3, "height": .14},
+             "styleOverrides": {"fill": "#00ffff", "fontSize": 10}},
+        ]
+        # A camera-turned photo (EXIF orientation 6: stored 200 x 100, shown 100 x 200) cropped to its shown
+        # top-right quadrant, in a frame of other proportions, over a white box: the kept part is red and the
+        # bands beside it stay white on the page and in the PDF; the DOCX holds it upright.
+        camera_data = camera_jpeg(6)
+        camera_upload = request.post(server.url + "/api/parts-manual/" + ASSEMBLY + "/documentation-assets",
+            multipart={"file": {"name": "camera.jpg", "mimeType": "image/jpeg", "buffer": camera_data}}, timeout=120000)
+        assert camera_upload.ok, camera_upload.text()
+        camera_frame = {"x": .68, "y": .16, "width": .2, "height": .2}
+        camera_crop = {"x": .5, "y": 0, "width": .5, "height": .5}
+        camera_key = "document-object-p4a-camera"
+        rows += [
+            {"objectId": "document-object-p4a-paper", "type": "text", "name": "Camera paper", "content": "",
+             "frame": dict(camera_frame), "styleOverrides": {"fill": "#ffffff", "fontSize": 10}},
+            {"objectId": camera_key, "type": "image", "name": "Camera picture", "asset": camera_upload.json()["asset"],
+             "contentMode": "contain", "altText": "Camera picture", "crop": dict(camera_crop),
+             "frame": dict(camera_frame)},
+        ]
+        for row in rows:
+            current = h.scene(kind)
+            response = request.post(h.base(kind) + "/documentation-scene/commands", data={
+                "baseRevision": current["revision"], "sourceRevision": current["scene"]["sourceRevision"],
+                "manualPlanRevision": current["scene"]["manualPlanRevision"], "operation": "add_object",
+                "pageId": page_id, "targetType": "document_object", "targetId": row["objectId"],
+                "documentObject": {**row, "source": "user"}}, timeout=120000)
+            assert response.ok, response.text()
+            response.body()
+        current = h.scene(kind)
+        initial_order = list(current["scene"]["pages"][page_id]["objectOrder"])
+        initial_order.remove(keys[0]); initial_order.append(keys[0])
+        setup = request.post(h.base(kind) + "/documentation-scene/commands", data={
+            "baseRevision":current["revision"],"sourceRevision":current["scene"]["sourceRevision"],
+            "manualPlanRevision":current["scene"]["manualPlanRevision"],"operation":"set_object_order",
+            "pageId":page_id,"targetType":"figure","targetId":page_id,"order":initial_order},timeout=120000)
+        assert setup.ok, setup.text()
+        setup.body()
+        page = h.open_document(kind, page_id, pointer_refresh=True)
+        details = evidence[kind] = {"steps": [], "pageId": page_id}
+        report["p4aDocumentTypes"].append({"documentType": kind, "canvas": True, "pdf": False, "docx": False})
+        ran = report["p4aDocumentTypes"][-1]
+
+        def read_objects():
+            read = tool("read_document_objects", {"documentType": kind, "pageIds": [page_id]})
+            assert read.get("ok"), read
+            data = read["data"]
+            record(prefix + "_read_safe", all(not ({"url", "path", "bytes", "content"} & set(row))
+                for row in data["pages"][0]["objects"]), data)
+            return data
+
+        def model_color(item, x, y):
+            f = item["frame"]
+            cx, cy = (f["x"]+f["width"]/2)*size[0], (f["y"]+f["height"]/2)*size[1]
+            a = math.radians(f.get("rotation", 0))
+            dx, dy = math.cos(a)*(x-cx)+math.sin(a)*(y-cy), -math.sin(a)*(x-cx)+math.cos(a)*(y-cy)
+            w, hh = f["width"]*size[0], f["height"]*size[1]
+            if item["type"] == "image":
+                source, (_, _, dw, dh) = objects.placement(item, (w, hh), (200,100))
+                if abs(dx) > dw/2-6 or abs(dy) > dh/2-6:
+                    return None
+                u, v = source["x"]+(dx/dw+.5)*source["width"], source["y"]+(dy/dh+.5)*source["height"]
+                if abs(u-.5) < .025 or abs(v-.5) < .025:
+                    return None
+                return ((255,0,0),(0,255,0),(0,0,255),(255,255,0))[(2 if v > .5 else 0)+(1 if u > .5 else 0)]
+            if item["type"] == "shape":
+                edge = min(w, hh)*.47-6
+                return (255,0,0) if abs(dx) < edge and abs(dy) < edge else None
+            # Stay below the text's first line and clear of its border.
+            return (0,255,255) if abs(dx) < w/2-6 and -hh/2+25 < dy < hh/2-6 else None
+
+        def camera_points():
+            w, hh = camera_frame["width"]*size[0], camera_frame["height"]*size[1]
+            _, (px, py, dw, dh) = objects.placement({"contentMode": "contain", "crop": camera_crop}, (w, hh), (100, 200))
+            left, top = camera_frame["x"]*size[0], camera_frame["y"]*size[1]
+            red, white = tuple(COLORS[ORIENTED[6][1]]), (255, 255, 255)
+            assert px > 12 and py == 0, (px, py)  # Bands left and right of the kept part.
+            return ([(left+px+dw*u, top+py+dh*v, red) for u, v in ((.5,.5),(.2,.2),(.8,.2),(.2,.8),(.8,.8))]
+                    + [(left+px/2, top+hh/2, white), (left+w-px/2, top+hh/2, white),
+                       (left+px-5, top+hh*.3, white), (left+px+dw+5, top+hh*.7, white)])
+
+        def measure(name):
+            snapshot = h.scene(kind)
+            descriptor = next(p for p in snapshot["document"]["pages"] if p["pageId"] == page_id)
+            ordered = list(objects.ordered_objects(descriptor))
+            layer = page.locator("#documentationPublicationSurface .documentation-object-layer")
+            geometry = layer.evaluate("""node => {
+                const rect = node.getBoundingClientRect();
+                return {rect: {x:rect.x,y:rect.y,width:rect.width,height:rect.height},
+                    objects: [...node.querySelectorAll(':scope > [data-documentation-object-id]')].map(el => {
+                        const r = el.getBoundingClientRect();
+                        return {id:el.dataset.documentationObjectId, box:[r.x-rect.x,r.y-rect.y,r.width,r.height],
+                            frame:[parseFloat(el.style.left),parseFloat(el.style.top),parseFloat(el.style.width),parseFloat(el.style.height)],
+                            crop:el.querySelector('img')?.style.objectViewBox || ''};
+                    })};
+            }""")
+            record(prefix+"_"+name+"_order", [r["id"] for r in geometry["objects"]] == [oid for oid,_ in ordered], geometry)
+            scale_x, scale_y = geometry["rect"]["width"]/size[0], geometry["rect"]["height"]/size[1]
+            actual = {r["id"]:r for r in geometry["objects"]}
+            for oid, item in ordered:
+                expected = objects.box(item["frame"], size)
+                box = [expected["x"]*size[0]*scale_x, expected["y"]*size[1]*scale_y,
+                       expected["width"]*size[0]*scale_x, expected["height"]*size[1]*scale_y]
+                f = item["frame"]
+                inline = [f["x"]*size[0],f["y"]*size[1],f["width"]*size[0],f["height"]*size[1]]
+                record(prefix+"_"+name+"_"+oid+"_frame", max(abs(a-b) for a,b in zip(actual[oid]["box"],box)) <= .5
+                       and max(abs(a-b) for a,b in zip(actual[oid]["frame"],inline)) < .01, actual[oid])
+            png = layer.screenshot(path=str(output / (prefix+"-"+name+".png")))
+            pixels = Image.open(io.BytesIO(png)).convert("RGB")
+            samples = []
+            selected = [(oid,item) for oid,item in ordered if oid in keys]
+            existing_boxes = [objects.box(item["frame"],size) for oid,item in ordered if oid not in keys]
+            # Use the same page-space sample points for the canvas and exported PDF.
+            for y in range(round(.15*size[1]), round(.85*size[1]), 17):
+                for x in range(round(.1*size[0]), round(.9*size[0]), 19):
+                    if any(b["x"]*size[0]-6 <= x <= (b["x"]+b["width"])*size[0]+6 and
+                           b["y"]*size[1]-6 <= y <= (b["y"]+b["height"])*size[1]+6 for b in existing_boxes):
+                        continue  # Existing fixture objects have their own paint and are outside this pixel oracle.
+                    color, owner = None, None
+                    for oid,item in selected:
+                        candidate = model_color(item,x,y)
+                        if candidate is not None:
+                            color, owner = candidate, oid
+                        else:
+                            # Skip points near a painted edge or text: the lower layer is not a valid oracle there.
+                            bounds = objects.box(item["frame"],size)
+                            if bounds["x"]*size[0]-6 <= x <= (bounds["x"]+bounds["width"])*size[0]+6 and bounds["y"]*size[1]-6 <= y <= (bounds["y"]+bounds["height"])*size[1]+6:
+                                color, owner = None, None
+                    if color is not None:
+                        actual_color = pixels.getpixel((round(x*pixels.width/size[0]),round(y*pixels.height/size[1])))
+                        samples.append({"point":[x,y],"expected":color,"actual":actual_color,"owner":owner})
+            record(prefix+"_"+name+"_pixels", bool(samples) and all(max(abs(a-b) for a,b in zip(s["expected"],s["actual"])) <= 4 for s in samples), samples)
+            camera = [{"point": [x, y], "expected": color,
+                       "actual": pixels.getpixel((round(x*pixels.width/size[0]), round(y*pixels.height/size[1])))}
+                      for x, y, color in camera_points()]
+            record(prefix+"_"+name+"_camera", all(max(abs(a-b) for a,b in zip(s["expected"],s["actual"])) <= 6 for s in camera), camera)
+            details["steps"].append({"name":name,"order":descriptor["documentationObjectOrder"],"samples":samples,"geometry":geometry})
+            return snapshot, samples
+
+        measure("initial")
+        camera_row = next(r for r in read_objects()["pages"][0]["objects"] if r["objectId"] == camera_key)
+        record(prefix+"_camera_read", camera_row["pixelSize"] == [100, 200] and camera_row["crop"] == camera_crop
+               and camera_row["contentMode"] == "contain", camera_row)
+        previous_states = []
+        def apply(name, operations):
+            previous_states.append(deepcopy(h.scene(kind)["scene"]["pages"][page_id]))
+            read = read_objects()
+            objects_by_id = {r["objectId"]:r for r in read["pages"][0]["objects"]}
+            for op in operations:
+                op["pageId"] = page_id
+                if op["operation"] == "set_object_order":
+                    op["expectedOrderHash"] = read["pages"][0]["orderHash"]
+                elif op["operation"] == "arrange_objects":
+                    op["expectedObjectHashes"] = [objects_by_id[oid]["objectHash"] for oid in op["objectIds"]]
+                else:
+                    op["expectedObjectHash"] = objects_by_id[op["objectId"]]["objectHash"]
+            result = tool("apply_document_edits", {"documentId":read["documentId"],"expectedRevision":read["revision"],
+                "requestId":prefix+"-"+name,"operations":operations})
+            assert result.get("ok"), result
+            details.setdefault("receipts",[]).append(result["data"]["receipt"])
+            h.refresh(pointer=True)
+            return measure(name)
+
+        apply("frame", [{"operation":"set_object_frame","objectId":keys[0],"x":.22,"y":.28,"width":.36,"height":.24}])
+        crop = {"x":.5,"y":0,"width":.5,"height":.5}
+        apply("crop", [{"operation":"set_image_crop","objectId":keys[0],"crop":crop}])
+        apply("rotate", [{"operation":"set_object_frame","objectId":keys[0],"rotation":90}])
+        apply("back", [{"operation":"set_object_order","objectId":keys[0],"to":"back"}])
+        snapshot, samples = apply("front", [{"operation":"set_object_order","objectId":keys[0],"to":"front"}])
+        record(prefix+"_crop_green", any(s["owner"] == keys[0] for s in samples)
+               and all(tuple(s["expected"]) == (0,255,0) for s in samples if s["owner"] == keys[0]), samples)
+        apply("align", [{"operation":"arrange_objects","objectIds":keys,"arrangement":"align_left"}])
+        snapshot, samples = apply("distribute", [{"operation":"arrange_objects","objectIds":keys,"arrangement":"distribute_vertical"}])
+        final = deepcopy(snapshot["scene"]["pages"][page_id])
+        page = h.open_document(kind, page_id, pointer_refresh=True)
+        record(prefix+"_reload", canonical_bytes(h.scene(kind)["scene"]["pages"][page_id]) == canonical_bytes(final))
+        measure("reopened")
+        page.locator("#documentationCaptureAllRibbon").click(no_wait_after=True)
+        page.wait_for_function("""() => {
+            const figures = (window.__compareDbg.state.partsManualDocumentation?.document?.pages || []).filter(p => p.renderRequest);
+            return figures.every(p => p.renderRequest.image?.status === 'ready') && !document.querySelector('#documentationWorkspace.busy');
+        }""", timeout=600000)
+        if page.locator("#documentationPublishRibbon").is_disabled():
+            ran["exportBlocker"] = page.locator("#documentationPublishRibbon").get_attribute("title")
+            record(prefix+"_export_enabled", False, ran)
+        else:
+            response, exported = h.press_export(kind)
+            assert response.ok, exported
+            if kind == DOC_TYPE:
+                report.setdefault("exportDownloadHandoffs", []).append(urlsplit(exported["artifact"]["url"]).path)
+            pdf_bytes = h.download(exported.get("pdf") or exported["artifact"], prefix+".pdf")  # the parts manual answers with "artifact"
+            ran["pdf"] = True
+            with fitz.open(stream=pdf_bytes,filetype="pdf") as pdf:
+                page_index = next(i for i,p in enumerate(snapshot["document"]["pages"]) if p["pageId"] == page_id)
+                pix = pdf[page_index].get_pixmap(matrix=fitz.Matrix(2,2),alpha=False)
+                pix.save(str(output/(prefix+"-pdf.png")))
+                comparisons = [{**s,"pdf":pix.pixel(round(s["point"][0]*2),round(s["point"][1]*2))[:3]} for s in samples]
+                record(prefix+"_pdf_pixels", all(max(abs(a-b) for a,b in zip(s["expected"],s["pdf"])) <= 4 for s in comparisons), comparisons)
+                camera = [{"point": [x, y], "expected": color, "pdf": pix.pixel(round(x*2), round(y*2))[:3]}
+                          for x, y, color in camera_points()]
+                record(prefix+"_pdf_camera", all(max(abs(a-b) for a,b in zip(s["expected"],s["pdf"])) <= 6 for s in camera), camera)
+            if kind != DOC_TYPE:
+                docx_bytes = h.download(exported["docx"],prefix+".docx")
+                ran["docx"] = True
+                with zipfile.ZipFile(io.BytesIO(docx_bytes)) as archive:
+                    xml = etree.fromstring(archive.read("word/document.xml"))
+                    media = [archive.read(name) for name in archive.namelist() if name.startswith("word/media/")]
+                ns = {"a":"http://schemas.openxmlformats.org/drawingml/2006/main",
+                      "wp":"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"}
+                pictures = xml.xpath("//wp:inline",namespaces=ns)
+                native = next(p for p in pictures if p.xpath("wp:docPr/@descr",namespaces=ns) == ["Four colour quadrants"])
+                record(prefix+"_docx_native_crop_rotation", native.xpath(".//a:srcRect/@l",namespaces=ns) == ["50000"]
+                    and native.xpath(".//a:srcRect/@b",namespaces=ns) == ["50000"]
+                    and native.xpath(".//a:xfrm/@rot",namespaces=ns) == ["5400000"])
+                record(prefix+"_docx_shape", any(p.xpath("wp:docPr/@descr",namespaces=ns) == ["Shape: Red rectangle"] for p in pictures))
+                turned = next(p for p in pictures if p.xpath("wp:docPr/@descr",namespaces=ns) == ["Camera picture"])
+                upright = [m for m in media if m[:3] == b"\xff\xd8\xff" and Image.open(io.BytesIO(m)).size == (100, 200)]
+                record(prefix+"_docx_camera_upright_crop", turned.xpath(".//a:srcRect/@l",namespaces=ns) == ["50000"]
+                    and turned.xpath(".//a:srcRect/@b",namespaces=ns) == ["50000"]
+                    and not turned.xpath(".//a:xfrm/@rot",namespaces=ns) and camera_data not in media and len(upright) == 1
+                    and max(abs(a-b) for a,b in zip(Image.open(io.BytesIO(upright[0])).convert("RGB").getpixel((75, 50)),
+                                                    COLORS[ORIENTED[6][1]])) <= 6)
+        for index, expected in enumerate(reversed(previous_states)):
+            with page.expect_response(lambda r:r.request.method == "POST" and r.url.endswith("/documentation-scene/undo"),timeout=120000) as undone:
+                page.locator("#documentationUndoRibbon").click()
+            undone.value.finished()
+            assert undone.value.ok, undone.value.text()
+            h.idle()
+            record(prefix+"_undo_"+str(index), canonical_bytes(h.scene(kind)["scene"]["pages"][page_id]) == canonical_bytes(expected))
+        details["final"] = final
+        write_json(output/"p4a-objects.json",evidence)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -3140,8 +3458,8 @@ def main():
         raise RuntimeError("Inline edit did not start after three double presses")
 
     try:
-        if args.phase not in {"P1a", "P1b", "P1c", "P2a", "P2b", "P3a", "P3b"}:
-            raise RuntimeError("Only the P1a-P3a and P3b part 1 gates are implemented.")
+        if args.phase not in {"P1a", "P1b", "P1c", "P2a", "P2b", "P3a", "P3b", "P4a"}:
+            raise RuntimeError("Only P1a through P4a part 1 gates are implemented.")
         from playwright.sync_api import sync_playwright
         server.start()
         report["isolation"] = server.isolation
@@ -3230,7 +3548,9 @@ def main():
                 raise RuntimeError(f"Tool HTTP {response.status}: {response.text()[:800]}")
             return response.json()
 
-        if args.phase == "P3b":
+        if args.phase == "P4a":
+            run_p4a(page, request, server, output, report, record, begin_edit, tool, fresh_page)
+        elif args.phase == "P3b":
             run_p3b(page, request, server, output, report, record, begin_edit, tool, fresh_page)
         elif args.phase == "P3a":
             run_p3a(page, request, server, output, report, record, begin_edit, tool, fresh_page)
@@ -3327,7 +3647,7 @@ def main():
             reopened = get_scene()
             write_json(output / "reopened.json", reopened)
             page.screenshot(path=str(output / "reopened.png"), full_page=True)
-            record("scene_upgraded_in_place", reopened["scene"]["schemaVersion"] == 6
+            record("scene_upgraded_in_place", reopened["scene"]["schemaVersion"] == 7
                    and not (server.manual / "edit.json").exists())
             record("original_v2_bytes_retained", sha(server.manual / "documentation-scene.v2.json") == copied_scene_hash)
             record("manual_plan_unchanged", sha(server.manual / "manual-plan.json") == legacy_before["manual-plan.json"])

@@ -44,7 +44,7 @@ from ai_inspector.documentation.rich_text import (
     reserved_ids as rich_reserved_ids, field_read as rich_field_read, guard_restored_fields,
 )
 
-DOCUMENTATION_SCENE_SCHEMA_VERSION = 6
+DOCUMENTATION_SCENE_SCHEMA_VERSION = 7
 DOCUMENTATION_TARGET_TYPES = frozenset(
     {
         "manual_group",
@@ -77,6 +77,10 @@ DOCUMENTATION_COMMAND_OPERATIONS = frozenset(
         "restore_callouts",
         "add_object",
         "remove_object",
+        "set_object_frame",
+        "set_image_crop",
+        "set_object_order",
+        "arrange_objects",
         "update_text",
         "replace_rich_text",
         "update_style",
@@ -582,6 +586,20 @@ def _document_object(value: Any, *, expected_id: Optional[str] = None, stored: b
         "locked": bool(value.get("locked", False)),
         "source": str(value.get("source") or "user"),
     }
+    from ai_inspector.documentation.objects import crop_value, image_angle
+    if "aspectLock" in value:
+        if type(value["aspectLock"]) is not bool:
+            raise DocumentEditError("invalid_object_frame", "aspectLock must be a boolean.")
+        if value["aspectLock"]:
+            result["aspectLock"] = True
+    if "crop" in value:
+        if object_type != "image":
+            raise DocumentEditError("unsupported_object_operation", "Only images have a crop.")
+        crop = crop_value(value["crop"])
+        if crop:
+            result["crop"] = crop
+    if not stored:
+        image_angle(result, result["frame"])
     if result["source"] not in {"user", "template", "sage"}:
         raise DocumentationSceneError("unsupported documentation object source")
     if object_type == "text":
@@ -956,12 +974,12 @@ def _replay_target_command(
         objects = page.setdefault("documentObjects", {})
         if operation == "remove_object":
             objects.pop(target_id, None)
+            from ai_inspector.documentation.objects import normalize_order
+            normalize_order(page)
             return
         current = copy.deepcopy(dict(objects.get(target_id) or {}))
         if not current:
             raise DocumentationSceneError("documentation object does not exist")
-        if current.get("locked") and operation not in {"update_text", "update_style"}:
-            raise DocumentationSceneError("locked documentation object cannot be transformed")
         if operation == "translate":
             translation = _annotation_vector(command.get("translation"))
             frame = dict(current.get("frame") or {})
@@ -985,6 +1003,21 @@ def _replay_target_command(
                 [0.0, 0.0, float(frame.get("rotation") or 0) + rotation[2]]
             )[2]
             current["frame"] = _document_frame(frame)
+        elif operation == "set_object_frame":
+            current["frame"] = copy.deepcopy(command["frame"])
+            if "aspectLock" in command:
+                if command["aspectLock"]:
+                    current["aspectLock"] = True
+                else:
+                    current.pop("aspectLock", None)
+        elif operation == "set_image_crop":
+            if command.get("contentMode") == "contain":
+                current["contentMode"] = "contain"
+            if command.get("crop"):
+                current["crop"] = copy.deepcopy(command["crop"])
+                current["contentMode"] = "contain"
+            else:
+                current.pop("crop", None)
         elif operation == "update_text":
             if current.get("type") != "text":
                 raise DocumentationSceneError("only text objects have editable text")
@@ -1109,6 +1142,16 @@ def _leaf_commands(commands):
             yield command
 
 
+def _command_version_keys(command):
+    page = command["pageId"]
+    if command["operation"] == "set_object_order":
+        return ["@page:" + page]
+    if command["operation"] == "arrange_objects":
+        return [scene_field_key(page, "document_object", key) for key in
+                command.get("movedObjectIds", [row["targetId"] for row in command["frames"]])]
+    return [scene_field_key(page, command["targetType"], command["targetId"])]
+
+
 def _advance_edit_versions(scene, commands):
     keys = set()
     for command in _leaf_commands(commands):
@@ -1120,12 +1163,15 @@ def _advance_edit_versions(scene, commands):
         keys.update(command.get("identityResetTargets", []))
         if operation in {"set_theme", "apply_template"}:
             scene["editEpoch"] += 1
-        elif operation in {"reset_page", "add_object", "remove_object"}:
+        elif operation in {"reset_page", "add_object", "remove_object", "set_object_order"}:
             keys.add("@page:" + page)
-        if operation == "arrange":
+        if operation == "arrange_objects":
+            for target in command.get("movedObjectIds", [r["targetId"] for r in command.get("frames", [])]):
+                keys.add(scene_field_key(page, "document_object", target))
+        elif operation == "arrange":
             for target in command.get("transforms") or []:
                 keys.add(scene_field_key(page, target["targetType"], target["targetId"]))
-        else:
+        elif operation != "set_object_order":
             keys.add(scene_field_key(page, str(command.get("targetType") or ""), str(command.get("targetId") or "")))
     for command in _leaf_commands(commands):
         for meta in (command.get("fieldMeta") or {}).values():
@@ -1146,6 +1192,9 @@ def replay_documentation_commands(commands: Iterable[Mapping[str, Any]]) -> Dict
         operation = str(command.get("operation") or "")
         if operation == "restore_change":
             restore_change(pages, command["change"]["changes"], root="pages")
+            from ai_inspector.documentation.objects import normalize_order
+            for restored in pages.values():
+                normalize_order(restored)
             continue
         page = _page_override(pages, page_id)
         if operation == "reset_page":
@@ -1163,6 +1212,15 @@ def replay_documentation_commands(commands: Iterable[Mapping[str, Any]]) -> Dict
             if target_id in objects:
                 raise DocumentationSceneError("documentation object already exists")
             objects[target_id] = document_object
+            from ai_inspector.documentation.objects import normalize_order
+            normalize_order(page)
+            continue
+        if operation == "set_object_order":
+            page["objectOrder"] = list(command["order"])
+            continue
+        if operation == "arrange_objects":
+            for row in command["frames"]:
+                page["documentObjects"][row["targetId"]]["frame"] = copy.deepcopy(row["frame"])
             continue
         if operation in {"set_theme", "apply_template"}:
             continue
@@ -1298,7 +1356,7 @@ def _arrange_transforms(value: Any) -> list[Dict[str, Any]]:
 
 def _upgrade_documentation_scene(scene: Dict[str, Any]) -> Dict[str, Any]:
     schema_version = scene.get("schemaVersion")
-    if schema_version not in {1, 2, 3, 4, 5, DOCUMENTATION_SCENE_SCHEMA_VERSION}:
+    if schema_version not in {1, 2, 3, 4, 5, 6, DOCUMENTATION_SCENE_SCHEMA_VERSION}:
         raise DocumentationSceneError("unsupported documentation scene schema")
     commands = scene.get("commands")
     if not isinstance(commands, list):
@@ -1358,6 +1416,10 @@ def validate_documentation_scene(scene: Mapping[str, Any]) -> None:
             command.get("targetId") or ""
         ):
             raise DocumentationSceneError("documentation command target ID is required")
+        if command.get("operation") in {"set_object_frame", "set_image_crop", "set_object_order", "arrange_objects"}:
+            from ai_inspector.documentation.objects import validate_command
+            validate_command(command)
+            continue
         if command.get("operation") == "arrange":
             if command.get("targetType") != "selection":
                 raise DocumentationSceneError("arrangement requires a target selection")
@@ -1533,6 +1595,14 @@ def validate_documentation_scene(scene: Mapping[str, Any]) -> None:
             )
     if scene.get("fieldMeta", {}) != replay_field_meta(commands[:cursor]):
         raise DocumentationSceneError("field provenance does not match active history")
+    for page in scene.get("pages", {}).values():
+        objects, order = page.get("documentObjects", {}), page.get("objectOrder")
+        if objects:
+            if (not isinstance(order, list) or any(not isinstance(key, str) for key in order)
+                    or len(order) != len(set(order)) or set(order) != set(objects)):
+                raise DocumentEditError("invalid_object_order", "Order must contain every page object exactly once.")
+        elif order is not None:
+            raise DocumentEditError("invalid_object_order", "A page without objects has no order.")
     replayed = replay_documentation_commands(commands[:cursor])
     if scene.get("pages") != replayed:
         raise DocumentationSceneError(
@@ -1595,9 +1665,9 @@ class DocumentationSceneRepository:
         if path.is_file():
             original = path.read_bytes()
             old_version = json.loads(original).get("schemaVersion")
-            if old_version not in {1, 2, 3, 4, 5, DOCUMENTATION_SCENE_SCHEMA_VERSION}:
+            if old_version not in {1, 2, 3, 4, 5, 6, DOCUMENTATION_SCENE_SCHEMA_VERSION}:
                 raise DocumentEditError("unsupported_document_schema", "This scene needs a newer editor.")
-            if old_version in {1, 2, 3, 4, 5}:
+            if old_version in {1, 2, 3, 4, 5, 6}:
                 backup = path.with_name("documentation-scene.v" + str(max(2, old_version)) + ".json")
                 if backup.exists():
                     if backup.read_bytes() != original:
@@ -1882,7 +1952,7 @@ class DocumentationSceneRepository:
                 persisted_command["change"] = change_record(before, scene, paths,
                     change_id=persisted_command["commandId"], actor=persisted_command["actor"],
                     created_at=persisted_command["createdAt"],
-                    version_keys=[scene_field_key(persisted_command["pageId"], persisted_command["targetType"], persisted_command["targetId"])])
+                    version_keys=_command_version_keys(persisted_command))
             _advance_edit_versions(scene, [persisted_command])
             self._save(assembly_number, scene)
             # The same projection as read() (history choices, change list), so a write never returns another shape.
@@ -1892,12 +1962,25 @@ class DocumentationSceneRepository:
     def apply_batch(self, assembly_number, source_revision, manual_plan_revision, *,
                     base_revision, expected_revision, request_id, commands, page_targets,
                     expected_hashes, current_hashes, hashes_revision, actor="sage", payload=None,
-                    allow_confirmation=False, identity_document=None, range_batch=False, table_results=None):
+                    allow_confirmation=False, identity_document=None, range_batch=False, table_results=None, object_results=None):
         """One history entry and one replace. The host compiles/hash-checks under
         transaction_lock and supplies hashes_revision to reject an unlocked race.
         """
         if not isinstance(commands, list) or not 1 <= len(commands) <= (224 if table_results is not None else 200 if range_batch else 12):
             raise DocumentEditError("invalid_document_operation", "Too many commands in this batch.")
+        if object_results is not None:
+            from ai_inspector.documentation.objects import object_batch
+            object_batch(commands)
+            required = set()
+            for command in commands:
+                if command["operation"] == "set_object_order":
+                    required.add("@object-order:" + command["pageId"])
+                elif command["operation"] == "arrange_objects":
+                    required.update(row["targetId"] for row in command["frames"])
+                else:
+                    required.add(command["targetId"])
+            if not required <= set(expected_hashes) or len(object_results) != len(commands):
+                raise DocumentEditError("invalid_document_operation", "Every object operation needs its pre-image hashes and result.")
         if any(meta.get("confirmation") for command in commands
                for meta in (command.get("fieldMeta") or {}).values()) and not allow_confirmation:
             raise DocumentEditError("invalid_document_operation", "Use the human confirmation endpoint.")
@@ -1917,7 +2000,7 @@ class DocumentationSceneRepository:
                 return {**loaded, "receipt": previous, "changed": previous["changedIds"]}
             if hashes_revision != loaded["revision"]:
                 raise DocumentEditError("stale_revision", "The host snapshot changed before the batch; read again.")
-            if len(expected_hashes) != len(commands):
+            if object_results is None and len(expected_hashes) != len(commands):
                 raise DocumentEditError("invalid_document_operation", "Every target requires a pre-image hash.")
             # Even matching base revisions require the observed target hashes.
             # The integer revision distinguishes old from future opaque hashes.
@@ -1927,7 +2010,8 @@ class DocumentationSceneRepository:
             candidate = copy.deepcopy(scene)
             persisted = []
             changed = []
-            for index, (target, command) in enumerate(zip(expected_hashes, commands)):
+            for index, command in enumerate(commands):
+                target = (command.get("targetId") or command["pageId"]) if object_results is not None else list(expected_hashes)[index]
                 try:
                     from ai_inspector.documentation.identity import normalize_command
 
@@ -1943,16 +2027,19 @@ class DocumentationSceneRepository:
                     continue
                 candidate = item["scene"]
                 persisted.append(item["command"])
-                changed.append(target)
+                if object_results is not None:
+                    changed.extend(row["objectId"] for row in object_results[index]["objects"] if row["objectId"] not in changed)
+                else:
+                    changed.append(target)
             receipt = make_receipt(scene, request_id=request_id, payload_hash=payload_hash,
                 document=document_id(self.document_type, assembly_number), expected_revision=expected_revision,
                 changed=changed, undoable=True)
-            if table_results is not None:
-                receipt["operationResults"] = copy.deepcopy(table_results)
+            if table_results is not None or object_results is not None:
+                receipt["operationResults"] = copy.deepcopy(table_results if table_results is not None else object_results)
             removed = [target for target, command in zip(changed, persisted) if command.get("richTextRemoved")]
             if removed:
                 receipt["validation"].append({"code": "rich_text_replaced_with_plain", "targetIds": removed})
-            if table_results is not None and len(json.dumps({"ok": True, "data": {"receipt": receipt,
+            if (table_results is not None or object_results is not None) and len(json.dumps({"ok": True, "data": {"receipt": receipt,
                     "changed": receipt["changedIds"]}}, ensure_ascii=False, allow_nan=False).encode("utf-8")) > 65536:
                 raise DocumentEditError("codex_result_too_large", "Retry fewer table operations so their identity results fit the tool response.")
             if not changed:
@@ -1974,7 +2061,7 @@ class DocumentationSceneRepository:
             candidate["historyCursor"] = cursor + 1
             candidate["commands"][-1]["change"] = change_record(scene, candidate,
                 scene_paths(scene, candidate, persisted), change_id=receipt["changeId"], actor=actor,
-                created_at=_utc_now(), version_keys=[scene_field_key(c["pageId"], c["targetType"], c["targetId"]) for c in persisted])
+                created_at=_utc_now(), version_keys=[key for c in persisted for key in _command_version_keys(c)])
             _advance_edit_versions(candidate, persisted)
             retain_receipt(candidate, receipt)
             self._save(assembly_number, candidate)
@@ -2140,7 +2227,13 @@ def apply_documentation_command_candidate(
     arrangement = None
     global_operation = operation in {"set_theme", "apply_template"}
     add_object_operation = operation == "add_object"
-    if operation == "arrange":
+    object_fields = {}
+    from ai_inspector.documentation.objects import OPERATIONS as OBJECT_OPERATIONS, live_command
+    if operation in OBJECT_OPERATIONS:
+        object_fields = live_command(scene, command)
+        if page_id not in page_targets:
+            raise DocumentEditError("object_not_found", "The page no longer exists.", pageId=page_id)
+    elif operation == "arrange":
         if target_type != "selection":
             raise DocumentationSceneError(
                 "arrangement requires a target selection"
@@ -2311,6 +2404,19 @@ def apply_documentation_command_candidate(
     # must not depend on the current flag (undo and read retain stored values).
     rich_text = None
     current_object = scene.get("pages", {}).get(page_id, {}).get("documentObjects", {}).get(target_id, {})
+    if target_type == "document_object" and current_object and operation in {"translate", "resize", "rotate", "remove_object"}:
+        from ai_inspector.documentation.objects import check_aspect, image_angle
+        if current_object.get("locked"):
+            raise DocumentEditError("object_locked", "Unlock the object before changing it.", objectId=target_id)
+        proposed = copy.deepcopy(current_object["frame"])
+        if operation == "resize":
+            proposed["width"] = max(.01, min(2., proposed["width"] + size_delta[0]))
+            proposed["height"] = max(.01, min(2., proposed["height"] + size_delta[1]))
+            check_aspect(current_object, proposed)
+        if operation == "rotate":
+            proposed["rotation"] = _normalized_rotation([0., 0., proposed.get("rotation", 0) + rotation[2]])[2]
+        if operation in {"translate", "resize", "rotate"}:
+            image_angle(current_object, proposed)
     current_override = scene.get("pages", {}).get(page_id, {}).get("pageElementOverrides", {}).get(target_id, {})
     current_value = current_object.get("content", "") if target_type == "document_object" else current_override.get("richText", current_override.get("text", ""))
     if target_type in {"document_object", "page_element"} and is_rich(current_value):
@@ -2376,6 +2482,7 @@ def apply_documentation_command_candidate(
         "actor": actor,
         "createdAt": now,
     }
+    persisted_command.update(object_fields)
     if translation is not None:
         persisted_command["translation"] = translation
     if rotation is not None:

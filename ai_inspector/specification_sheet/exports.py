@@ -249,9 +249,10 @@ def build_specification_pdf_bytes(
     *,
     render_root: str | Path,
     assembly_number: str,
+    asset_root: str | Path | None = None,
 ) -> bytes:
     payload, _fields = _build_specification_pdf(
-        document, render_root=render_root, assembly_number=assembly_number, fillable=False
+        document, render_root=render_root, assembly_number=assembly_number, asset_root=asset_root, fillable=False
     )
     return payload
 
@@ -261,10 +262,11 @@ def build_specification_fillable_pdf_bytes(
     *,
     render_root: str | Path,
     assembly_number: str,
+    asset_root: str | Path | None = None,
 ) -> Tuple[bytes, List[Dict[str, Any]]]:
     """The same page with every open slot as an amber form field; returns the PDF and its fields."""
     return _build_specification_pdf(
-        document, render_root=render_root, assembly_number=assembly_number, fillable=True
+        document, render_root=render_root, assembly_number=assembly_number, asset_root=asset_root, fillable=True
     )
 
 
@@ -274,6 +276,7 @@ def _build_specification_pdf(
     render_root: str | Path,
     assembly_number: str,
     fillable: bool,
+    asset_root: str | Path | None = None,
 ) -> Tuple[bytes, List[Dict[str, Any]]]:
     document = export_document(document)
     check_export(document, document.get("exportMode", "review"))
@@ -515,7 +518,8 @@ def _build_specification_pdf(
         color=(1, 1, 1),
         align=2,
     )
-    draw_pdf_objects(fitz, page, descriptor, text_plans)
+    draw_pdf_objects(fitz, page, descriptor, text_plans, document=document,
+                     asset_root=asset_root or render_root, assembly_number=assembly_number)
     keywords = f"InspectorPro,{assembly_number},specification sheet"
     if fillable:
         keywords = (f"{FILLABLE_KEYWORD_PREFIX};assembly={assembly_number};"
@@ -642,6 +646,7 @@ def build_specification_docx_bytes(
     *,
     render_root: str | Path,
     assembly_number: str,
+    asset_root: str | Path | None = None,
 ) -> bytes:
     document = export_document(document, format="docx")
     check_export(document, document.get("exportMode", "review"), format="docx")
@@ -746,7 +751,7 @@ def build_specification_docx_bytes(
 
     from ai_inspector.documentation.rich_docx import DocxObjects
     authored = DocxObjects(output, document, (width_pt, height_pt), shade_cell=_docx_shade_cell,
-                           border_cell=_docx_set_cell_border, clear_borders=_docx_clear_table_borders)
+                           border_cell=_docx_set_cell_border, clear_borders=_docx_clear_table_borders, asset_root=asset_root or render_root, assembly_number=assembly_number)
 
     def flush_objects(*keys, fallback):
         tops = [_block_frame(descriptor, blocks[key], width_pt, height_pt)[1] for key in keys if key in blocks]
@@ -929,11 +934,13 @@ def store_specification_pdf(
     root: str | Path,
     assembly_number: str,
     document: Mapping[str, Any],
+    asset_root: str | Path | None = None,
 ) -> Dict[str, Any]:
     revision = str(document.get("documentRevision") or "")
     payload = build_specification_pdf_bytes(
         document,
         render_root=root,
+        asset_root=asset_root,
         assembly_number=assembly_number,
     )
     directory = _document_directory(root, assembly_number, revision)
@@ -951,6 +958,10 @@ def store_specification_pdf(
         "filename": filename,
         "url": f"/api/specification-sheet/{assembly_number}/documents/{revision}/pdf",
     }
+    from ai_inspector.documentation.objects import has_objects
+    from ai_inspector.documentation.rich_layout import PDF_RENDERER_VERSION
+    if has_objects(document):
+        artifact["rendererVersion"] = PDF_RENDERER_VERSION
     _write_atomic(
         directory / "pdf.json",
         (json.dumps(artifact, ensure_ascii=True, sort_keys=True, indent=2) + "\n").encode("ascii"),
@@ -962,11 +973,13 @@ def store_specification_fillable_pdf(
     root: str | Path,
     assembly_number: str,
     document: Mapping[str, Any],
+    asset_root: str | Path | None = None,
 ) -> Dict[str, Any]:
     revision = str(document.get("documentRevision") or "")
     payload, fields = build_specification_fillable_pdf_bytes(
         document,
         render_root=root,
+        asset_root=asset_root,
         assembly_number=assembly_number,
     )
     directory = _document_directory(root, assembly_number, revision)
@@ -986,6 +999,10 @@ def store_specification_fillable_pdf(
         "openFields": [{"slot": field["name"], "name": field["label"]} for field in fields],
         "url": f"/api/specification-sheet/{assembly_number}/documents/{revision}/fillable-pdf",
     }
+    from ai_inspector.documentation.objects import has_objects
+    from ai_inspector.documentation.rich_layout import PDF_RENDERER_VERSION
+    if has_objects(document):
+        artifact["rendererVersion"] = PDF_RENDERER_VERSION
     _write_atomic(
         directory / "fillable.json",
         (json.dumps(artifact, ensure_ascii=True, sort_keys=True, indent=2) + "\n").encode("ascii"),
@@ -1009,11 +1026,13 @@ def store_specification_docx(
     root: str | Path,
     assembly_number: str,
     document: Mapping[str, Any],
+    asset_root: str | Path | None = None,
 ) -> Dict[str, Any]:
     revision = str(document.get("documentRevision") or "")
     payload = build_specification_docx_bytes(
         document,
         render_root=root,
+        asset_root=asset_root,
         assembly_number=assembly_number,
     )
     directory = _document_directory(root, assembly_number, revision)
@@ -1033,7 +1052,7 @@ def store_specification_docx(
             "application/vnd.openxmlformats-officedocument."
             "wordprocessingml.document"
         ),
-        "rendererVersion": "specification-sheet-docx-v1",
+        "rendererVersion": "specification-sheet-docx-v2",
         "url": f"/api/specification-sheet/{assembly_number}/documents/{revision}/docx",
     }
     from ai_inspector.documentation.rich_docx import artifact_metadata

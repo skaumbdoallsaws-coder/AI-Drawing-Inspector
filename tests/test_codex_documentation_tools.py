@@ -138,7 +138,7 @@ def test_the_tool_set_is_exact_typed_and_closed():
     assert finder["read_only"] is True
     assert finder["input_schema"]["properties"]["limit"]["maximum"] == 200
     variants = batch["input_schema"]["properties"]["operations"]["items"]["anyOf"]
-    assert {item["properties"]["operation"]["enum"][0] for item in variants} == {"replace_text", "set_slot_value", "replace_rich_text", "replace_range", "format_range", "create_table", "modify_table"}
+    assert {item["properties"]["operation"]["enum"][0] for item in variants} == {"replace_text", "set_slot_value", "replace_rich_text", "replace_range", "format_range", "create_table", "modify_table", "set_object_frame", "set_image_crop", "set_object_order", "arrange_objects"}
     rich = next(v for v in variants if v["properties"]["operation"]["enum"] == ["replace_rich_text"])
     table_variants = [v for v in variants if v["properties"]["operation"]["enum"] == ["modify_table"]]
     assert {v["properties"]["action"]["enum"][0] for v in table_variants} == {
@@ -172,7 +172,7 @@ def test_the_tool_set_is_exact_typed_and_closed():
     assert {spec["name"] for spec in specs if spec.get("read_only", True)} == {
         "inspect_documentation_context", "inspect_documentation_type", "inspect_parts_manual_bom",
         "find_library_machines", "list_appearances", "list_part_faces", "list_signs_and_scenes",
-        "find_document_text", "read_document_pages", "propose_document_value_confirmation", "inspect_document_change", "read_document_conflicts"}
+        "read_document_objects", "find_document_text", "read_document_pages", "propose_document_value_confirmation", "inspect_document_change", "read_document_conflicts"}
 
 
 def test_public_research_joins_the_tools_behind_its_flag(monkeypatch):

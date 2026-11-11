@@ -399,7 +399,7 @@ def test_live_api_refuses_uncaptured_export_then_builds_landscape_review_pdf(
     assert result["docx"]["controlledRelease"] is False
     assert result["docx"]["pageCount"] == 20
     assert result["docx"]["documentRevision"] == result["pdf"]["documentRevision"]
-    assert result["docx"]["rendererVersion"] == "work-instructions-docx-rich-v2"
+    assert result["docx"]["rendererVersion"] == "work-instructions-docx-rich-v3"
 
     downloaded = client.get(result["pdf"]["url"])
     assert downloaded.status_code == 200

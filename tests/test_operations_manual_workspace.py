@@ -618,7 +618,7 @@ def test_docx_renderer_version_invalidates_an_older_cached_export(
     )
     first = store_prototype_docx(tmp_path, "MMLE-50D", document)
     assert first["cacheHit"] is False
-    assert first["rendererVersion"] == "operations-docx-rich-v4"
+    assert first["rendererVersion"] == "operations-docx-rich-v5"
 
     metadata_path = (
         tmp_path

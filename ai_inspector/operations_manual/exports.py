@@ -28,7 +28,7 @@ class OperationsManualExportError(RuntimeError):
 
 _SAFE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,180}$")
 _EXPORT_LOCK = threading.RLock()
-_DOCX_RENDERER_VERSION = "operations-docx-rich-v4"
+_DOCX_RENDERER_VERSION = "operations-docx-rich-v5"
 
 
 def _safe(value: Any, label: str) -> str:
@@ -686,6 +686,7 @@ def build_prototype_pdf_bytes(
     root: str | Path,
     assembly_number: str,
     document: Mapping[str, Any],
+    asset_root: str | Path | None = None,
 ) -> bytes:
     document = export_document(document)
     check_export(document, document.get("exportMode", "review"))
@@ -766,7 +767,8 @@ def build_prototype_pdf_bytes(
             if isinstance(block, Mapping):
                 _draw_block(fitz, page, descriptor, block, document, root, assembly_number,
                             block_plans.get(descriptor["pageId"], {}).get(block.get("blockId")))
-        draw_pdf_objects(fitz, page, descriptor, text_plans)
+        draw_pdf_objects(fitz, page, descriptor, text_plans, document=document,
+                         asset_root=asset_root or root, assembly_number=assembly_number)
     toc = [[1, str(document.get("title") or "Operations and Maintenance Manual"), 1]]
     seen_sections: set[str] = set()
     for descriptor in pages:
@@ -1100,6 +1102,7 @@ def build_prototype_docx_bytes(
     root: str | Path,
     assembly_number: str,
     document: Mapping[str, Any],
+    asset_root: str | Path | None = None,
 ) -> bytes:
     document = export_document(document, format="docx")
     check_export(document, document.get("exportMode", "review"), format="docx")
@@ -1158,7 +1161,7 @@ def build_prototype_docx_bytes(
     from ai_inspector.documentation.rich_blocks import rich_value, base_style, effective_override
     from ai_inspector.specification_sheet.exports import _docx_set_cell_border, _docx_clear_table_borders
     authored = DocxObjects(output, document, (page_width_pt, page_height_pt), shade_cell=_docx_cell_shading,
-                           border_cell=_docx_set_cell_border, clear_borders=_docx_clear_table_borders)
+                           border_cell=_docx_set_cell_border, clear_borders=_docx_clear_table_borders, asset_root=asset_root or root, assembly_number=assembly_number)
     pages = [row for row in document.get("pages") or [] if isinstance(row, Mapping)]
     for page_index, descriptor in enumerate(pages):
         if page_index:
@@ -1404,9 +1407,10 @@ def _store_export(
         from ai_inspector.documentation.rich_docx import artifact_metadata
         descriptor.update(artifact_metadata(document, _publication_page_geometry(document)[:2], 1.56 * 72))
     elif kind == "pdf":
-        from ai_inspector.documentation.rich_layout import PDF_RENDERER_VERSION, has_text_objects
+        from ai_inspector.documentation.rich_layout import PDF_RENDERER_VERSION
+        from ai_inspector.documentation.objects import has_objects
         from ai_inspector.documentation.rich_blocks import has_rich_blocks
-        if has_text_objects(document) or has_rich_blocks(document):
+        if has_objects(document) or has_rich_blocks(document):
             descriptor["rendererVersion"] = PDF_RENDERER_VERSION
     _write_atomic(
         metadata_path,
@@ -1457,9 +1461,10 @@ def _cached_export(
         from ai_inspector.documentation.rich_docx import artifact_metadata
         expected.update(artifact_metadata(document, _publication_page_geometry(document)[:2], 1.56 * 72))
     elif kind == "pdf":
-        from ai_inspector.documentation.rich_layout import PDF_RENDERER_VERSION, has_text_objects
+        from ai_inspector.documentation.rich_layout import PDF_RENDERER_VERSION
+        from ai_inspector.documentation.objects import has_objects
         from ai_inspector.documentation.rich_blocks import has_rich_blocks
-        if has_text_objects(document) or has_rich_blocks(document):
+        if has_objects(document) or has_rich_blocks(document):
             expected["rendererVersion"] = PDF_RENDERER_VERSION
     if any(descriptor.get(key) != value for key, value in expected.items()):
         return None
@@ -1469,7 +1474,8 @@ def _cached_export(
 
 
 def store_prototype_pdf(
-    root: str | Path, assembly_number: str, document: Mapping[str, Any]
+    root: str | Path, assembly_number: str, document: Mapping[str, Any],
+    asset_root: str | Path | None = None,
 ) -> Dict[str, Any]:
     document = export_document(document)
     check_export(document, document.get("exportMode", "review"))
@@ -1482,14 +1488,15 @@ def store_prototype_pdf(
             assembly_number,
             document,
             kind="pdf",
-            payload=build_prototype_pdf_bytes(root, assembly_number, document),
+            payload=build_prototype_pdf_bytes(root, assembly_number, document, asset_root=asset_root),
         )
         result["cacheHit"] = False
         return result
 
 
 def store_prototype_docx(
-    root: str | Path, assembly_number: str, document: Mapping[str, Any]
+    root: str | Path, assembly_number: str, document: Mapping[str, Any],
+    asset_root: str | Path | None = None,
 ) -> Dict[str, Any]:
     document = export_document(document, format="docx")
     check_export(document, document.get("exportMode", "review"), format="docx")
@@ -1502,7 +1509,7 @@ def store_prototype_docx(
             assembly_number,
             document,
             kind="docx",
-            payload=build_prototype_docx_bytes(root, assembly_number, document),
+            payload=build_prototype_docx_bytes(root, assembly_number, document, asset_root=asset_root),
         )
         result["cacheHit"] = False
         return result

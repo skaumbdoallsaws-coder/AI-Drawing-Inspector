@@ -948,12 +948,13 @@ def _draw_documentation_objects(
     if not isinstance(objects, Mapping):
         objects = {}
     theme = _document_theme(document)
-    for object_id in dict.fromkeys([*objects, *(rich_plans or {})]):
+    from ai_inspector.documentation.objects import ordered_objects, draw_pdf_image, draw_pdf_shape
+    from ai_inspector.documentation.commands import DocumentEditError
+    for object_id, value in ordered_objects(descriptor):
         if rich_plans and object_id in rich_plans:
             from ai_inspector.documentation.rich_layout import draw_pdf_object
             draw_pdf_object(fitz, page, rich_plans[object_id])
             continue
-        value = objects[object_id]
         if not isinstance(value, Mapping):
             continue
         frame = value.get("frame")
@@ -1020,55 +1021,13 @@ def _draw_documentation_objects(
                     stroke_opacity=opacity,
                 )
             continue
-        if object_type == "image":
-            asset = value.get("asset")
-            if not isinstance(asset, Mapping):
-                raise PartsManualPdfError("documentation image object has no managed asset")
-            if abs(rotation % 90) > 1e-9:
-                raise PartsManualPdfError(
-                    "documentation image rotation must use 90-degree increments"
-                )
-            page.insert_image(
-                rect,
-                filename=str(_documentation_asset_path(root, assembly_number, asset)),
-                keep_proportion=str(value.get("contentMode") or "contain") == "contain",
-                rotate=int(rotation) % 360,
-            )
-            continue
-        if object_type != "shape":
-            continue
-        color = _hex_rgb(style.get("outlineColor"), "#ABBAC4")
-        fill = _hex_rgb(style.get("fill"), "#FFFFFF")
-        width = float(style.get("lineWidth") or 1.0)
-        shape_type = str(value.get("shapeType") or "rectangle")
-        if shape_type == "ellipse":
-            page.draw_oval(
-                rect,
-                color=color,
-                fill=fill,
-                width=width,
-                stroke_opacity=opacity,
-                fill_opacity=opacity,
-                morph=morph,
-            )
-        elif shape_type == "arrow":
-            start = fitz.Point(rect.x0, rect.y0 + rect.height * 0.5)
-            end = fitz.Point(rect.x1, rect.y0 + rect.height * 0.5)
-            page.draw_line(start, end, color=color, width=width, morph=morph)
-            page.draw_line(end, fitz.Point(end.x - 9, end.y - 5), color=color, width=width, morph=morph)
-            page.draw_line(end, fitz.Point(end.x - 9, end.y + 5), color=color, width=width, morph=morph)
-        else:
-            page.draw_rect(
-                rect,
-                color=color,
-                fill=fill,
-                width=width,
-                dashes="3 2" if shape_type in {"revision_cloud", "detail_box"} else None,
-                radius=0.12 if shape_type == "revision_cloud" else None,
-                stroke_opacity=opacity,
-                fill_opacity=opacity,
-                morph=morph,
-            )
+        try:
+            if object_type == "image":
+                draw_pdf_image(fitz, page, value, style, root, assembly_number)
+            elif object_type == "shape":
+                draw_pdf_shape(fitz, page, value, style)
+        except DocumentEditError as error:
+            raise PartsManualPdfError(f"{error.code}: {object_id}: {error}") from error
 
 
 def build_manual_pdf_bytes(
@@ -1431,6 +1390,10 @@ def store_manual_pdf(
         "sha256": hashlib.sha256(payload).hexdigest(),
         "generatedAt": _utc_now(),
     }
+    from ai_inspector.documentation.objects import has_objects
+    from ai_inspector.documentation.rich_layout import PDF_RENDERER_VERSION
+    if has_objects(document):
+        descriptor["rendererVersion"] = PDF_RENDERER_VERSION
     _write_atomic(pdf_path, payload)
     _write_atomic(
         metadata_path,

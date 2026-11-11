@@ -16065,6 +16065,11 @@ class DocumentationSceneCommandBody(BaseModel):
     endCondition: Optional[str] = None
     repeatedPartStrategy: Optional[str] = None
     documentObject: Optional[Dict[str, Any]] = None
+    frame: Optional[Dict[str, Any]] = None
+    aspectLock: Optional[bool] = None
+    crop: Optional[Dict[str, Any]] = None
+    order: Optional[List[str]] = None
+    objectIds: Optional[List[str]] = None
     text: Optional[str] = None
     richText: Optional[Dict[str, Any]] = None
     expectedContentHash: Optional[str] = None
@@ -17669,6 +17674,7 @@ def operations_manual_prototype_export(assembly_number: str, mode: str = "review
             OPERATIONS_MANUAL_ROOT,
             str(catalog["assemblyNumber"]),
             document,
+            asset_root=PARTS_MANUAL_ROOT,
         )
         docx_artifact = _documentation_companion_docx(
             store_prototype_docx,
@@ -18177,6 +18183,7 @@ def work_instructions_review_export(assembly_number: str, mode: str = "review"):
             WORK_INSTRUCTION_ROOT,
             str(catalog["assemblyNumber"]),
             document,
+            asset_root=PARTS_MANUAL_ROOT,
         )
         docx_artifact = _documentation_companion_docx(
             store_work_instruction_review_docx,
@@ -18796,7 +18803,7 @@ def documentation_confirmation_read(document_type: str, assembly_number: str):
 
 def _documentation_companion_docx(writer, root, assembly_number, document):
     # The UI deliberately obtains its DOCX companion through the PDF route.
-    return writer(root, assembly_number, document)
+    return writer(root, assembly_number, document, asset_root=PARTS_MANUAL_ROOT)
 
 
 def _documentation_value_error(error: DocumentEditError):
@@ -18984,6 +18991,11 @@ def _documentation_editor_read(document, loaded, baseline):
 
 def _documentation_prepare_scene_command(document, loaded, command):
     """The workspace retains exact baseRevision checks; rich writes also bind the field hash."""
+    if command.get("operation") == "arrange_objects":
+        from ai_inspector.documentation.objects import apply_operation, page_size
+        page = loaded["scene"].get("pages", {}).get(command["pageId"], {})
+        _, computed, _ = apply_operation(page, command, page_size(document))
+        command = {**command, **computed}
     if command.get("operation") == "replace_rich_text":
         require_documentation_rich_text()
     if command.get("operation") == "replace_rich_text" or command.get("wholeFieldReplacement"):
@@ -19331,6 +19343,7 @@ def specification_sheet_export(assembly_number: str, mode: str = "review"):
             SPECIFICATION_SHEET_ROOT,
             str(catalog["assemblyNumber"]),
             document,
+            asset_root=PARTS_MANUAL_ROOT,
         )
         docx_artifact = _documentation_companion_docx(
             store_specification_docx,
@@ -19441,6 +19454,7 @@ def specification_sheet_fillable_export(assembly_number: str):
             SPECIFICATION_SHEET_ROOT,
             str(catalog["assemblyNumber"]),
             document,
+            asset_root=PARTS_MANUAL_ROOT,
         )
     except (*_SPECIFICATION_SHEET_SLOT_ERRORS, SpecificationSheetExportError) as error:
         if isinstance(error, DocumentEditError):
@@ -42052,6 +42066,11 @@ class _DocumentationAgentHost:
         return {"changed": [{"pageId": e["pageId"], "targetId": e["targetId"]} for e in edits],
                 "receipt": result["receipt"]}
 
+    def read_document_objects(self, assembly_number, document_type, page_ids):
+        from ai_inspector.documentation.objects import read_objects
+        snapshot = self.document_snapshot(assembly_number, document_type)
+        return read_objects(snapshot, page_ids, PARTS_MANUAL_ROOT, assembly_number)
+
     def apply_document_edits(self, assembly_number, document_type, observed, *, actor="sage"):
         operations = observed["operations"]
         destination = documentation_operation_store(operations)
@@ -42090,6 +42109,24 @@ class _DocumentationAgentHost:
             from ai_inspector.documentation.identity import check_alias_binding
 
             check_alias_binding(observed, snapshot["state"])
+            if destination == "objects":
+                from ai_inspector.documentation.objects import prepare_batch
+                commands, expected, current, operation_results = prepare_batch(
+                    scene, snapshot["document"], operations, observed["expectedRevision"])
+                document = snapshot["document"]
+                targets = (_parts_manual_editable_page_targets(document) if document_type == "illustrated_parts_manual"
+                           else _operations_manual_editable_page_targets(document))
+                result = repository.apply_batch(assembly_number, observed["sourceRevision"], observed["manualPlanRevision"],
+                    base_revision=observed.get("sceneRevision"), expected_revision=observed["expectedRevision"],
+                    request_id=observed["requestId"], commands=commands, page_targets=targets,
+                    expected_hashes=expected, current_hashes=current, hashes_revision=loaded["revision"],
+                    actor=actor, payload=observed, identity_document=snapshot["identity_document"],
+                    object_results=operation_results)
+                if document_type == "work_instructions" and result["changed"]:
+                    next_document = self._text_scene(assembly_number, document_type)["document"]
+                    carry_draft_render_artifacts(WORK_INSTRUCTION_ROOT, assembly_number, document, next_document)
+                return {"receipt": result["receipt"], "changed": result["changed"],
+                        "objectBinding": {"sceneRevision": result["revision"], "revision": result["scene"]["editRevision"]}}
             from ai_inspector.documentation.search import coalesce_ranges, RANGE_OPERATIONS
             from ai_inspector.documentation.commands import check_preconditions
             from ai_inspector.documentation.tables import coalesce_tables, TABLE_OPERATIONS, require_target

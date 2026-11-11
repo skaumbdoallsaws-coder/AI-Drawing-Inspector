@@ -128,6 +128,9 @@ def retain_receipt(state: dict, receipt: dict) -> None:
 def operation_store(operations: list[dict]) -> str:
     if not isinstance(operations, list) or not 1 <= len(operations) <= 224 or any(not isinstance(o, dict) for o in operations):
         raise DocumentEditError("invalid_document_operation", "Submit at most 200 range operations or 12 whole-field operations.")
+    from .objects import OPERATIONS, object_batch
+    if any(o.get("operation") in OPERATIONS for o in operations):
+        return object_batch(operations)
     if any(not isinstance(o.get("targetId"), str) or not o["targetId"]
            or not isinstance(o.get("operation"), str) for o in operations):
         raise DocumentEditError("invalid_document_operation", "Each operation needs a target ID and operation name.")

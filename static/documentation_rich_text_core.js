@@ -9,7 +9,7 @@
     const ID = /^rt-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
     const BLOCKS = ['paragraph', 'heading', 'bulletList', 'orderedList'];
     const TABLE_NODES = ['table', 'tableRow', 'tableCell', 'tableHeader'];
-    const IDENTIFIED = [...BLOCKS, 'listItem', 'hardBreak'];
+    const IDENTIFIED = [...BLOCKS, 'listItem', 'hardBreak', ...TABLE_NODES];
     const hasTable = value => Array.isArray((value?.doc || value)?.content) && (value.doc || value).content.some(node => node?.type === 'table');
     const MARKS = ['bold', 'italic', 'underline', 'strike', 'subscript', 'superscript', 'highlight', 'textStyle', 'link'];
     const INVALID_UNICODE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u;
@@ -97,7 +97,6 @@
     function readOnlyReason(field) {
         if (field?.richTextError) return 'This rich text field is read-only: ' + field.richTextError;
         if (!field?.richText) return '';
-        if (field.richText.schemaVersion === 3) return 'This text box contains a table. Tables cannot be edited here yet.';
         try {
             const value = normalize(field.richText);
             // A stored non-minimal version remains stored, and must also be supported.
@@ -201,7 +200,6 @@
         }
         const raw = envelopeInput ? value.doc : value;
         const tableDocument = hasTable(raw), maxNodes = tableDocument ? 2048 : LIMITS.nodes;
-        if (editor && tableDocument) fail('Tables cannot be edited here yet.', 'unsupported_rich_text_schema');
         const used = new Set(options.reservedIds || []), makeId = options.idFactory || allocate;
         let count = 0;
         function feature2() {
@@ -215,6 +213,11 @@
                 if (ID.test(id) && !used.has(id)) { used.add(id); return id; }
             }
             fail('Could not allocate a unique text node ID. Your draft is still open.');
+        }
+        function tableIdentity(candidate) {
+            if (editor && (typeof candidate !== 'string' || !ID.test(candidate) || used.has(candidate)))
+                fail('Table, row, cell and column IDs must be present and unique.', 'invalid_table_grid');
+            return identity(candidate);
         }
         function hex(value) {
             const result = editor ? color(value) : typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value) ? value.toLowerCase() : null;
@@ -286,9 +289,9 @@
             const allowed = ['paragraph', 'heading'].includes(type) ? [...PARAGRAPH_ATTRS, ...(type === 'heading' ? ['level'] : [])]
                 : type === 'orderedList' ? ['start', ...(editor ? ['type'] : [])]
                 : type === 'table' ? ['ownership', 'style', 'columns']
-                : ['tableCell', 'tableHeader'].includes(type) ? ['colspan', 'rowspan', 'fill', 'verticalAlign'] : [];
+                : ['tableCell', 'tableHeader'].includes(type) ? ['colspan', 'rowspan', 'fill', 'verticalAlign', ...(editor ? ['colwidth'] : [])] : [];
             keys(attrs, [...allowed, ...(identified ? ['id'] : [])], !editor && identified ? (type === 'table' ? ['id', ...allowed] : ['id']) : []);
-            if (identified) result.attrs = { id: identity(attrs.id) };
+            if (identified) result.attrs = { id: TABLE_NODES.includes(type) ? tableIdentity(attrs.id) : identity(attrs.id) };
             for (const name of PARAGRAPH_ATTRS) if (Object.hasOwn(attrs, name)) {
                 if (editor && attrs[name] == null) continue;
                 feature2();
@@ -302,9 +305,10 @@
                     fail('Invalid authored table attributes.', 'invalid_table_grid');
                 if (attrs.columns.length > 12) fail('At most twelve columns.', 'table_too_large');
                 const columns = attrs.columns.map(col => {
+                    if (editor && !col?.id) fail('Column IDs must be present.', 'invalid_table_grid');
                     keys(col, ['id', 'width'], ['id', 'width']);
                     if (!Number.isInteger(col.width) || col.width < 1) fail('Invalid column share.', 'invalid_table_grid');
-                    return { id: identity(col.id), width: col.width };
+                    return { id: tableIdentity(col.id), width: col.width };
                 });
                 if (columns.reduce((sum, col) => sum + col.width, 0) !== 1000) fail('Column shares must sum to 1000.', 'invalid_table_grid');
                 Object.assign(result.attrs, { ownership: 'authored', style: attrs.style, columns });
@@ -318,7 +322,7 @@
                 const align = attrs.verticalAlign === undefined ? 'top' : attrs.verticalAlign;
                 if (!['top', 'middle', 'bottom'].includes(align)) fail('Invalid cell alignment.', 'invalid_table_grid');
                 if (align !== 'top') result.attrs.verticalAlign = align;
-                if (Object.hasOwn(attrs, 'fill')) result.attrs.fill = hex(attrs.fill);
+                if (Object.hasOwn(attrs, 'fill') && !(editor && attrs.fill == null)) result.attrs.fill = hex(attrs.fill);
             }
             if (type === 'heading') {
                 if (!Number.isInteger(attrs.level) || attrs.level < 1 || attrs.level > 3) fail('Heading levels are limited to 1-3.');
@@ -389,6 +393,85 @@
         if (options.capabilities) requireCapabilities(result, options.capabilities);
         return result;
     }
+
+    const TABLE_NOTICE = 'Use the Table menu to change rows, columns or cells.';
+    const TABLE_PASTE_NOTICE = 'Tables cannot be pasted here. Use Table, Insert table.';
+    function tableSignature(table) {
+        const a = table.attrs || {};
+        return canonical({ id: a.id, ownership: a.ownership, style: a.style, columns: a.columns,
+            rows: (table.content || []).map(row => ({ id: row.attrs?.id,
+                cells: (row.content || []).map(cell => ({ id: cell.attrs?.id, type: cell.type,
+                    colspan: cell.attrs?.colspan || 1, rowspan: cell.attrs?.rowspan || 1,
+                    fill: cell.attrs?.fill || null, verticalAlign: cell.attrs?.verticalAlign || 'top' })) })) });
+    }
+    function tableGuard(oldDoc, newDoc) {
+        const old = new Map((oldDoc.content || []).filter(n => n.type === 'table')
+            .map(n => [n.attrs?.id, tableSignature(n)]));
+        const seen = new Set();
+        let reason = null;
+        function walk(node, depth) {
+            if (node.type === 'table') {
+                const id = node.attrs?.id;
+                if (!id || !old.has(id)) reason ||= TABLE_PASTE_NOTICE;
+                else if (depth !== 1 || seen.has(id) || old.get(id) !== tableSignature(node)) reason ||= TABLE_NOTICE;
+                seen.add(id);
+            }
+            (node.content || []).forEach(child => walk(child, depth + 1));
+        }
+        walk(newDoc, 0);
+        return reason;
+    }
+    // Grid positions also restore a caret after a server operation removes its cell.
+    function tableCells(table) {
+        const grid = [], cells = [];
+        (table?.content || []).forEach((row, y) => {
+            grid[y] ||= [];
+            let x = 0;
+            for (const cell of row.content || []) {
+                while (grid[y][x]) x++;
+                const width = cell.attrs.colspan || 1, height = cell.attrs.rowspan || 1;
+                const entry = { cell, rowId: row.attrs.id, row: y, column: x };
+                cells.push(entry);
+                for (let yy = y; yy < y + height; yy++) {
+                    grid[yy] ||= [];
+                    for (let xx = x; xx < x + width; xx++) grid[yy][xx] = entry;
+                }
+                x += width;
+            }
+        });
+        return { cells, grid };
+    }
+    function tableWidths(columns, columnId, percent) {
+        const selected = columns.findIndex(c => c.id === columnId);
+        if (selected < 0 || !Number.isInteger(percent) || percent < 1 || percent > 99)
+            fail('Choose a column and a whole percent from 1 to 99.', 'invalid_table_operation');
+        if (columns.length === 1) return [1000];
+        const result = columns.map(() => 0);
+        result[selected] = Math.max(1, Math.min(1000 - columns.length + 1, percent * 10));
+        let remaining = 1000 - result[selected], active = columns.map((_, i) => i).filter(i => i !== selected);
+        while (active.length) {
+            const weight = active.reduce((sum, i) => sum + columns[i].width, 0);
+            const small = active.filter(i => remaining * columns[i].width / weight < 1);
+            if (!small.length) {
+                const exact = new Map(active.map(i => [i, remaining * columns[i].width / weight]));
+                for (const i of active) result[i] = Math.floor(exact.get(i));
+                const rest = 1000 - result.reduce((sum, n) => sum + n, 0);
+                active.sort((a, b) => (exact.get(b) - result[b]) - (exact.get(a) - result[a]) || a - b);
+                for (const i of active.slice(0, rest)) result[i]++;
+                break;
+            }
+            for (const i of small) { result[i] = 1; remaining--; }
+            active = active.filter(i => !small.includes(i));
+        }
+        return result;
+    }
+    function equalTableWidths(columns) {
+        return columns.map((_, i) => Math.floor(1000 / columns.length) + (i < 1000 % columns.length ? 1 : 0));
+    }
+    function tableAfterId(doc, topLevelIndex) {
+        return doc.content?.[topLevelIndex]?.attrs?.id || null;
+    }
+
     function baseLineHeight(style = {}) {
         const value = Number(style.baseLineHeight);
         return Number.isFinite(value) && value > 0 ? value : 1.2;
@@ -421,5 +504,5 @@
         }
         return project(value.doc || value);
     }
-    return { baseLineHeight, FEATURES, SCHEMA2_FEATURES, NAMED_STYLES, PARAGRAPH_ATTRS, FULL_CAPABILITIES, usedFeatures, requireCapabilities, pasteFontFamily, pasteFontSize, paragraphValue, editorDocument, FONT_MAP, RENDER_MARKS, font, readOnlyReason, LIMITS, ID, IDENTIFIED, LINK, color, href, nodeIds, reservedIds, canonical, normalize, fromPlain, plainText };
+    return { tableSignature, tableGuard, tableCells, tableWidths, equalTableWidths, tableAfterId, TABLE_NOTICE, TABLE_PASTE_NOTICE, baseLineHeight, FEATURES, SCHEMA2_FEATURES, NAMED_STYLES, PARAGRAPH_ATTRS, FULL_CAPABILITIES, usedFeatures, requireCapabilities, pasteFontFamily, pasteFontSize, paragraphValue, editorDocument, FONT_MAP, RENDER_MARKS, font, readOnlyReason, LIMITS, ID, IDENTIFIED, LINK, color, href, nodeIds, reservedIds, canonical, normalize, fromPlain, plainText };
 });

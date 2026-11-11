@@ -18,12 +18,12 @@ window.DocumentationRichText = api;
 // Consume named exports only, from the reviewed self-contained module.
 api.ready = import('/static/vendor/tiptap/tiptap.bundle.js?v=c36fd989775f').then(
     ({ Editor, Extension, Mark, StarterKit, TextStyle, Color, FontFamily, FontSize,
-        Highlight, Subscript, Superscript, TextAlign }) => {
+        Highlight, Subscript, Superscript, TextAlign, Table, TableRow, TableCell, TableHeader }) => {
         if (!core || !Editor || !Extension || !StarterKit || !TextStyle || !Color) {
             return { ok: false, reason: 'The rich text editor is unavailable.' };
         }
         kit = { Editor, Extension, Mark, StarterKit, TextStyle, Color, FontFamily, FontSize,
-            Highlight, Subscript, Superscript, TextAlign };
+            Highlight, Subscript, Superscript, TextAlign, Table, TableRow, TableCell, TableHeader };
         return { ok: true, reason: '' };
     }, () => ({ ok: false, reason: 'The rich text editor could not load. This field is read-only.' })
 ).then(status => {
@@ -151,7 +151,7 @@ function cssColor(value) {
 }
 
 function extensions(capabilities, sink, toggleList, boxUnderline, signalWord) {
-    const { Extension, Mark, StarterKit, TextStyle, Color, FontFamily, FontSize, Highlight, Subscript, Superscript, TextAlign } = kit;
+    const { Extension, Mark, StarterKit, TextStyle, Color, FontFamily, FontSize, Highlight, Subscript, Superscript, TextAlign, Table, TableRow, TableCell, TableHeader } = kit;
     const allows = name => capabilities.features.includes(name);
     // Preserve the static renderer's outer link/color precedence. A presentation
     // mark at the leaf supplies each link's underline at the run's own size.
@@ -191,6 +191,51 @@ function extensions(capabilities, sink, toggleList, boxUnderline, signalWord) {
             isAllowedUri: value => Boolean(core.href(value)), HTMLAttributes: core.LINK } : false,
     });
     const result = [starter];
+
+    if (allows('table') && capabilities.schemaVersions.includes(3)) {
+        result.push(Table.extend({
+            addAttributes() {
+                return { ...(this.parent?.() || {}), ownership: { default: 'authored' },
+                    style: { default: 'grid' }, columns: { default: null } };
+            },
+            renderHTML({ node }) {
+                return ['table', { 'data-rich-id': node.attrs.id, 'data-table-style': node.attrs.style,
+                    style: 'white-space: pre-wrap' },
+                ['colgroup', ...(node.attrs.columns || []).map(column => ['col', {
+                    'data-rich-id': column.id, style: 'width: ' + column.width / 10 + '%' }])],
+                ['tbody', 0]];
+            },
+            addKeyboardShortcuts() {
+                return { ...this.parent(),
+                    Tab: () => {
+                        if (!this.editor.isActive('table')) return false;
+                        this.editor.commands.goToNextCell();
+                        return true; // The last cell never grows a row or moves focus out.
+                    },
+                    'Shift-Tab': () => {
+                        if (!this.editor.isActive('table')) return false;
+                        this.editor.commands.goToPreviousCell(); return true;
+                    },
+                };
+            },
+        }).configure({ resizable: false, View: null }),
+        TableRow.extend({ renderHTML({ node }) { return ['tr', { 'data-rich-id': node.attrs.id,
+            style: 'white-space: pre-wrap' }, 0]; } }));
+        for (const [extension, tag] of [[TableCell, 'td'], [TableHeader, 'th']]) result.push(extension.extend({
+            content: 'paragraph+',
+            addAttributes() {
+                const { colspan, rowspan, colwidth } = this.parent();
+                return { colspan, rowspan, colwidth, fill: { default: null }, verticalAlign: { default: 'top' } };
+            },
+            renderHTML({ node }) {
+                return [tag, { 'data-rich-id': node.attrs.id, colspan: node.attrs.colspan,
+                    rowspan: node.attrs.rowspan, style: 'white-space: pre-wrap; vertical-align: '
+                        + (node.attrs.verticalAlign || 'top') + '; background-color: '
+                        + (node.attrs.fill || (tag === 'th' ? '#e9eef2' : 'transparent')) }, 0];
+            },
+        }));
+    }
+
     if (boxUnderline || allows('link')) result.push(Mark.create({ name: 'documentationInheritedUnderline', priority: 45,
         parseHTML() { return []; }, renderHTML() { return ['u', { 'data-rich-inherited-underline': '' }, 0]; },
     }));
@@ -270,7 +315,7 @@ function mount(element, options) {
     const field = options.field;
     const originalHash = field.contentHash;
     let composing = false, pendingCommit = false, saving = false, disposed = false, conflict = false;
-    let blurTimer = null, dirty = false, inflight = null;
+    let blurTimer = null, dirty = false, inflight = null, tableBusy = false, tableFlight = null;
     let initialJSON;
     const listeners = [];
     function listen(target, event, fn, capture = false) {
@@ -319,7 +364,7 @@ function mount(element, options) {
         discard.hidden = overwrite.hidden = !conflict;
     }
     const done = button(actions, 'Done', () => commit(false), 'done');
-    const cancel = button(actions, 'Cancel', () => { if (!saving) close(); }, 'cancel');
+    const cancel = button(actions, 'Cancel', () => { if (!saving && !tableBusy) close(); }, 'cancel');
     const discard = button(actions, 'Discard draft and load current', async () => {
         try {
             const snapshot = await options.read();
@@ -351,7 +396,11 @@ function mount(element, options) {
             editorProps: {
                 attributes: { 'aria-label': 'Rich text editor', role: 'textbox', 'aria-multiline': 'true' },
                 handlePaste(view, event) {
-                    if (event.clipboardData?.getData('text/html')) return false;
+                    const html = event.clipboardData?.getData('text/html');
+                    if (html && new DOMParser().parseFromString(html, 'text/html').querySelector('table')) {
+                        event.preventDefault(); notice(core.TABLE_PASTE_NOTICE); return true;
+                    }
+                    if (html) return false;
                     const text = event.clipboardData?.getData('text/plain');
                     if (text === undefined) return false;
                     event.preventDefault();
@@ -381,6 +430,9 @@ function mount(element, options) {
     // typing, paste and keyboard commands get the same contract as the ribbon.
     const dispatch = editor.view.props.dispatchTransaction;
     editor.view.setProps({ dispatchTransaction(tr) {
+        // Supervisor: selection-only transactions cannot change a table; skip the two serializations.
+        const tableReason = tr.docChanged ? core.tableGuard(editor.state.doc.toJSON(), tr.doc.toJSON()) : null;
+        if (tableReason) { notice(tableReason); editor.view.updateState(editor.state); return; }
         let deepest = 0;
         function lists(node, depth = 0) {
             if (['bulletList', 'orderedList'].includes(node.type.name)) depth++;
@@ -410,10 +462,10 @@ function mount(element, options) {
         element, editor, pageId: field.pageId, targetId: field.targetId,
         get dirty() { return dirty; },
         get composing() { return composing; },
-        get saving() { return saving; },
+        get saving() { return saving || tableBusy; },
         controls() { return [toolbar]; },
         reconcile(snapshot) {
-            if (disposed || saving) return;
+            if (disposed || saving || tableBusy) return;
             const current = options.findField(snapshot);
             if (!current || current.contentHash !== originalHash) {
                 if (dirty || composing) notice('This field changed elsewhere. Your draft is kept. Choose how to continue.', true);
@@ -424,11 +476,13 @@ function mount(element, options) {
         async finish() {
             // Leaving the page or document saves the draft first, like a blur. True once closed;
             // false keeps the draft open (conflict, error or IME composition) and the caller stays.
+            if (tableFlight) { await tableFlight; return false; }
             if (inflight) { await inflight; return disposed; }
             if (!disposed && !conflict) await commit(false);
             return disposed;
         },
-        cancel: () => close(),
+        cancel: () => { if (!tableBusy) close(); },
+        notice,
         dispose: () => close(false),
         ownsFocus(target) { return element.contains(target) || panel.contains(target) || toolbar.contains(target); },
     };
@@ -446,6 +500,7 @@ function mount(element, options) {
         if (notify) options.onClose?.();
     }
     function commit(overwriteNewer = false) {
+        if (tableBusy) return tableFlight || Promise.resolve(false);
         // One save at a time, so navigation can wait for a running blur save.
         if (!inflight) inflight = save(overwriteNewer).finally(() => { inflight = null; });
         return inflight;
@@ -482,6 +537,7 @@ function mount(element, options) {
             const fresh = await options.read();
             if (disposed) return;
             close(false); options.apply(fresh); options.onClose?.();
+            return fresh;
         } catch (error) {
             if (disposed) return;
             const concurrent = ['content_hash_mismatch', 'revision_conflict', 'stale_document_revision',
@@ -492,7 +548,7 @@ function mount(element, options) {
         } finally {
             saving = false;
             if (!disposed) editor.setEditable(true, false);
-            done.disabled = overwrite.disabled = cancel.disabled = false;
+            done.disabled = overwrite.disabled = cancel.disabled = tableBusy;
         }
     }
     function selectedBlocks(state = editor.state) {
@@ -510,6 +566,17 @@ function mount(element, options) {
         for (let depth = $from.depth; depth > 0; depth--) if ($from.node(depth).type.name === 'listItem') return true;
         let found = false;
         editor.state.doc.nodesBetween(from, to, node => { if (node.type.name === 'listItem') found = true; });
+        return found;
+    }
+    function insideCell() {
+        const { $from, from, to } = editor.state.selection;
+        if (editor.state.selection.$anchorCell) return true;
+        for (let depth = $from.depth; depth > 0; depth--)
+            if (['tableCell', 'tableHeader'].includes($from.node(depth).type.name)) return true;
+        let found = false;
+        editor.state.doc.nodesBetween(from, to, node => {
+            if (['tableCell', 'tableHeader'].includes(node.type.name)) found = true;
+        });
         return found;
     }
     function selectedMarks() {
@@ -536,7 +603,7 @@ function mount(element, options) {
         for (const update of stateControls) update();
     }
     function perform(build) {
-        if (disposed || saving) return false;
+        if (disposed || saving || tableBusy) return false;
         // The pinned bundle's closeHistory helper uses this PluginKey name but
         // does not export the helper. Each ribbon action starts one undo group.
         let chain = editor.chain().focus().setMeta('closeHistory$', true);
@@ -601,7 +668,7 @@ function mount(element, options) {
         values.push(['body', 'Body']);
         if (allows('namedStyle')) values.push(['caption', 'Caption'], ['note', 'Note']);
         const style = select('Style', values, value => {
-            if (!value || insideList()) return;
+            if (!value || insideList() || insideCell()) return;
             perform(chain => chain.command(({ tr, state }) => {
                 const heading = /^h[1-3]$/.test(value);
                 const type = editor.schema.nodes[heading ? 'heading' : 'paragraph'];
@@ -615,7 +682,7 @@ function mount(element, options) {
                 return true;
             }));
         }, () => shared(selectedBlocks().map(({ node }) => node.type.name === 'heading' ? 'h' + node.attrs.level : node.attrs.namedStyle || 'body')));
-        stateControls.push(() => { style.disabled = insideList(); });
+        stateControls.push(() => { style.disabled = tableBusy || insideList() || insideCell(); style.setAttribute('aria-disabled', String(style.disabled)); });
     }
     if (allows('fontFamily')) select('Font', [['box', 'Box font'], ...Object.keys(core.FONT_MAP).map(name => [name, name])],
         value => { if (value) mark(value === 'box' ? 'unsetFontFamily' : 'setFontFamily', value); },
@@ -726,6 +793,7 @@ function mount(element, options) {
             });
     }
     function toggleList(command) {
+        if (insideCell()) return false;
         return perform(chain => {
             if (allows('namedStyle')) chain = chain.updateAttributes('paragraph', { namedStyle: null });
             return chain[command]();
@@ -734,6 +802,7 @@ function mount(element, options) {
     for (const [name, label, command] of [['bulletList', 'Bullets', 'toggleBulletList'], ['orderedList', 'Numbering', 'toggleOrderedList']]) if (allows(name)) {
         const control = button(toolbar, label, () => toggleList(command));
         stateControls.push(() => {
+            control.disabled = tableBusy || insideCell(); control.setAttribute('aria-disabled', String(control.disabled));
             const value = shared(selectedBlocks().map(({ pos }) => {
                 const parent = editor.state.doc.resolve(pos + 1);
                 for (let depth = parent.depth; depth > 0; depth--) if (parent.node(depth).type.name === name) return true;
@@ -821,9 +890,244 @@ function mount(element, options) {
         symbols.appendChild(section);
     }
     toolbar.appendChild(symbols);
+
+    let tablePanel = null, tableToggle = null;
+    // Supervisor: every Table menu control asks for the context on every transaction. One answer per editor
+    // state keeps typing in a large table from serializing the document about twenty times per key.
+    let contextState = null, contextValue = null;
+    function tableContext() {
+        if (contextState !== editor.state) { contextValue = readTableContext(); contextState = editor.state; }
+        return { ...contextValue };
+    }
+    function readTableContext() {
+        const selection = editor.state.selection;
+        const anchor = selection.$anchorCell || selection.$from;
+        const topLevelIndex = anchor.index(0), doc = editor.getJSON();
+        const table = doc.content?.[topLevelIndex];
+        const context = { topLevelIndex, afterId: core.tableAfterId(doc, topLevelIndex) };
+        if (table?.type !== 'table') return context;
+        let cellId = selection.$anchorCell ? editor.state.doc.nodeAt(anchor.pos)?.attrs.id : null;
+        let cellPos = selection.$anchorCell ? anchor.pos : null;
+        for (let depth = anchor.depth; depth > 0 && !cellId; depth--) {
+            if (['tableCell', 'tableHeader'].includes(anchor.node(depth).type.name)) {
+                cellId = anchor.node(depth).attrs.id; cellPos = anchor.before(depth);
+            }
+        }
+        const grid = core.tableCells(table);
+        const entry = grid.cells.find(item => item.cell.attrs.id === cellId) || grid.cells[0];
+        const selected = [];
+        if (selection.$anchorCell && typeof selection.forEachCell === 'function')
+            selection.forEachCell(cell => selected.push(cell.attrs.id));
+        return { ...context, table, tableId: table.attrs.id, cellId: entry?.cell.attrs.id,
+            row: entry?.row || 0, column: entry?.column || 0, rowId: entry?.rowId,
+            columnId: table.attrs.columns[entry?.column || 0].id,
+            offset: cellPos == null ? 2 : Math.max(2, selection.from - cellPos),
+            cellIds: selected.length ? selected : entry ? [entry.cell.attrs.id] : [],
+            cellSelection: selected.length >= 2 };
+    }
+    function restoreCaret(caret) {
+        if (!caret) { editor.commands.focus('end'); return; }
+        const json = editor.getJSON();
+        const table = json.content?.find(node => node.type === 'table' && node.attrs.id === caret.tableId);
+        if (table) {
+            const { cells, grid } = core.tableCells(table);
+            const found = cells.find(item => item.cell.attrs.id === caret.cellId)
+                || grid[Math.min(caret.row || 0, grid.length - 1)]?.[Math.min(caret.column || 0, table.attrs.columns.length - 1)]
+                || cells[0];
+            let position = null;
+            editor.state.doc.descendants((node, pos) => {
+                if (node.attrs.id !== found?.cell.attrs.id) return;
+                const offset = Math.min(caret.offset || 2, node.nodeSize - 2);
+                const candidate = pos + Math.max(2, offset);
+                position = editor.state.doc.resolve(candidate).parent.inlineContent ? candidate : pos + 2;
+            });
+            if (position != null) { editor.commands.focus(position); return; }
+        }
+        // A deleted table leaves its nearest following paragraph, or the preceding block's end.
+        let position = 0;
+        const index = Math.min(caret.topLevelIndex || 0, editor.state.doc.childCount);
+        for (let i = 0; i < index; i++) position += editor.state.doc.child(i).nodeSize;
+        editor.commands.focus(Math.min(position, editor.state.doc.content.size));
+    }
+    function lockTableAction(locked) {
+        tableBusy = locked;
+        done.disabled = cancel.disabled = overwrite.disabled = discard.disabled = locked;
+        for (const control of toolbar.querySelectorAll('button,input,select')) control.disabled = locked;
+        editor.setEditable(!locked, false);
+        if (!locked) refreshControls();
+    }
+    async function runTableAction(build) {
+        if (tableBusy || saving || disposed || composing || editor.view.composing) return;
+        const caret = tableContext();
+        lockTableAction(true);
+        let fresh = null;
+        try {
+            if (dirty) {
+                // Use the existing save path, including conflict handling and teardown.
+                fresh = await save(false);
+                if (!fresh) return;
+            } else {
+                fresh = await options.read();
+                const current = options.findField(fresh);
+                if (!current || current.contentHash !== originalHash) {
+                    notice('This field changed elsewhere. Your draft is kept. Choose how to continue.', true);
+                    return;
+                }
+            }
+            const current = options.findField(fresh);
+            if (!current || core.readOnlyReason(current) || !fresh.documentationRichText
+                || !current.capabilities?.includes('replace_rich_text')) throw Error('This field is no longer editable.');
+            // New paragraph IDs are allocated by save; insertion uses the freshly stored top-level ID.
+            caret.afterId = core.tableAfterId(current.richText?.doc || {}, caret.topLevelIndex);
+            const operation = build(caret);
+            if (!disposed) message.textContent = 'Updating table...';
+            const response = await options.tableOperation(fresh, current, operation);
+            const identity = response.receipt?.operationResults?.[0]?.table;
+            if (operation.operation === 'create_table' && identity) Object.assign(caret, {
+                tableId: identity.tableId, cellId: identity.rows[0].cellIds[0], row: 0, column: 0, offset: 2 });
+            fresh = await options.read();
+            if (!disposed) close(false);
+            await options.remount(fresh, caret);
+        } catch (error) {
+            if (disposed && fresh) await options.remount(fresh, caret, error.message);
+            else if (!disposed) notice(error.message);
+        } finally {
+            if (!disposed) lockTableAction(false);
+        }
+    }
+    function tableAction(build) {
+        if (tableBusy) return;
+        tableFlight = runTableAction(build).catch(error => options.onError?.(error))
+            .finally(() => { tableFlight = null; });
+    }
+    if (allows('table') && capabilities.schemaVersions.includes(3)) {
+        tablePanel = document.createElement('div');
+        tablePanel.className = 'documentation-table-menu'; tablePanel.hidden = true;
+        tablePanel.setAttribute('role', 'dialog'); tablePanel.setAttribute('aria-label', 'Table menu');
+        tableToggle = button(toolbar, 'Table', () => {
+            if (tableBusy) return;
+            tablePanel.hidden = !tablePanel.hidden; symbols.hidden = true;
+            symbolToggle.setAttribute('aria-expanded', 'false');
+            tableToggle.setAttribute('aria-expanded', String(!tablePanel.hidden));
+            const rect = tableToggle.getBoundingClientRect();
+            tablePanel.style.top = Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - 450)) + 'px';
+            tablePanel.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 390)) + 'px';
+            refreshControls();
+            if (!tablePanel.hidden) rows.focus();
+        });
+        tableToggle.setAttribute('aria-expanded', 'false');
+        const title = document.createElement('strong'); title.textContent = 'Insert table'; tablePanel.appendChild(title);
+        function input(label, type, min, max, value) {
+            const wrapper = document.createElement('label'), control = document.createElement('input');
+            wrapper.textContent = label + ' '; control.type = type; control.setAttribute('aria-label', label);
+            if (min != null) { control.min = String(min); control.max = String(max); control.step = '1'; }
+            if (type === 'checkbox') control.checked = value; else control.value = String(value);
+            wrapper.appendChild(control); tablePanel.appendChild(wrapper); return control;
+        }
+        const rows = input('Rows', 'number', 1, 50, 3), columns = input('Columns', 'number', 1, 12, 3);
+        const header = input('Header row', 'checkbox', null, null, true);
+        button(tablePanel, 'Insert', () => {
+            if (!rows.checkValidity() || !columns.checkValidity() || !rows.value || !columns.value) {
+                notice('Enter 1-50 rows and 1-12 columns.'); return;
+            }
+            const count = Number(rows.value), width = Number(columns.value), headerRow = header.checked;
+            tableAction(context => ({ operation: 'create_table', rows: count, columns: width, headerRow,
+                ...(context.afterId ? { afterId: context.afterId } : {}) }));
+        }, 'insert-table');
+        const current = document.createElement('div'); current.className = 'documentation-table-current';
+        tablePanel.appendChild(current);
+        const modify = (action, fields = () => ({})) => tableAction(context => ({
+            operation: 'modify_table', tableId: context.tableId, action, ...fields(context) }));
+        function command(label, action, fields, enabled = context => Boolean(context.table)) {
+            const control = button(current, label, () => {
+                if (enabled(tableContext())) modify(action, fields);
+            });
+            stateControls.push(() => {
+                control.disabled = tableBusy || !enabled(tableContext());
+                control.setAttribute('aria-disabled', String(control.disabled));
+            });
+            return control;
+        }
+        for (const [label, action, position] of [
+            ['Insert row above', 'insert_row', 'before'], ['Insert row below', 'insert_row', 'after'],
+            ['Insert column left', 'insert_column', 'before'], ['Insert column right', 'insert_column', 'after']])
+            command(label, action, context => ({ [action === 'insert_row' ? 'rowId' : 'columnId']:
+                action === 'insert_row' ? context.rowId : context.columnId, position }));
+        command('Delete row', 'delete_row', context => ({ rowId: context.rowId }));
+        command('Delete column', 'delete_column', context => ({ columnId: context.columnId }));
+        command('Delete table', 'delete_table');
+        command('Merge cells', 'merge_cells', context => ({ cellIds: context.cellIds }),
+            context => context.cellSelection);
+        command('Split cell', 'split_cells', context => ({ cellIds: [context.cellId] }),
+            context => {
+                const cell = context.table && core.tableCells(context.table).cells.find(c => c.cell.attrs.id === context.cellId)?.cell;
+                return cell && ((cell.attrs.colspan || 1) > 1 || (cell.attrs.rowspan || 1) > 1);
+            });
+        function selectedCells(context) {
+            return context.table ? core.tableCells(context.table).cells.filter(c => context.cellIds.includes(c.cell.attrs.id)).map(c => c.cell) : [];
+        }
+        const headerCell = command('Header cell', 'set_cell_style', context => ({
+            cellIds: context.cellIds, style: { header: !selectedCells(context).every(cell => cell.type === 'tableHeader') } }));
+        stateControls.push(() => headerCell.setAttribute('aria-pressed',
+            String(selectedCells(tableContext()).length > 0 && selectedCells(tableContext()).every(c => c.type === 'tableHeader'))));
+        const fill = input('Fill', 'color', null, null, '#e9eef2');
+        current.appendChild(fill.parentElement);
+        const fillText = input('Fill hex', 'text', null, null, '');
+        current.appendChild(fillText.parentElement);
+        function applyFill(value) {
+            if (!/^#[0-9a-f]{6}$/i.test(value)) { notice('Enter a six-digit fill color such as #cceeff.'); return; }
+            modify('set_cell_style', context => ({ cellIds: context.cellIds, style: { fill: value.toLowerCase() } }));
+        }
+        listen(fill, 'change', () => applyFill(fill.value));
+        listen(fillText, 'change', () => applyFill(fillText.value));
+        stateControls.push(() => {
+            const cells = selectedCells(tableContext()), color = shared(cells.map(c => c.attrs.fill || null));
+            fill.disabled = fillText.disabled = tableBusy || !cells.length; fill.value = color || '#e9eef2';
+            if (document.activeElement !== fillText) fillText.value = color || '';
+        });
+        command('No fill', 'set_cell_style', context => ({ cellIds: context.cellIds, style: { fill: null } }));
+        for (const align of ['top', 'middle', 'bottom']) {
+            const control = command('Align ' + align, 'set_cell_style', context => ({
+                cellIds: context.cellIds, style: { verticalAlign: align } }));
+            stateControls.push(() => {
+                const cells = selectedCells(tableContext());
+                control.setAttribute('aria-pressed', String(cells.length > 0 && cells.every(c => (c.attrs.verticalAlign || 'top') === align)));
+            });
+        }
+        const borders = command('Borders', 'set_table_style', context => ({
+            style: context.table.attrs.style === 'grid' ? 'plain' : 'grid' }));
+        stateControls.push(() => borders.setAttribute('aria-pressed', String(tableContext().table?.attrs.style === 'grid')));
+        const percent = input('Column width', 'number', 1, 99, 33);
+        current.appendChild(percent.parentElement);
+        stateControls.push(() => {
+            const context = tableContext();
+            percent.disabled = tableBusy || !context.table;
+            if (document.activeElement !== percent) percent.value = context.table
+                ? String(Math.round(context.table.attrs.columns[context.column].width / 10)) : '';
+        });
+        command('Apply', 'set_widths', context => {
+            if (!percent.value || !percent.checkValidity()) throw Error('Enter a whole percent from 1 to 99.');
+            const widths = core.tableWidths(context.table.attrs.columns, context.columnId, Number(percent.value));
+            return { widths: context.table.attrs.columns.map((c, i) => ({ columnId: c.id, width: widths[i] })) };
+        });
+        command('Equal widths', 'set_widths', context => {
+            const widths = core.equalTableWidths(context.table.attrs.columns);
+            return { widths: context.table.attrs.columns.map((c, i) => ({ columnId: c.id, width: widths[i] })) };
+        });
+        stateControls.push(() => { current.hidden = !tableContext().table; });
+        toolbar.appendChild(tablePanel);
+    }
+
     for (const host of [element, panel, toolbar]) {
         listen(host, 'keydown', event => {
-            if (event.key === 'Escape') { event.preventDefault(); if (!saving) close(); }
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                if (tablePanel && !tablePanel.hidden) {
+                    tablePanel.hidden = true; tableToggle.setAttribute('aria-expanded', 'false'); editor.commands.focus();
+                } else if (!symbols.hidden) {
+                    symbols.hidden = true; symbolToggle.setAttribute('aria-expanded', 'false'); editor.commands.focus();
+                } else if (!saving && !tableBusy) close();
+            }
             event.stopPropagation();
         });
         listen(host, 'pointerdown', event => event.stopPropagation());
@@ -856,7 +1160,7 @@ function mount(element, options) {
         }
     });
     notice('Edit text, then choose Done.');
-    editor.commands.focus('end');
+    restoreCaret(options.restoreCaret);
     refreshControls();
     return controller;
 }

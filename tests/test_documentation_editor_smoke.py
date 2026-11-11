@@ -131,3 +131,22 @@ def test_p2b_only_the_checked_single_glyph_refusal_is_expected():
     report["phase"] = "P2b"
     report["expectedHttpFailures"][0]["error"] = "layout_overflow"
     assert not classify_failures(report)
+
+
+def test_p3b_only_the_checked_single_column_refusal_is_expected():
+    item = failure("/api/documentation/operations_and_maintenance_manual/MMLE-50D/tables", 422, "POST")
+    report = empty_report()
+    report.update(phase="P3b", httpFailures=[item], consoleErrors=[console_resource(item)],
+                  expectedHttpFailures=[{**item, "error": "table_column_too_narrow", "checked": True}])
+    assert classify_failures(report)
+    report["httpFailures"].append(deepcopy(item))
+    assert not classify_failures(report)
+    report["httpFailures"].pop()
+    for phase in ("P2b", "P3a"):
+        report["phase"] = phase
+        assert not classify_failures(report)
+    report["phase"] = "P3b"
+    report["expectedHttpFailures"][0]["checked"] = False
+    assert not classify_failures(report)
+    report["expectedHttpFailures"][0].update(checked=True, error="invalid_table_operation")
+    assert not classify_failures(report)

@@ -648,3 +648,83 @@ def test_a_table_past_the_box_bound_is_refused_as_a_table_with_advice():
     for cell in cells(big):
         cell["content"][0]["content"] = [{"type": "text", "text": "x" * 40}]
     refused("rich_text_too_large", lambda: rich.validate(big))
+
+
+# P3b-2 workspace adapter: the route delegates to the existing atomic table writer.
+def test_workspace_table_route_user_receipt_retry_and_one_undo(mmle_client, monkeypatch):
+    import server
+    monkeypatch.setenv(rich.FEATURE_FLAG, "on")
+    host = server._DocumentationAgentHost()
+    snapshot = host.document_snapshot("MMLE-50D", KIND)
+    state = snapshot["state"]
+    page = snapshot["document"]["pages"][0]["pageId"]
+    response = mmle_client.post("/api/operations-manual/MMLE-50D/documentation-scene/commands", json={
+        "baseRevision": state["sceneRevision"], "sourceRevision": state["sourceRevision"],
+        "manualPlanRevision": state["manualPlanRevision"], "operation": "add_object", "pageId": page,
+        "targetType": "document_object", "targetId": OBJECT,
+        "documentObject": {"objectId": OBJECT, "type": "text", "name": "Workspace table", "source": "user",
+            "content": "Plain pre-image", "frame": {"x": .1, "y": .2, "width": .75, "height": .5}}})
+    assert response.status_code == 200, response.text
+    snapshot = host.document_snapshot("MMLE-50D", KIND)
+    target = next(t for t in snapshot["targets"].values() if t["alias"] == OBJECT)
+    preimage = deepcopy(target)
+    state = snapshot["state"]
+    args = {key: state[key] for key in ("documentId", "sourceRevision", "manualPlanRevision", "sceneRevision")}
+    args.update(expectedRevision=state["revision"], requestId="workspace-table-create", operations=[{
+        "operation": "create_table", "targetId": target["targetId"],
+        "expectedContentHash": snapshot["hashes"][target["targetId"]], "rows": 3, "columns": 3, "headerRow": True}])
+    route = f"/api/documentation/{KIND}/MMLE-50D/tables"
+    response = mmle_client.post(route, json=args)
+    assert response.status_code == 200, response.text
+    result = response.json()
+    receipt = result["receipt"]
+    current = host.document_snapshot("MMLE-50D", KIND)
+    actual = current["targets"][target["targetId"]]["richField"]["richText"]
+    assert receipt["operationResults"][0]["table"] == tables.describe(table_of(actual))
+    assert receipt["revision"] == receipt["beforeRevision"] + 1
+    command = current["state"]["scene"]["commands"][-1]
+    assert command["actor"] == "user"
+    assert all(c["actor"] == "user" for c in command["commands"])
+    assert mmle_client.post(route, json=args).json()["receipt"] == receipt
+    # The wrapper must preserve the domain refusal, and not write a new scene revision.
+    bad = {key: current["state"][key] for key in ("documentId", "sourceRevision", "manualPlanRevision", "sceneRevision")}
+    bad.update(expectedRevision=current["state"]["revision"], requestId="workspace-table-refused", operations=[{
+        "operation": "modify_table", "targetId": target["targetId"],
+        "expectedContentHash": current["hashes"][target["targetId"]], "tableId": table_of(actual)["attrs"]["id"],
+        "action": "set_widths", "widths": [{"columnId": col["id"], "width": width}
+            for col, width in zip(table_of(actual)["attrs"]["columns"], [1, 499, 500])]}])
+    refused_response = mmle_client.post(route, json=bad)
+    assert refused_response.status_code != 200
+    assert refused_response.json()["error"] == "table_column_too_narrow"
+    assert host.document_snapshot("MMLE-50D", KIND)["state"]["scene"] == current["state"]["scene"]
+    monkeypatch.setenv(rich.FEATURE_FLAG, "off")
+    off = mmle_client.post(route, json={**bad, "requestId": "workspace-table-flag-off"})
+    assert off.status_code != 200
+    assert off.json()["error"] == "documentation_rich_text_disabled"
+    monkeypatch.setenv(rich.FEATURE_FLAG, "on")
+    host.undo_document_change("MMLE-50D", KIND, {"documentId": receipt["documentId"],
+        "changeId": receipt["changeId"], "expectedRevision": receipt["revision"], "requestId": "undo-workspace-table"})
+    restored = host.document_snapshot("MMLE-50D", KIND)["targets"][target["targetId"]]
+    assert canonical_bytes(restored["richField"]) == canonical_bytes(preimage["richField"])
+    assert restored["attributes"]["content"] == preimage["attributes"]["content"]
+
+
+def test_workspace_table_route_requires_exact_binding_and_only_table_operations(mmle_client, monkeypatch):
+    import server
+    called = []
+    monkeypatch.setattr(server._DocumentationAgentHost, "apply_document_edits", lambda *a, **kw: called.append((a, kw)))
+    valid = {"documentId": "document", "expectedRevision": 0, "requestId": "request", "sourceRevision": "source",
+        "manualPlanRevision": "plan", "sceneRevision": 0, "operations": [
+            {"operation": "create_table", "targetId": OBJECT, "expectedContentHash": "hash", "rows": 3, "columns": 3}]}
+    bad = [{k: v for k, v in valid.items() if k != missing} for missing in valid]
+    bad += [{**valid, "extra": True}, {**valid, "operations": []}, {**valid, "operations": valid["operations"] * 25},
+            {**valid, "operations": None}, {**valid, "operations": ["create_table"]}]
+    for operation in ("replace_text", "replace_rich_text", "replace_range", "format_range", "set_slot_value"):
+        bad.append({**valid, "operations": [{**valid["operations"][0], "operation": operation}]})
+    for missing in ("targetId", "expectedContentHash"):
+        bad.append({**valid, "operations": [{k: v for k, v in valid["operations"][0].items() if k != missing}]})
+    for body in bad:
+        response = mmle_client.post(f"/api/documentation/{KIND}/MMLE-50D/tables", json=body)
+        assert response.status_code != 200, body
+        assert response.json()["error"] == "invalid_document_operation", response.text
+    assert not called

@@ -169,3 +169,127 @@ heavy job at a time.
   changes go through the server operations.
 - P5a: structure-only read of a table for Sage; lazy load of the editor bundle (carried).
 - P4b: the operations DOCX header band covers the top of chapter headings in Word (carried).
+
+
+## P3b-2
+
+CHANGED
+
+- `static/documentation_rich_text.js`: capability-gated table extensions edit cell paragraphs using static colgroup/cell markup, `View: null` and no resizing. The transaction guard blocks structural/style changes. Tab stays inside the table; heading, named-style and list controls are disabled in cells.
+- `static/documentation_rich_text_core.js`: editor normalization preserves table/row/cell/column IDs, strips Tiptap defaults and allocates new paragraph IDs. Added signatures/guards, grid positions, insertion anchors and proportional/equal widths. Supported schema-3 fields are editable.
+- The Table menu follows Symbol and uses server operations for insertion, deletion, merging, splitting, header/fill/alignment/borders and widths. Fill has a native picker and a hex field. Save/conflict handling precedes operations; remount restores the caret by cell ID or grid position. A saved draft plus a table action are **two writes and two document undo steps**; editor Ctrl+Z history starts again after remount.
+- `server.py` and `static/index.html`: added the bound user `/tables` route, receipt-preserving transport retry and reload/remount wiring. CSS adds the menu, cell selection overlay and gap cursor. Changed static URLs are bumped.
+- Extended Node and pytest coverage for normalization, guards, the 200 width vectors, extension markup/keyboard behavior, route restrictions, user attribution, receipts, refusals and exact undo.
+- Added P3b smoke part 2 for real menu/keyboard interactions, 0.05 px mounted/static geometry, caret continuity, paste/width refusals, gap typing, undo/redo, exports and Sage interoperability. It records values/receipts and menu, selection, canvas and PDF PNGs.
+
+TESTS
+
+- Static checks only: Python AST parsing passed for four changed Python files; `node --check` passed for both changed static JS files and the Node test file; all four executable inline scripts in `index.html` compiled.
+- `git diff --check` passed. Written files use LF; added server/index lines are ASCII; the server UTF-8 BOM is preserved.
+- No runtime tests, browser measurements, exports, baselines or commits were run.
+
+NOT RUN
+
+Claude must run these in the equipped environment, using the hidden-process launcher on Windows:
+
+```text
+node --test tests/documentation*.test.cjs
+python -m pytest -q tests/test_documentation_tables.py tests/test_documentation_editor_smoke.py tests/test_documentation_rich_text.py tests/test_documentation_typography.py tests/test_documentation_rich_exports.py tests/test_documentation_search.py tests/test_documentation_rich_blocks.py
+python -m pytest -q tests/test_documentation_transactions.py tests/test_documentation_provenance.py tests/test_documentation_change_undo.py tests/test_documentation_refresh.py tests/test_documentation_store_chokepoint.py tests/test_documentation_conflicts_ui.py tests/test_codex_documentation_tools.py tests/test_codex_readonly_pilot.py tests/test_codex_assisted_tools.py
+python tools/documentation_baseline.py --check
+python tools/documentation_baseline.py --local --check
+python tests/smoke_documentation_editor.py --phase P1a
+python tests/smoke_documentation_editor.py --phase P1b
+python tests/smoke_documentation_editor.py --phase P1c
+python tests/smoke_documentation_editor.py --phase P2a
+python tests/smoke_documentation_editor.py --phase P2b
+python tests/smoke_documentation_editor.py --phase P3a
+python tests/smoke_documentation_editor.py --phase P3b
+python -c "import glob,sys,pytest; sys.exit(pytest.main(['-q']+sorted({p for pattern in ('tests/test_documentation*.py','tests/test_parts_manual*.py','tests/test_operations_manual*.py','tests/test_specification_sheet*.py','tests/test_work_instruction*.py','tests/test_inspection_sheet*.py') for p in glob.glob(pattern)})))"
+python -c "import glob,sys,pytest; sys.exit(pytest.main(['-q']+sorted({p for pattern in ('tests/test_codex*.py','tests/test_facility*.py','tests/test_authored*.py','tests/test_sage*.py','tests/test_industrial*.py') for p in glob.glob(pattern)})))"
+```
+
+Review the smoke PNGs and PDF crop, and render the DOCX in Word. The supplied width fixture remains unchanged and untracked for the supervisor to add.
+
+DEVIATIONS
+
+- Part 1's obsolete read-only assertion now checks that an unchanged table mounts and Escape makes no write. Its other proof steps remain; measurement is extracted for reuse by part 2.
+- No changes to `tables.py`, the table model, layout, exports, Sage tools, bundle or scene schema.
+
+OPEN QUESTIONS
+
+- Runtime acceptance is pending: width vectors, 0.05 px geometry, cell-selection drag, gap-cursor typing, remount focus, route/undo tests and browser exports have not been executed here.
+
+
+## P3b-2 supervisor gate
+
+Reviewed, fixed and gated by Claude on 2026-11-11 on the worktree (doc-editor at 4a15e6e plus this round). Codex
+built the round in 23 minutes and ran static checks only; every runtime gate below was run by the supervisor, one
+heavy job at a time.
+
+### Findings fixed by the supervisor
+
+1. Cost per key in a large table. The table guard serialized the document twice on every transaction, including
+   caret moves, and every Table menu control asked for the table context (a third serialization and a grid walk)
+   on every transaction: about twenty-five serializations per key. The guard now runs only when the document
+   changed, and the context is computed once per editor state.
+2. Smoke harness (written without a run).
+   - The table measurement took the text box's size from `offsetWidth`, a whole number. This round's box is
+     0.84 x 960 = 806.4 px wide, so the layout was made for 806 px and every column edge came out 1/8 px off the
+     real canvas (11 failed checks). It now reads the exact size from the element's style. The product was right.
+   - One step pressed Tab into the last cell, then Enter, and expected the cell's text to survive. Tab selects
+     the text of the cell it enters (see Accepted), so Enter replaced it. The step now checks that selection
+     (`p3b2_tab_selects_cell_text`), presses End and waits until the editor has registered the caret move.
+     Three short experiments on the same harness showed why the wait is needed: the editor learns of a native
+     caret move from the browser's selectionchange event, which arrives after the key; a key sent within the
+     same few milliseconds still acts on the old selection. End, Home and the arrows behave normally in every
+     cell once that event has arrived.
+   - Two checks passed a single node to `plain_text`, which takes a whole envelope (the fatal error of run 1).
+
+### Accepted
+
+- Tab and Shift+Tab select the text of the cell they enter, as Word does; typing replaces it. Tab in the last
+  cell does nothing (no new row, focus stays).
+- A table action on an unsaved draft is two steps in the document history: the text save, then the operation.
+  The workspace's Undo walks both. The editor's own Ctrl+Z history starts again after each table action,
+  because the editor is mounted again on the stored result.
+- From the keyboard a table can only keep its structure or go away whole. An edit that would change part of
+  it (a selection that crosses the table's edge and is deleted or typed over) is refused with the notice
+  "Use the Table menu to change rows, columns or cells." Editing and emptying cells is allowed, and so is
+  removing a whole table together with what is selected around it (select-all, then Delete).
+- A pasted HTML table is refused with its notice; plain text pastes as before.
+- Style, Bullets and Numbering are disabled inside a cell (cells hold paragraphs only).
+
+### Visual check
+
+- Real app, operations manual: the Table menu (insert form; the current table's actions appear with the caret
+  in a table), a two-cell selection with its tint, the table while typing, and the final table after the
+  whole sequence.
+- PDF region and a Word 16 render of the exported DOCX: the same table (header fill, rules, the two-paragraph
+  cell, the paragraph after the table).
+
+### Numbers
+
+- Node 307/307 (rich text 258, conflicts 18, search 20, tables 11).
+- Focused suite 1421 passed, none failed, on the final product code.
+- Smoke P3b (part 1 and part 2 in one run): run 1 stopped in part 2 with 103 of 115 checks passed (the rounded
+  box size, the Tab step and a misused helper); run 2 passed 168 of 169 (the Tab step again: the key after End
+  arrived before the editor had registered the caret move); run 3 169/169 on the final code.
+- Three short experiments on the smoke harness (the same server, browser and editor; about three minutes each)
+  logged the editor's selection after every key: End, Home and the arrows collapse a cell's selected text in
+  every cell; a caret move is registered on the browser's selectionchange event, some milliseconds after the
+  key.
+- Smokes P3a 194/194, P2b 36/36, P2a 23/23, P1a 27/27, P1b 46/46, P1c 35/35, each on its first run, alone.
+- Both baseline checks exit 0 (stores reopened unchanged).
+- Documentation suites 1478 passed plus the 1 pre-existing failure
+  (test_operations_manual_precoding_contracts::test_source_ids_references_and_local_hashes_are_closed).
+- Wide suites 170 failed / 9 errors / 3851 passed / 68 skipped: the same 179 failure IDs as at P3a-1, nothing new.
+- The product files were last written at 10:54, before the focused suite; the smoke file at 11:31, before
+  smoke run 3; every gate after that ran on that code.
+- A Word 16 render of the exported DOCX (42 pages) and the PDF region, checked against the canvas.
+
+### Notes for later rounds
+
+- P4a: measure page elements from their style or bounding box, never `offsetWidth`.
+- P5a: structure-only read of a table for Sage; lazy load of the editor bundle (carried).
+- P4b: the operations DOCX header band covers the top of chapter headings in Word (carried).

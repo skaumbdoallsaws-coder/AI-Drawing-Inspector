@@ -114,8 +114,30 @@
 .documentation-symbol-picker legend { font: 12px Arial, sans-serif; color: #b9cfdf; padding: 0 2px; }
 .documentation-symbol-picker button { font: 18px Arial, sans-serif; min-width: 30px; min-height: 30px; }
 
-/* Schema 3 static authored tables. The editor remains read-only this round. */
+/* Authored tables share one geometry contract in the canvas and the editor. */
 .documentation-rich-content table { border-collapse: collapse; table-layout: fixed; width: 100%; margin: 0; border-spacing: 0; }
 .documentation-rich-content td, .documentation-rich-content th { border: 1px solid #8a98a5; padding: 4px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
 .documentation-rich-content th { font-weight: 700; }
 .documentation-rich-content table[data-table-style=plain] td, .documentation-rich-content table[data-table-style=plain] th { border-color: transparent; }
+
+/* Cell selection and the gap cursor paint above the shared geometry. */
+.documentation-rich-editor :is(td, th) { position: relative; }
+.documentation-rich-editor .selectedCell::after {
+    content: ''; position: absolute; inset: 0; background: #248ed440; pointer-events: none; z-index: 2;
+}
+.documentation-rich-editor .tiptap { position: relative; }
+.documentation-rich-editor .ProseMirror-gapcursor { display: none; pointer-events: none; position: absolute; margin: 0; }
+.documentation-rich-editor .ProseMirror-gapcursor::after {
+    content: ''; display: block; position: absolute; top: -2px; width: 20px; border-top: 2px solid #1688d4;
+    animation: documentation-gap-blink 1.1s steps(2, start) infinite;
+}
+.documentation-rich-editor .ProseMirror-focused .ProseMirror-gapcursor { display: block; }
+@keyframes documentation-gap-blink { to { visibility: hidden; } }
+.documentation-table-menu {
+    position: fixed; z-index: 5001; width: 370px; max-height: min(440px, calc(100vh - 16px)); overflow: auto;
+    background: #122532; color: #eef6fc; padding: 8px; border: 1px solid #547083; border-radius: 4px;
+    box-shadow: 0 3px 10px #0005; display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+}
+.documentation-table-menu[hidden], .documentation-table-current[hidden] { display: none; }
+.documentation-table-menu strong { width: 100%; font: bold 13px Arial, sans-serif; }
+.documentation-table-current { display: flex; gap: 6px; flex-wrap: wrap; padding-top: 8px; border-top: 1px solid #547083; }

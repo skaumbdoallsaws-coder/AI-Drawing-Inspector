@@ -18734,6 +18734,28 @@ def documentation_text_ranges(document_type: str, assembly_number: str, body: Di
         return _documentation_value_error(error)
 
 
+@app.post("/api/documentation/{document_type}/{assembly_number}/tables")
+def documentation_text_tables(document_type: str, assembly_number: str, body: Dict[str, Any]):
+    """Workspace table actions use the same bound, atomic operations as Sage."""
+    try:
+        required = {"documentId", "expectedRevision", "requestId", "sourceRevision",
+                    "manualPlanRevision", "sceneRevision", "operations"}
+        operations = body.get("operations")
+        if (document_type not in _DocumentationAgentHost._TEXT_ROUTES or set(body) != required
+                or not isinstance(operations, list) or not 1 <= len(operations) <= 24
+                or any(not isinstance(op, dict) or op.get("operation") not in {"create_table", "modify_table"}
+                       or not isinstance(op.get("targetId"), str) or not op["targetId"]
+                       or not isinstance(op.get("expectedContentHash"), str) or not op["expectedContentHash"]
+                       for op in operations)):
+            raise DocumentEditError("invalid_document_operation", "Send the document binding and 1-24 table operations.")
+        documentation_operation_store(operations)
+        require_documentation_rich_text()
+        return {"success": True, **_DocumentationAgentHost().apply_document_edits(
+            assembly_number, document_type, body, actor="user")}
+    except DocumentEditError as error:
+        return _documentation_value_error(error)
+
+
 @app.get("/api/documentation/{document_type}/{assembly_number}/conflicts")
 def documentation_conflicts_get(document_type: str, assembly_number: str,
                                 start: int = Query(0, alias="from", ge=0), limit: int = Query(20, ge=1, le=100)):

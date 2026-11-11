@@ -39,6 +39,7 @@ venv/
 !tests/fixtures/skill_route_cases.json
 !tests/fixtures/rich_text_v2_vectors.json
 !tests/fixtures/documentation_table_row_heights.json
+!tests/fixtures/documentation_table_width_vectors.json
 !docs/agent-skills-phase0-baseline.json
 !docs/facility-layout-kf0-*.json
 !ai_inspector/agent_skills/schemas/*.json

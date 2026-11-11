@@ -12,11 +12,11 @@
     <link rel="stylesheet" href="/static/packaging_ribbon_icons.css">
     <script src="/static/documentation_commands.js?v=20261109-p1b-3"></script>
     <script src="/static/documentation_conflicts.js?v=20261110-p2a-1"></script>
-    <script src="/static/documentation_rich_text_core.js?v=20261111-p3b-1"></script>
+    <script src="/static/documentation_rich_text_core.js?v=20261111-p3b-2"></script>
     <script src="/static/documentation_symbols.js?v=20261111-p3a-4"></script>
     <script src="/static/documentation_search.js?v=20261111-p3a-4"></script>
-    <script type="module" src="/static/documentation_rich_text.js?v=20261111-p3b-1"></script>
-    <link rel="stylesheet" href="/static/documentation_rich_text.css?v=20261111-p3b-1">
+    <script type="module" src="/static/documentation_rich_text.js?v=20261111-p3b-2"></script>
+    <link rel="stylesheet" href="/static/documentation_rich_text.css?v=20261111-p3b-2">
     <script src="/static/cad_viewport.js"></script>
     <script>
         // Theme bootstrap — set data-theme BEFORE the stylesheet is parsed
@@ -39565,7 +39565,7 @@
             if (element) _documentationBeginInlineTextEdit(null, target, element);
         }
 
-        async function _documentationBeginRichEdit(target, element) {
+        async function _documentationBeginRichEdit(target, element, resume = {}) {
             const payload = _documentationPayload();
             const page = _documentationActivePage();
             const field = _documentationRichField(page?.pageId, target.targetId, payload);
@@ -39590,7 +39590,7 @@
                 && page.pageId === _documentationActivePage()?.pageId;
             if (field.richTextStyle) _documentationApplyElementStyle(element, field.richTextStyle);
             const controller = DocumentationRichText.mount(element, {
-                field, snapshot: payload, noticeHost: document.getElementById('documentationWorkspace'),
+                field, snapshot: payload, restoreCaret: resume.caret, noticeHost: document.getElementById('documentationWorkspace'),
                 boxStyle: field.richTextStyle || _documentationResolvedObjectStyle(page.documentationObjects[target.targetId]),
                 findField: snapshot => _documentationRichField(page.pageId, target.targetId, snapshot),
                 read: () => _partsManualApi(`${bound.apiBase}/documentation-scene`),
@@ -39611,6 +39611,30 @@
                         }),
                     });
                 },
+                tableOperation: (snapshot, current, operation) => {
+                    if (!stillHere()) throw new Error('The document or page changed.');
+                    const context = _documentationReviewHost().context();
+                    const binding = current.binding;
+                    const body = { documentId: binding.documentId, expectedRevision: current.revision,
+                        sourceRevision: binding.sourceRevision, manualPlanRevision: binding.manualPlanRevision,
+                        sceneRevision: snapshot.revision, requestId: crypto.randomUUID(),
+                        operations: [{ ...operation, targetId: current.targetId, expectedContentHash: current.contentHash }] };
+                    const send = () => _partsManualApi('/api/documentation/' + context.kind + '/'
+                        + encodeURIComponent(context.number) + '/tables', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                    // A transport retry uses the exact request ID and pre-image, never a second operation.
+                    return send().catch(error => { if (error.code) throw error; return send(); });
+                },
+                remount: async (snapshot, caret, message) => {
+                    if (!stillHere()) throw new Error('The document or page changed.');
+                    _documentationUpdatePayload(snapshot);
+                    _documentationRenderPublicationPage(_documentationActivePage());
+                    _documentationRenderPageRail();
+                    const next = document.querySelector('#documentationPublicationSurface [data-documentation-object-id="'
+                        + CSS.escape(target.targetId) + '"]');
+                    if (!next) throw new Error('The text box is no longer on this page.');
+                    await _documentationBeginRichEdit(target, next, { caret, message });
+                },
                 apply: snapshot => { if (bound.apiBase === _documentationApiBase()) _documentationUpdatePayload(snapshot); },
                 onClose: () => {
                     if (bound.apiBase !== _documentationApiBase()) return;
@@ -39624,7 +39648,8 @@
             });
             if (controller) {
                 _documentationSelectTarget(target, { silent: true });
-                controller.editor.commands.focus();
+                if (!resume.caret) controller.editor.commands.focus();
+                if (resume.message) controller.notice(resume.message);
             }
             return true;
         }

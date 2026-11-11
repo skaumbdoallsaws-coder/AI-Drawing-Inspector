@@ -78,16 +78,21 @@ def known_http_failure(failure):
 def classify_failures(report):
     """Keep all raw evidence, separating only the supervisor's known fixture gaps."""
     known_http, unexpected_http, known = [], [], []
-    expected = list(report.get("expectedHttpFailures", [])) if report.get("phase") == "P2b" else []
+    expected = list(report.get("expectedHttpFailures", [])) if report.get("phase") in {"P2b", "P3b"} else []
     for item in report["httpFailures"]:
         reason = known_http_failure(item)
-        proof = next((row for row in expected if row.get("error") == "unsupported_export_glyph"
+        proof = next((row for row in expected if report.get("phase") == "P2b" and row.get("error") == "unsupported_export_glyph"
                       and row.get("checked") is True and row.get("status") == item.get("status") == 422
                       and row.get("method") == item.get("method") == "POST" and row.get("url") == item.get("url")
                       and urlsplit(item["url"]).path == "/api/specification-sheet/MMLE-50D/pdf"), None)
+        if proof is None and report.get("phase") == "P3b":
+            proof = next((row for row in expected if row.get("error") == "table_column_too_narrow"
+                          and row.get("checked") is True and row.get("status") == item.get("status") == 422
+                          and row.get("method") == item.get("method") == "POST" and row.get("url") == item.get("url")
+                          and urlsplit(item["url"]).path == "/api/documentation/operations_and_maintenance_manual/MMLE-50D/tables"), None)
         if proof is not None:
             expected.remove(proof)  # Exactly one observed, checked proof refusal.
-            reason = "Expected unsupported_export_glyph proof refusal"
+            reason = "Expected " + proof["error"] + " proof refusal"
         if reason:
             known_http.append(item)
             known.append({"kind": "http", **item, "reason": reason})
@@ -2514,6 +2519,71 @@ def run_p3a_search(h, output, report, record, tool):
     write_json(output / "p3a4-comparison.json", report["p3a4Exports"])
 
 
+def measure_table_canvas(h, kind, key, page_id, output, record, stem):
+    """Shared static table geometry and per-cell typography proof (composition points)."""
+    import fitz
+    from ai_inspector.documentation.rich_layout import prepare_pdf_objects
+    snapshot = h.scene(kind)["document"]
+    box = h.box(key)
+    whole = box.evaluate(CANVAS_LINES_JS)
+    item = next(p for p in snapshot["pages"] if p["pageId"] == page_id)["documentationObjects"][key]
+    # Supervisor: offsetWidth is a whole number. A frame of .84 x 960 is 806.4 px, and a layout made for 806 px
+    # put every column 1/8 px off the real canvas. The element's own style holds the exact size.
+    exact = box.evaluate("box => [parseFloat(box.style.width), parseFloat(box.style.height)]")
+    size = (exact[0] / item["frame"]["width"], exact[1] / item["frame"]["height"])
+    plan = prepare_pdf_objects(fitz, snapshot, size, canvas_rounding=True)[page_id][key]
+    geometry = box.evaluate("""box => {
+        const bounds = box.getBoundingClientRect(), css = getComputedStyle(box);
+        const scale = bounds.width / parseFloat(css.width);
+        const left = bounds.left + (parseFloat(css.borderLeftWidth) + parseFloat(css.paddingLeft)) * scale;
+        const top = bounds.top + (parseFloat(css.borderTopWidth) + parseFloat(css.paddingTop)) * scale;
+        const rect = node => { const r = node.getBoundingClientRect(); return [
+            (r.left - left) / scale, (r.top - top) / scale, (r.right - left) / scale, (r.bottom - top) / scale]; };
+        const table = box.querySelector('table');
+        return {table: rect(table), columns: [...table.querySelectorAll('col')].map(rect),
+            rows: [...table.querySelectorAll('tr')].map(rect),
+            cells: [...table.querySelectorAll('td,th')].map(c => ({id:c.dataset.richId, box:rect(c)}))};
+    }""")
+    expected = plan.layout.tables[0]
+    x, y = plan.layout.frame[:2]
+    local = lambda rect: [rect[0] - x, rect[1] - y, rect[2] - x, rect[3] - y]
+    # Supervisor: 0.05 px. The table rules are measured Chromium facts to 1/64 px; one px would hide an error.
+    near = lambda a, b, tol=.05: len(a) == len(b) and all(abs(v - w) <= tol for v, w in zip(a, b))
+    record(stem + "_canvas_table_box", near(geometry["table"], local(expected.box))
+           and abs(whole["contentHeight"] - plan.layout.measured_height) <= .05,
+           {"canvas": geometry["table"], "layout": local(expected.box), "canvasHeight": whole["contentHeight"],
+            "layoutHeight": plan.layout.measured_height})
+    record(stem + "_canvas_column_edges", all(near([c[0], c[2]], [expected.column_edges[n] - x, expected.column_edges[n + 1] - x])
+        for n, c in enumerate(geometry["columns"])),
+        {"canvas": geometry["columns"], "layout": [edge - x for edge in expected.column_edges]})
+    record(stem + "_canvas_row_edges", all(near([r[1], r[3]], [expected.row_edges[n] - y, expected.row_edges[n + 1] - y])
+        for n, r in enumerate(geometry["rows"])),
+        {"canvas": geometry["rows"], "layout": [edge - y for edge in expected.row_edges]})
+    lines = {}
+    for number, cell in enumerate(geometry["cells"], 1):
+        cid = cell["id"]
+        actual = box.locator('[data-rich-id="' + cid + '"]').evaluate(CANVAS_LINES_JS)
+        element = box.locator('[data-rich-id="' + cid + '"]')
+        inset = element.evaluate("""node => {const s=getComputedStyle(node);return [
+            parseFloat(s.borderLeftWidth)+parseFloat(s.paddingLeft), parseFloat(s.borderTopWidth)+parseFloat(s.paddingTop)];}""")
+        expected_cell = expected.cells[cid]
+        want = [{"text": "".join(r.text for r in line.runs), "left": line.runs[0].x - x,
+                 "top": line.runs[0].rect[1] - y, "bottom": line.runs[0].rect[3] - y}
+                for line in expected_cell.layout.lines if line.runs]
+        got = [{"text": line["text"], "left": line["left"] + cell["box"][0] + inset[0],
+                "top": line["top"] + cell["box"][1] + inset[1], "bottom": line["bottom"] + cell["box"][1] + inset[1]}
+               for line in actual["lines"] if line["text"].strip()]
+        record(stem + "_canvas_cell_%02d" % number, near(cell["box"], local(expected_cell.box)) and len(got) == len(want)
+               and all(a["text"] == b["text"] and near([a[k] for k in ("left", "top", "bottom")],
+                   [b[k] for k in ("left", "top", "bottom")]) for a, b in zip(got, want)),
+               {"id": cid, "canvasBox": cell["box"], "layoutBox": local(expected_cell.box), "canvas": got, "layout": want})
+        lines[cid] = got
+    h.screenshot(stem + "-table")
+    box.screenshot(path=str(output / (stem + "-canvas-table.png")))
+    return {"geometry": geometry, "lines": lines}, snapshot, plan
+
+
+
 def run_p3b(page, request, server, output, report, record, begin_edit, tool, fresh_page):
     """P3b part 1: Sage-authored table, real canvas, workspace exports and undo."""
     from copy import deepcopy
@@ -2632,61 +2702,7 @@ def run_p3b(page, request, server, output, report, record, begin_edit, tool, fre
            and "table" in field["richTextCapabilities"]["features"])
 
     def measure(stem="p3b"):
-        snapshot = h.scene(kind)["document"]
-        box = h.box(key)
-        whole = box.evaluate(CANVAS_LINES_JS)
-        item = next(p for p in snapshot["pages"] if p["pageId"] == page_id)["documentationObjects"][key]
-        size = (whole["width"] / item["frame"]["width"], whole["height"] / item["frame"]["height"])
-        plan = prepare_pdf_objects(fitz, snapshot, size, canvas_rounding=True)[page_id][key]
-        geometry = box.evaluate("""box => {
-            const bounds = box.getBoundingClientRect(), css = getComputedStyle(box);
-            const scale = bounds.width / parseFloat(css.width);
-            const left = bounds.left + (parseFloat(css.borderLeftWidth) + parseFloat(css.paddingLeft)) * scale;
-            const top = bounds.top + (parseFloat(css.borderTopWidth) + parseFloat(css.paddingTop)) * scale;
-            const rect = node => { const r = node.getBoundingClientRect(); return [
-                (r.left - left) / scale, (r.top - top) / scale, (r.right - left) / scale, (r.bottom - top) / scale]; };
-            const table = box.querySelector('table');
-            return {table: rect(table), columns: [...table.querySelectorAll('col')].map(rect),
-                rows: [...table.querySelectorAll('tr')].map(rect),
-                cells: [...table.querySelectorAll('td,th')].map(c => ({id:c.dataset.richId, box:rect(c)}))};
-        }""")
-        expected = plan.layout.tables[0]
-        x, y = plan.layout.frame[:2]
-        local = lambda rect: [rect[0] - x, rect[1] - y, rect[2] - x, rect[3] - y]
-        # Supervisor: 0.05 px. The table rules are measured Chromium facts to 1/64 px; one px would hide an error.
-        near = lambda a, b, tol=.05: len(a) == len(b) and all(abs(v - w) <= tol for v, w in zip(a, b))
-        record(stem + "_canvas_table_box", near(geometry["table"], local(expected.box))
-               and abs(whole["contentHeight"] - plan.layout.measured_height) <= .05,
-               {"canvas": geometry["table"], "layout": local(expected.box), "canvasHeight": whole["contentHeight"],
-                "layoutHeight": plan.layout.measured_height})
-        record(stem + "_canvas_column_edges", all(near([c[0], c[2]], [expected.column_edges[n] - x, expected.column_edges[n + 1] - x])
-            for n, c in enumerate(geometry["columns"])),
-            {"canvas": geometry["columns"], "layout": [edge - x for edge in expected.column_edges]})
-        record(stem + "_canvas_row_edges", all(near([r[1], r[3]], [expected.row_edges[n] - y, expected.row_edges[n + 1] - y])
-            for n, r in enumerate(geometry["rows"])),
-            {"canvas": geometry["rows"], "layout": [edge - y for edge in expected.row_edges]})
-        lines = {}
-        for number, cell in enumerate(geometry["cells"], 1):
-            cid = cell["id"]
-            actual = box.locator('[data-rich-id="' + cid + '"]').evaluate(CANVAS_LINES_JS)
-            element = box.locator('[data-rich-id="' + cid + '"]')
-            inset = element.evaluate("""node => {const s=getComputedStyle(node);return [
-                parseFloat(s.borderLeftWidth)+parseFloat(s.paddingLeft), parseFloat(s.borderTopWidth)+parseFloat(s.paddingTop)];}""")
-            expected_cell = expected.cells[cid]
-            want = [{"text": "".join(r.text for r in line.runs), "left": line.runs[0].x - x,
-                     "top": line.runs[0].rect[1] - y, "bottom": line.runs[0].rect[3] - y}
-                    for line in expected_cell.layout.lines if line.runs]
-            got = [{"text": line["text"], "left": line["left"] + cell["box"][0] + inset[0],
-                    "top": line["top"] + cell["box"][1] + inset[1], "bottom": line["bottom"] + cell["box"][1] + inset[1]}
-                   for line in actual["lines"] if line["text"].strip()]
-            record(stem + "_canvas_cell_%02d" % number, near(cell["box"], local(expected_cell.box)) and len(got) == len(want)
-                   and all(a["text"] == b["text"] and near([a[k] for k in ("left", "top", "bottom")],
-                       [b[k] for k in ("left", "top", "bottom")]) for a, b in zip(got, want)),
-                   {"id": cid, "canvasBox": cell["box"], "layoutBox": local(expected_cell.box), "canvas": got, "layout": want})
-            lines[cid] = got
-        h.screenshot(stem + "-table")
-        box.screenshot(path=str(output / (stem + "-canvas-table.png")))
-        return {"geometry": geometry, "lines": lines}, snapshot, plan
+        return measure_table_canvas(h, kind, key, page_id, output, record, stem)
 
     measured, snapshot, plan = measure()
     shape = plan.layout.tables[0]
@@ -2717,17 +2733,12 @@ def run_p3b(page, request, server, output, report, record, begin_edit, tool, fre
     evidence["docx"] = compare_docx(artifacts["docx"], key, plan.layout.content)
     record("p3b_exports", docx_run_text(artifacts["docx"], key) == plain_text(value).replace("\n", ""))
     revision = h.scene(kind)["revision"]
-    # Supervisor: a schema-3 field must not open an editor, so wait for the notice (begin_edit otherwise waits for
-    # an editable element and gives up after three double presses).
-    h.begin_edit(h.box(key), read_only=True)
-    notice = "This text box contains a table. Tables cannot be edited here yet."
-    shown = page.locator(".documentation-rich-readonly").first
-    shown.wait_for(state="visible")
-    record("p3b_read_only", notice in shown.inner_text()
-           and page.evaluate("() => DocumentationRichText.mountedCount") == 0
-           and page.locator('[contenteditable="true"]').count() == 0
-           and h.scene(kind)["revision"] == revision and stored() == value, shown.inner_text())
-    h.screenshot("read-only")
+    # P3b-2 lifts the editor guard; entering and escaping unchanged still never writes.
+    editor = h.mount(key)
+    record("p3b_table_editor_enabled", page.evaluate("() => DocumentationRichText.mountedCount") == 1
+           and h.scene(kind)["revision"] == revision and stored() == value)
+    editor.press("Escape")
+    page.wait_for_function("() => DocumentationRichText.mountedCount === 0")
     with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/undo"), timeout=120000) as response:
         page.locator("#documentationUndoRibbon").click()
     response.value.finished()
@@ -2762,6 +2773,293 @@ def run_p3b(page, request, server, output, report, record, begin_edit, tool, fre
     h.idle()
     record("p3b_plain_style_undo", canonical_bytes(stored()) == canonical_bytes(value))
     write_json(output / "p3b-table.json", evidence)
+    run_p3b_editor(page, request, server, output, report, record, begin_edit, tool, fresh_page, key)
+
+
+
+def run_p3b_editor(page, request, server, output, report, record, begin_edit, tool, fresh_page, prior_key):
+    """Part 2: real pointer/keyboard input; editor API access below only reads state."""
+    from copy import deepcopy
+    from ai_inspector.documentation import tables
+    from ai_inspector.documentation.commands import canonical_bytes
+    from ai_inspector.documentation.rich_text import node_ids, plain_text
+    from tests.documentation_rich_export_support import compare_pdf, compare_docx
+
+    kind, key = "operations_and_maintenance_manual", "document-object-p3b-edit"
+    h = rich_browser_helpers(page, request, server, output, report, begin_edit, fresh_page, "P3b2")
+    before = h.scene(kind)
+    page_id = before["document"]["pages"][0]["pageId"]
+    # The prior proof is saved; keep this specimen unobscured in the isolated scene.
+    removed = request.post(h.base(kind) + "/documentation-scene/commands", data={
+        "baseRevision": before["revision"], "sourceRevision": before["scene"]["sourceRevision"],
+        "manualPlanRevision": before["scene"]["manualPlanRevision"], "operation": "remove_object",
+        "pageId": page_id, "targetType": "document_object", "targetId": prior_key}, timeout=120000)
+    assert removed.ok, removed.text()
+    removed.body()
+    h.create(kind, key, "Workspace table", frame={"x": .08, "y": .15, "width": .84, "height": .72},
+             style={"fontFamily": "Arial", "fontSize": 10})
+    page = h.open_document(kind, page_id, pointer_refresh=True)
+    h.mount(key)
+    proof = {"steps": []}
+    controls = page.locator(".documentation-rich-controls")
+    panel = page.get_by_role("dialog", name="Table menu", exact=True)
+
+    def stored():
+        return h.field(h.scene(kind), key).get("richText")
+
+    def table(value=None):
+        return next(n for n in (value or stored())["doc"]["content"] if n["type"] == "table")
+
+    def editor():
+        return page.locator('.documentation-rich-editor [contenteditable="true"]')
+
+    def caret():
+        return page.evaluate("""() => {
+            const s = DocumentationRichText.active.editor.state.selection;
+            for (let d = s.$from.depth; d > 0; d--) {
+                const n = s.$from.node(d);
+                if (['tableCell','tableHeader'].includes(n.type.name)) return n.attrs.id;
+            }
+            return null;
+        }""")
+
+    def cell(cid):
+        return editor().locator('[data-rich-id="' + cid + '"]')
+
+    def open_menu():
+        controls.get_by_role("button", name="Table", exact=True).click()
+        panel.wait_for(state="visible")
+
+    def close_menu():
+        panel.get_by_label("Rows", exact=True).press("Escape")
+        panel.wait_for(state="hidden")
+
+    def input_number(label, value):
+        control = panel.get_by_label(label, exact=True)
+        control.click(); control.press("Control+a"); page.keyboard.insert_text(str(value))
+        # Button pointer handling preserves the value; blur must not save a draft.
+        control.press("Tab")
+
+    def cell_text(node):
+        # Supervisor: plain_text takes a whole envelope; a cell is walked here.
+        return node.get("text", "") + "".join(cell_text(child) for child in node.get("content", []))
+
+    def action(label, name, configure=None):
+        preimage = deepcopy(stored())
+        open_menu()
+        if configure:
+            configure()
+        with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/tables"), timeout=120000) as response:
+            panel.get_by_role("button", name=label, exact=True).click()
+        response.value.finished()
+        result = response.value.json()
+        assert response.value.ok, result
+        page.wait_for_function("""() => DocumentationRichText.active && !DocumentationRichText.active.saving
+            && document.querySelector('.documentation-rich-editor [contenteditable="true"]')
+            && !document.querySelector('.documentation-table-menu:not([hidden])')""", timeout=120000)
+        # Focus is asynchronous in Tiptap; wait for the actual caret before sending the next physical key.
+        page.wait_for_function("() => document.activeElement?.classList.contains('tiptap')")
+        value = stored()
+        identity = result["receipt"]["operationResults"][0]["table"]
+        record("p3b2_" + name + "_receipt", identity == (tables.describe(table(value)) if identity else None),
+               {"receipt": result["receipt"], "caret": caret()})
+        proof["steps"].append({"name": name, "before": preimage, "after": value, "receipt": result["receipt"], "caret": caret()})
+        write_json(output / "p3b2-editor.json", proof)
+        return preimage, value, identity
+
+    open_menu()
+    record("p3b2_insert_defaults", panel.get_by_label("Rows", exact=True).input_value() == "3"
+           and panel.get_by_label("Columns", exact=True).input_value() == "3"
+           and panel.get_by_label("Header row", exact=True).is_checked())
+    h.screenshot("menu")
+    close_menu()
+    _, value, identity = action("Insert", "insert")
+    first = identity["rows"][0]["cellIds"][0]
+    record("p3b2_insert_focus_first_cell", caret() == first, caret())
+    for i in range(9):
+        page.keyboard.insert_text("Typed" + str(i + 1))
+        page.keyboard.press("Tab")
+    draft = page.evaluate("() => DocumentationRichText.active.editor.getJSON()")
+    draft_table = next(n for n in draft["content"] if n["type"] == "table")
+    record("p3b2_tab_last_no_row", len(draft_table["content"]) == 3
+           and caret() == identity["rows"][-1]["cellIds"][-1], draft_table)
+    page.keyboard.press("Shift+Tab")
+    record("p3b2_shift_tab_previous", caret() == identity["rows"][-1]["cellIds"][-2], caret())
+    page.keyboard.press("Tab")
+    # Supervisor: Tab selects the text of the cell it enters (as Word does), so typing would replace it.
+    record("p3b2_tab_selects_cell_text", page.evaluate("""() => {
+        const s = DocumentationRichText.active.editor.state;
+        return s.doc.textBetween(s.selection.from, s.selection.to);
+    }""") == "Typed9")
+    page.keyboard.press("End")
+    # The editor learns of a native caret move from the browser's selectionchange event, which arrives after the
+    # key. A key sent before it (only automation is that fast) would still act on the old selection.
+    page.wait_for_function("() => DocumentationRichText.active.editor.state.selection.empty")
+    page.keyboard.press("Enter"); page.keyboard.insert_text("Second paragraph")
+    record("p3b2_enter_in_cell", page.evaluate("""() => {
+        const doc = DocumentationRichText.active.editor.getJSON();
+        return doc.content.find(n=>n.type==='table').content.at(-1).content.at(-1).content.length;
+    }""") == 2)
+    h.finish()
+    value = stored()
+    record("p3b2_typed_text_and_ids", all("Typed" + str(i) in plain_text(value) for i in range(1, 10))
+           and tables.describe(table(value)) == identity, value)
+    measured, _, _ = measure_table_canvas(h, kind, key, page_id, output, record, "p3b2-typed")
+    # Compare cell boxes with the unchanged static view in composition points.
+    def cell_boxes():
+        return h.box(key).evaluate("""box => {
+            const bounds = box.getBoundingClientRect(), scale = bounds.width / parseFloat(getComputedStyle(box).width);
+            return [...box.querySelectorAll('td,th')].map(c => {const r=c.getBoundingClientRect();
+                return {id:c.dataset.richId, rect:[r.left-bounds.left,r.top-bounds.top,r.width,r.height].map(v=>v/scale)};});
+        }""")
+    static = cell_boxes()
+    h.mount(key)
+    mounted = cell_boxes()
+    record("p3b2_mount_geometry", len(static) == len(mounted) and all(a["id"] == b["id"]
+           and all(abs(x-y) <= .05 for x, y in zip(a["rect"], b["rect"])) for a, b in zip(static, mounted)),
+           {"static": static, "mounted": mounted})
+    cell(first).click()
+    for label in ("Style",):
+        record("p3b2_cell_disabled_" + label, controls.get_by_label(label, exact=True).get_attribute("aria-disabled") == "true")
+    for label in ("Bullets", "Numbering"):
+        record("p3b2_cell_disabled_" + label, controls.get_by_role("button", name=label, exact=True).get_attribute("aria-disabled") == "true")
+    # Drag across the first two cells: ProseMirror creates a real cell selection.
+    a = cell(first).bounding_box(); b = cell(identity["rows"][0]["cellIds"][1]).bounding_box()
+    page.mouse.move(a["x"] + 8, a["y"] + 8); page.mouse.down()
+    page.mouse.move(b["x"] + b["width"] - 8, b["y"] + b["height"] / 2, steps=12); page.mouse.up()
+    selected = page.evaluate("""() => {
+        const s=DocumentationRichText.active.editor.state.selection, ids=[];
+        if(s.$anchorCell && typeof s.forEachCell==='function') s.forEachCell(c=>ids.push(c.attrs.id));
+        return ids;
+    }""")
+    record("p3b2_cell_selection", selected == identity["rows"][0]["cellIds"][:2], selected)
+    h.screenshot("cell-selection")
+    _, value, _ = action("Merge cells", "merge")
+    record("p3b2_merge_focus", table(value)["content"][0]["content"][0]["attrs"].get("colspan") == 2
+           and caret() == first, {"cell": table(value)["content"][0]["content"][0], "caret": caret()})
+    page.keyboard.insert_text("Immediate")
+    record("p3b2_merge_typing_immediate", "Immediate" in editor().inner_text())
+    pre = deepcopy(stored())
+    _, value, _ = action("Insert row below", "insert_row")
+    # The saved draft and server operation have distinct history entries.
+    step = proof["steps"][-1]["receipt"]
+    record("p3b2_dirty_text_and_structure_two_steps", "Immediate" in plain_text(value)
+           and step["beforeRevision"] == proof["steps"][-2]["receipt"]["revision"] + 1
+           and node_ids(pre) < node_ids(value), step)
+    _, value, _ = action("Insert column right", "insert_column")
+    record("p3b2_insert_dimensions", len(table(value)["content"]) == 4 and len(table(value)["attrs"]["columns"]) == 4)
+    _, value, _ = action("Split cell", "split")
+    record("p3b2_split_content_anchor", caret() == first
+           and "Immediate" in cell_text(table(value)["content"][0]["content"][0])
+           and all(not c["attrs"].get("colspan") for c in table(value)["content"][0]["content"]))
+    _, value, _ = action("Header cell", "header")
+    record("p3b2_header_toggle", table(value)["content"][0]["content"][0]["type"] == "tableCell")
+    open_menu()
+    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/tables"), timeout=120000) as response:
+        fill = panel.get_by_label("Fill hex", exact=True)
+        fill.click(); fill.press("Control+a"); page.keyboard.insert_text("#cceeff"); fill.press("Tab")
+    response.value.finished(); assert response.value.ok, response.value.text()
+    page.wait_for_function("() => DocumentationRichText.active && !DocumentationRichText.active.saving && document.activeElement?.classList.contains('tiptap')")
+    record("p3b2_fill", table()["content"][0]["content"][0]["attrs"].get("fill") == "#cceeff")
+    _, value, _ = action("Align middle", "middle")
+    record("p3b2_middle", table(value)["content"][0]["content"][0]["attrs"].get("verticalAlign") == "middle")
+    _, value, _ = action("Borders", "plain")
+    record("p3b2_plain", table(value)["attrs"]["style"] == "plain")
+    _, value, _ = action("Borders", "grid")
+    record("p3b2_grid", table(value)["attrs"]["style"] == "grid")
+    columns_before = deepcopy(table()["attrs"]["columns"])
+    expected = [400, *tables._shares([c["width"] for c in columns_before[1:]], 600)]
+    _, value, _ = action("Apply", "width_40", lambda: input_number("Column width", 40))
+    record("p3b2_width_40", [c["width"] for c in table(value)["attrs"]["columns"]] == expected,
+           {"expected": expected, "columns": table(value)["attrs"]["columns"]})
+    _, value, _ = action("Equal widths", "equal")
+    record("p3b2_equal_widths", [c["width"] for c in table(value)["attrs"]["columns"]] == [250] * 4)
+    # A 1% column is below 12 pt in this frame. The checked refusal is the only expected HTTP failure.
+    saved = deepcopy(stored()); revision = h.scene(kind)["revision"]
+    open_menu(); input_number("Column width", 1)
+    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/tables"), timeout=120000) as response:
+        panel.get_by_role("button", name="Apply", exact=True).click()
+    response.value.finished(); error = response.value.json()
+    page.wait_for_function("() => DocumentationRichText.active && !DocumentationRichText.active.saving")
+    message = page.locator(".documentation-rich-message").inner_text()
+    checked = response.value.status == 422 and error.get("error") == "table_column_too_narrow"
+    report.setdefault("expectedHttpFailures", []).append({"url": response.value.url, "status": response.value.status,
+        "method": "POST", "error": error.get("error"), "checked": checked})
+    record("p3b2_server_refusal_keeps_editor", checked and bool(message) and stored() == saved
+           and h.scene(kind)["revision"] == revision and page.evaluate("() => DocumentationRichText.mountedCount") == 1,
+           {"response": error, "notice": message})
+    close_menu()
+    # Write an HTML clipboard payload, then use a real paste key; no editor commands.
+    page.context.grant_permissions(["clipboard-read", "clipboard-write"], origin=server.url)
+    page.evaluate("""async () => navigator.clipboard.write([new ClipboardItem({
+        'text/html':new Blob(['<table><tr><td>Foreign</td></tr></table>'],{type:'text/html'}),
+        'text/plain':new Blob(['Foreign'],{type:'text/plain'})})])""")
+    draft_before = page.evaluate("() => DocumentationRichText.active.editor.getJSON()")
+    page.keyboard.press("Control+v")
+    page.wait_for_function("() => document.querySelector('.documentation-rich-message')?.textContent === 'Tables cannot be pasted here. Use Table, Insert table.'")
+    record("p3b2_paste_refused", page.evaluate("() => DocumentationRichText.active.editor.getJSON()") == draft_before
+           and stored() == saved, page.locator(".documentation-rich-message").inner_text())
+    _, value, _ = action("Delete row", "delete_row")
+    record("p3b2_delete_row_count", len(table(value)["content"]) == 3)
+    _, value, _ = action("Delete column", "delete_column")
+    record("p3b2_delete_column_count", len(table(value)["attrs"]["columns"]) == 3)
+    # The final table has no trailing paragraph. Arrow out into the gap, then type there.
+    last_cell = table(value)["content"][-1]["content"][-1]["attrs"]["id"]
+    cell(last_cell).click()
+    page.keyboard.press("Control+End"); page.keyboard.press("ArrowDown")
+    gap = page.evaluate("() => DocumentationRichText.active.editor.state.selection.constructor.name")
+    page.keyboard.insert_text("After the table")
+    h.finish()
+    value = stored()
+    record("p3b2_type_after_final_table", value["doc"]["content"][-1]["type"] == "paragraph"
+           and cell_text(value["doc"]["content"][-1]) == "After the table", {"selection": gap, "value": value})
+    h.mount(key)
+    cell(table(value)["content"][0]["content"][0]["attrs"]["id"]).click()
+    pre_delete, deleted, _ = action("Delete table", "delete_table")
+    record("p3b2_delete_table", all(n["type"] != "table" for n in deleted["doc"]["content"]))
+    editor().press("Escape")
+    def history(which):
+        with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/" + which), timeout=120000) as response:
+            page.locator("#documentation" + which.title() + "Ribbon").click()
+        response.value.finished(); assert response.value.ok, response.value.text()
+        h.idle()
+    history("undo")
+    record("p3b2_undo_delete_exact", canonical_bytes(stored()) == canonical_bytes(pre_delete))
+    history("redo")
+    record("p3b2_redo_delete_exact", canonical_bytes(stored()) == canonical_bytes(deleted))
+    history("undo")  # Restore the authored table for export and the final Sage interoperability proof.
+    measured, snapshot, plan = measure_table_canvas(h, kind, key, page_id, output, record, "p3b2-final")
+    h.screenshot("final-table")
+    page.locator("#documentationCaptureAllRibbon").click(no_wait_after=True)
+    page.wait_for_function("""() => {
+        const figures=(window.__compareDbg.state.partsManualDocumentation?.document?.pages||[]).filter(p=>p.renderRequest);
+        return figures.length && figures.every(p=>p.renderRequest.image?.status==='ready')
+            && !document.querySelector('#documentationWorkspace.busy');
+    }""", timeout=240000)
+    artifacts = {}
+    for format in ("pdf", "docx"):
+        response, result = h.press_export(kind, format)
+        assert response.ok, result
+        artifacts[format] = h.download(result[format], "p3b2-table." + format)
+    proof["pdf"] = compare_pdf(artifacts["pdf"], h.scene(kind)["document"], page_id, key, output / "p3b2-pdf.png")
+    proof["docx"] = compare_docx(artifacts["docx"], key, plan.layout.content)
+    record("p3b2_exports", docx_run_text(artifacts["docx"], key) == plain_text(stored()).replace("\n", ""))
+    bound = tool("read_document_pages", {"documentType": kind, "targets": [{"pageId": page_id, "targetId": key}]})
+    assert bound.get("ok"), bound
+    field = bound["data"]["targets"][0]; before_sage = deepcopy(stored())
+    result = tool("apply_document_edits", {"documentId": bound["data"]["documentId"], "expectedRevision": field["revision"],
+        "requestId": "p3b2-sage", "operations": [{"operation": "modify_table", "targetId": field["targetId"],
+            "expectedContentHash": field["contentHash"], "tableId": table()["attrs"]["id"],
+            "action": "set_table_style", "style": "plain"}]})
+    assert result.get("ok"), result
+    value = stored()
+    record("p3b2_sage_keeps_ids_text", node_ids(value) == node_ids(before_sage) and plain_text(value) == plain_text(before_sage))
+    page = h.open_document(kind, page_id, pointer_refresh=True)
+    record("p3b2_reload_ids_content", canonical_bytes(stored()) == canonical_bytes(value), value)
+    reopened, _, _ = measure_table_canvas(h, kind, key, page_id, output, record, "p3b2-reopened")
+    record("p3b2_reloaded_geometry", same_canvas(measured, reopened))
+    proof["final"] = value
+    write_json(output / "p3b2-editor.json", proof)
 
 
 def main():

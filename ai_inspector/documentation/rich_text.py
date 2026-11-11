@@ -1,6 +1,6 @@
 """Versioned authored text. JSON is user data, never HTML or model instructions.
 
-Only content of scene-owned text objects can hold this envelope. Stored values
+Scene-owned text objects and approved generated-block overrides hold this envelope. Stored values
 are never repaired on read. The client allocates rt-<UUID> block/break IDs; text
 leaves and the document root have no identity (ProseMirror splits text leaves).
 """
@@ -295,10 +295,14 @@ def object_values(pages):
         for key, item in page.get("documentObjects", {}).items():
             if item.get("type") == "text":
                 yield page_id, key, item.get("content", "")
+        for key, override in page.get("pageElementOverrides", {}).items():
+            if "richText" in override:
+                yield page_id, key, override["richText"]
 
 
-def reserved_ids(pages, page_id, target_id):
-    return {identity for page, key, value in object_values(pages) if (page, key) != (page_id, target_id)
+def reserved_ids(pages, page_id, target_id, *, aliases=()):
+    excluded = {(page_id, target_id), *aliases}
+    return {identity for page, key, value in object_values(pages) if (page, key) not in excluded
             for identity in node_ids(value)}
 
 
@@ -380,6 +384,10 @@ def rich_targets(document):
         for objects in (page.get("documentationObjects", {}), composition.get("documentObjects", {})):
             for key, item in objects.items():
                 if item.get("type") == "text" and (is_rich(item.get("content")) or item.get("isRichText")):
+                    found[(page["pageId"], key)] = {"pageId": page["pageId"], "targetId": key}
+        for overrides in (page.get("identityOverrides", {}), composition.get("pageElementOverrides", {})):
+            for key, override in overrides.items():
+                if "richText" in override:
                     found[(page["pageId"], key)] = {"pageId": page["pageId"], "targetId": key}
     return list(found.values())
 

@@ -18914,13 +18914,18 @@ def _documentation_snapshot_payload(payload, document_type, *, identity_document
 
 
 def _documentation_editor_read(document, loaded, baseline):
-    if not any(item.get("type") == "text" for page in document.get("pages", [])
-               for item in page.get("documentationObjects", {}).values()):
+    from ai_inspector.documentation.targets import RICH_DOCUMENT_TYPES
+    # Parts manuals and specification sheets have no eligible generated blocks; without text objects they
+    # skip the snapshot as before P3a-3 (it cost every scene read about 10-15 ms; supervisor P3a-3).
+    if document.get("documentType") not in RICH_DOCUMENT_TYPES and not any(
+            item.get("type") == "text" for page in document.get("pages", [])
+            for item in page.get("documentationObjects", {}).values()):
         return {"documentationRichText": documentation_rich_text_enabled(), "richTextFields": []}
     snapshot = _documentation_snapshot_payload({**loaded, "document": document}, document["documentType"],
                                                 identity_document=baseline)
-    fields = [documentation_read_targets(snapshot["state"], snapshot["targets"], [{"targetId": key}], limit=None)["targets"][0]
-              for key, target in snapshot["targets"].items() if target["targetType"] == "document_object"]
+    requested = [{"targetId": key} for key, target in snapshot["targets"].items() if target.get("richField") is not None]
+    fields = (documentation_read_targets(snapshot["state"], snapshot["targets"], requested, limit=None, internal=True)["targets"]
+              if requested else [])
     return {"documentationRichText": documentation_rich_text_enabled(), "richTextFields": fields}
 
 
@@ -18932,6 +18937,8 @@ def _documentation_prepare_scene_command(document, loaded, command):
         snapshot = _documentation_snapshot_payload({**loaded, "document": document}, document["documentType"])
         from ai_inspector.documentation.targets import resolve_target
         target = resolve_target(snapshot["targets"], command["targetId"], command["pageId"])
+        from ai_inspector.documentation.refresh import assert_writable
+        assert_writable(snapshot["state"], [target["targetId"], target["attributes"].get("provenance", {}).get("targetId")])
         if not command.get("expectedContentHash"):
             raise DocumentEditError("document_read_required", "Read the complete field before replacing it.")
         if command["expectedContentHash"] != snapshot["hashes"][target["targetId"]]:

@@ -77,3 +77,22 @@
     background: #122532; color: #eef6fc; border: 1px solid #547083;
     box-shadow: 0 3px 10px #0005; padding: 6px;
 }
+
+/* Generated rich frames use the same inline contract, independent of the legacy block styles. */
+.documentation-rich-content { white-space: pre-wrap; }
+.documentation-rich-content ul, .documentation-rich-content ol { padding-inline-start: 40px; }
+.documentation-safety-copy .documentation-rich-content strong {
+    margin-right: 0; color: inherit; font-family: inherit; font-weight: 700;
+}
+/* Bold is exactly 700, as in the PDF and DOCX. The UA's strong is "bolder" (900 inside a 700 box), and on Windows
+   Arial weights above 700 resolve to Arial Black, a wider and taller face no export draws (supervisor P3a-3). */
+.documentation-rich-content strong { font-weight: 700; }
+.documentation-rich-content .documentation-rich-signal {
+    font-family: Arial; font-size: 10px; font-weight: 700; font-style: normal; color: #18212a;
+    margin-right: 3px; user-select: none; display: none;
+}
+.documentation-rich-content > p:first-child > .documentation-rich-signal,
+.documentation-rich-content > .tiptap > p:first-child > .documentation-rich-signal { display: inline; }
+.documentation-safety-copy:has(.documentation-rich-content) { min-width: 0; }
+.documentation-safety-copy .documentation-rich-editor,
+.documentation-safety-copy .documentation-rich-editor .tiptap { height: auto; }

@@ -333,6 +333,10 @@
         if (options.capabilities) requireCapabilities(result, options.capabilities);
         return result;
     }
+    function baseLineHeight(style = {}) {
+        const value = Number(style.baseLineHeight);
+        return Number.isFinite(value) && value > 0 ? value : 1.2;
+    }
     function editorDocument(value, { boxUnderline = false } = {}) {
         const doc = JSON.parse(JSON.stringify(value.doc));
         (function walk(node) {
@@ -361,5 +365,5 @@
         }
         return project(value.doc || value);
     }
-    return { FEATURES, SCHEMA2_FEATURES, NAMED_STYLES, PARAGRAPH_ATTRS, FULL_CAPABILITIES, usedFeatures, requireCapabilities, pasteFontFamily, pasteFontSize, paragraphValue, editorDocument, FONT_MAP, RENDER_MARKS, font, readOnlyReason, LIMITS, ID, IDENTIFIED, LINK, color, href, nodeIds, reservedIds, canonical, normalize, fromPlain, plainText };
+    return { baseLineHeight, FEATURES, SCHEMA2_FEATURES, NAMED_STYLES, PARAGRAPH_ATTRS, FULL_CAPABILITIES, usedFeatures, requireCapabilities, pasteFontFamily, pasteFontSize, paragraphValue, editorDocument, FONT_MAP, RENDER_MARKS, font, readOnlyReason, LIMITS, ID, IDENTIFIED, LINK, color, href, nodeIds, reservedIds, canonical, normalize, fromPlain, plainText };
 });

@@ -16,7 +16,7 @@ from .commands import DocumentEditError
 from .rich_text import from_plain, is_rich, validate
 from .rich_fonts import font as canvas_font, line_box, decoration, rounded_metrics, NAMED_STYLES, SCRIPT_SIZE, SUB_OFFSET, SUP_OFFSET
 
-PDF_RENDERER_VERSION = "authored-text-pdf-3"
+PDF_RENDERER_VERSION = "rich-text-pdf-4"
 # The PDF mirrors the canvas: documentation_rich_text.js render() inside a
 # .documentation-object.text box, where one page px is one PDF point. These are
 # that box's CSS and the browser defaults it relies on.
@@ -76,6 +76,7 @@ class Run:
     strike: bool = False
     script: str | None = None
     highlight: str | None = None
+    gap: float = 0  # Presentation-only notice gap; never stored in an envelope.
 
 
 @dataclass(frozen=True)
@@ -186,11 +187,15 @@ def content_model(value, style=None):
                 runs.append(run)
         paragraphs.append(Paragraph(kind, level, family, size * named.get("scale", HEADING_SCALE[level]), attrs.get("textAlign", align),
                                     path, marker, tuple(runs), attrs.get("indent", 0), attrs.get("spaceBefore", 0),
-                                    attrs.get("spaceAfter", 0), attrs.get("lineHeight", LINE_HEIGHT),
+                                    attrs.get("spaceAfter", 0), attrs.get("lineHeight", style.get("baseLineHeight") or LINE_HEIGHT),
                                     attrs.get("namedStyle"), paragraph_base))
 
     for node in envelope["doc"]["content"]:
         block(node)
+    if style.get("signalWord") and paragraphs:
+        first = paragraphs[0]
+        prefix = (replace(base, text=str(style["signalWord"]), bold=True), replace(base, kind="gap", text=" ", gap=3))
+        paragraphs[0] = replace(first, runs=prefix + first.runs)
     return Content(tuple(paragraphs), size, base)
 
 
@@ -338,6 +343,8 @@ def layout_text(value, frame, style=None, *, fitz_module=None, canvas_rounding=F
                          glyph_ascent, glyph_descent, family, shift, boxes, mark_ascent, mark_descent)
         if run.kind == "break":
             return [hard_break()]
+        if run.kind == "gap":
+            return [_Atom("\u00a0", run, primary, size, run.gap, 0, run.gap, glyph_ascent, glyph_descent, family, 0, boxes, mark_ascent, mark_descent)]
         result = []
         for char in unicodedata.normalize("NFC", run.text):
             if char == "\n":
@@ -416,6 +423,9 @@ def layout_text(value, frame, style=None, *, fitz_module=None, canvas_rounding=F
 
             def place(items, pen, **flags):
                 for atom in items:
+                    if atom.run.kind == "gap":
+                        pen += atom.advance
+                        continue
                     if not atom.text:
                         continue
                     shifted = baseline + atom.shift
@@ -429,7 +439,8 @@ def layout_text(value, frame, style=None, *, fitz_module=None, canvas_rounding=F
                         font_family=atom.family, strike=atom.run.strike, script=atom.run.script, highlight=atom.run.highlight,
                         highlight_rect=highlight_rect if atom.run.highlight else (), underline_offset=underline[0],
                         underline_width=underline[1], strike_offset=strike[0], strike_width=strike[1], **flags)
-                    if positioned and replace(positioned[-1], text="", width=0, rect=(), highlight_rect=(), x=0) == replace(run, text="", width=0, rect=(), highlight_rect=(), x=0):
+                    if (positioned and abs(positioned[-1].x + positioned[-1].width - pen) < _EPSILON
+                            and replace(positioned[-1], text="", width=0, rect=(), highlight_rect=(), x=0) == replace(run, text="", width=0, rect=(), highlight_rect=(), x=0)):
                         previous = positioned[-1]
                         positioned[-1] = replace(previous, text=previous.text + run.text, width=previous.width + run.width,
                             rect=(min(previous.rect[0], rect[0]), min(previous.rect[1], rect[1]),

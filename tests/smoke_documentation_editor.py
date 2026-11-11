@@ -833,7 +833,10 @@ def rich_select_word(page, editor, word):
     editor.evaluate("""(node, word) => {
         const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
         const nodes = []; let text = '', current;
-        while ((current = walker.nextNode())) { nodes.push({node:current, start:text.length}); text += current.textContent; }
+        while ((current = walker.nextNode())) {
+            if (current.parentElement.closest('[contenteditable="false"]')) continue;
+            nodes.push({node:current, start:text.length}); text += current.textContent;
+        }
         const start = text.indexOf(word), end = start + word.length;
         if (start < 0) throw new Error('Proof word is missing: ' + word);
         const first = nodes.find(item => start >= item.start && start < item.start + item.node.length);
@@ -876,7 +879,8 @@ def rich_browser_helpers(page, request, server, output, report, begin_edit, fres
     """Shared real scene/browser controls for P2a and P2b; no editor mocks."""
     from types import SimpleNamespace
     spec = "product_specification_sheet"
-    routes = {spec: "specification-sheet", DOC_TYPE: "parts-manual"}
+    routes = {spec: "specification-sheet", DOC_TYPE: "parts-manual",
+              "operations_and_maintenance_manual": "operations-manual", "work_instructions": "work-instructions"}
     object_id = "document-object-p2a"
     posts = []
 
@@ -936,16 +940,19 @@ def rich_browser_helpers(page, request, server, output, report, begin_edit, fres
                 return
         raise RuntimeError("Rich editor page activation did not settle")
 
-    def refresh():
+    def refresh(pointer=False):
         # Use the real ribbon callback without moving focus; this is the same reload
         # the Sage completion/poll paths perform while a user is still typing.
         with page.expect_response(lambda r: r.request.method == "GET" and r.url.endswith("/documentation-scene"), timeout=120000) as response:
-            page.locator("#documentationRefreshRibbon").evaluate("button => button.click()")
+            if pointer:
+                page.locator("#documentationRefreshRibbon").click()
+            else:
+                page.locator("#documentationRefreshRibbon").evaluate("button => button.click()")
         response.value.finished()
         idle()
         page.wait_for_function("() => window.__compareDbg.documentationGenerationSnapshot().visiblePageCount > 0", timeout=120000)
 
-    def open_document(kind, page_id):
+    def open_document(kind, page_id, *, pointer_refresh=False):
         nonlocal page
         page = fresh_page()
         page.on("request", observe)
@@ -956,16 +963,17 @@ def rich_browser_helpers(page, request, server, output, report, begin_edit, fres
         idle()
         if page.evaluate("() => window.__compareDbg.state.documentationDocumentType") != kind:
             switch(kind)
-        refresh()
+        refresh(pointer_refresh)
         navigate(page_id)
         report["workspaceOpens"].append({"phase": phase, "documentType": kind, "pageId": page_id})
         return page
 
-    def box(key=object_id):
-        return page.locator(f'#documentationPublicationSurface [data-documentation-object-id="{key}"]')
+    def box(key=object_id, *, generated=False):
+        attribute = "data-documentation-edit-target" if generated else "data-documentation-object-id"
+        return page.locator(f'#documentationPublicationSurface [{attribute}="{key}"]').first
 
-    def mount(key=object_id):
-        begin_edit(box(key))
+    def mount(key=object_id, *, generated=False):
+        begin_edit(box(key, generated=generated))
         page.wait_for_function("() => window.DocumentationRichText?.mountedCount === 1", timeout=30000)
         return page.locator('.documentation-rich-editor [contenteditable="true"]')
 
@@ -1285,7 +1293,7 @@ box => {
       const range = document.createRange();
       range.setStart(text, i); range.setEnd(text, i + length);
       const r = [...range.getClientRects()].pop();
-      if (!r) { i += length; continue; }
+      if (!r || (!r.width && !r.height)) { i += length; continue; }
       const glyph = local(r), baseline = glyph.top + metrics.ascent * size - shift;
       if (!current || block !== currentBlock || Math.abs(baseline - current.baseline) > tolerance) {
         current = {top: glyph.top, bottom: glyph.bottom, left: glyph.left, baseline, text: '', glyphs: []};
@@ -1314,10 +1322,22 @@ def canvas_matches_layout(snapshot, page_id, key, label, measured, record, page_
     import unicodedata
     from ai_inspector.documentation.rich_layout import TAB_SPACES, prepare_pdf_objects, authored_objects
     descriptor = next(p for p in snapshot["pages"] if p["pageId"] == page_id)
-    frame = next(row for row in authored_objects(descriptor) if row[0] == key)[1]["frame"]
-    if page_size is None:
-        page_size = (measured["width"] / frame["width"], measured["height"] / frame["height"])
-    plan = prepare_pdf_objects(fitz, snapshot, page_size)[page_id][key]
+    authored = next((row for row in authored_objects(descriptor) if row[0] == key), None)
+    if authored:
+        frame = authored[1]["frame"]
+        if page_size is None:
+            page_size = (measured["width"] / frame["width"], measured["height"] / frame["height"])
+        def prepare(rounding=False):
+            return prepare_pdf_objects(fitz, snapshot, page_size, canvas_rounding=rounding)[page_id][key]
+        expected_size = [frame["width"] * page_size[0], frame["height"] * page_size[1]]
+    else:
+        from ai_inspector.documentation.rich_blocks import prepare_pdf_blocks, content_frame, block_frame
+        block = next(b for b in descriptor["layoutBlocks"] if key in {b["blockId"], b.get("stableId")})
+        def prepare(rounding=False):
+            return prepare_pdf_blocks(fitz, snapshot, canvas_rounding=rounding)[page_id][block["blockId"]]
+        frame = content_frame(block, block_frame(snapshot, descriptor, block))
+        expected_size = [frame[2] - frame[0], prepare().layout.measured_height if block["blockType"] in {"note", "status_panel"} else frame[3] - frame[1]]
+    plan = prepare()
     inner = plan.layout.frame
     pdf = [{"text": "".join(r.text for r in runs), "left": runs[0].x - inner[0],
             "top": runs[0].rect[1] - inner[1], "bottom": runs[0].rect[3] - inner[1]}
@@ -1326,7 +1346,7 @@ def canvas_matches_layout(snapshot, page_id, key, label, measured, record, page_
                "left": row["left"], "top": row["top"], "bottom": row["bottom"]} for row in measured["lines"]]
     pdf = [row for row in pdf if row["text"].strip()]
     canvas = [row for row in canvas if row["text"].strip()]
-    box_size = [abs(measured["width"] - frame["width"] * page_size[0]), abs(measured["height"] - frame["height"] * page_size[1])]
+    box_size = [abs(measured["width"] - expected_size[0]), abs(measured["height"] - expected_size[1])]
     detail = {"canvas": canvas, "pdf": pdf, "boxSizeError": box_size,
               "contentHeight": {"canvas": measured["contentHeight"], "pdf": plan.layout.measured_height}}
     ok = (len(canvas) == len(pdf)
@@ -1336,9 +1356,10 @@ def canvas_matches_layout(snapshot, page_id, key, label, measured, record, page_
         # Vertical geometry is compared with the same layout rounded as Blink rounds at device scale 1 (whole-pixel
         # ascent/descent, LayoutUnit line heights, floored top half-leading; rich_fonts.line_box). The export itself is
         # unrounded, within about a pixel of every display scale; the checks above already bound it.
-        rounded = prepare_pdf_objects(fitz, snapshot, page_size, canvas_rounding=True)[page_id][key]
+        rounded = prepare(True)
         assert [len(line.runs) for line in rounded.layout.lines] == [len(line.runs) for line in plan.layout.lines]
         plan = rounded
+        inner = plan.layout.frame
         pdf = [{"text": "".join(r.text for r in runs), "top": runs[0].rect[1] - inner[1], "bottom": runs[0].rect[3] - inner[1]}
                for runs in ([r for r in line.runs if not r.marker] for line in plan.layout.lines) if runs]
         pdf = [row for row in pdf if row["text"].strip()]
@@ -1868,6 +1889,7 @@ def run_p3a(page, request, server, output, report, record, begin_edit, tool, fre
             record("p3a_only_one_run_" + key + "_" + format, len(before) == len(after) and changed == ([0] if key == keys[0] else []), changed)
     report["p3aComparison"] = (output / "p3a-comparison.json").relative_to(ROOT).as_posix()
     run_p3a_editor(page, h, page_id, keys, output, report, record, tool)
+    run_p3a_narrative(h, output, report, record, tool)
     report["p3aScenePosts"] = h.posts
 
 def run_p3a_editor(page, h, page_id, prior_keys, output, report, record, tool):
@@ -2122,6 +2144,177 @@ def run_p3a_editor(page, h, page_id, prior_keys, output, report, record, tool):
     record("p3a2_read_capabilities", read["data"]["targets"][0]["richTextCapabilities"] == {
         "schemaVersions": [1, 2], "features": list(FEATURES), "listDepth": 6})
     write_json(output / "p3a2-comparison.json", report["p3a2Exports"])
+
+
+def run_p3a_narrative(h, output, report, record, tool):
+    """Part 3: real generated blocks, native editor controls, captures and exports."""
+    from copy import deepcopy
+    from ai_inspector.documentation.commands import canonical_bytes
+    from ai_inspector.documentation.rich_text import from_plain, plain_text, validate
+    from ai_inspector.documentation.rich_layout import content_model
+    from ai_inspector.documentation.rich_blocks import base_style, effective_override
+    from tests.documentation_rich_export_support import compare_pdf, compare_docx
+
+    ops, wi = "operations_and_maintenance_manual", "work_instructions"
+    proofs = {}
+
+    def choose(kind, block_type):
+        document = h.scene(kind)["document"]
+        candidates = [(p, b) for p in document["pages"] for b in p.get("layoutBlocks", [])
+                      if (b.get("blockType") == block_type or block_type == "note" and b.get("blockType") == "status_panel")
+                      and b.get("text", b.get("caption", ""))]
+        # A list needs an extra 40 pt start indent; use a roomy generated frame, never resize the proof to conceal overflow.
+        return max(candidates, key=lambda pair: pair[1]["frame"]["width"] * pair[1]["frame"]["height"] /
+                   max(1, len(pair[1].get("text", pair[1].get("caption", "")))))
+
+    def capture():
+        page.locator("#documentationCaptureAllRibbon").click(no_wait_after=True)
+        page.wait_for_function("""() => {
+            const figures = (window.__compareDbg.state.partsManualDocumentation?.document?.pages || []).filter(p => p.renderRequest);
+            return figures.length && figures.every(p => p.renderRequest.image?.status === 'ready')
+                && !document.querySelector('#documentationWorkspace.busy');
+        }""", timeout=240000)
+
+    def field(kind, alias):
+        return h.field(h.scene(kind), alias)
+
+    def override(kind, alias):
+        snapshot = h.scene(kind)
+        row = h.field(snapshot, alias)
+        return next((p.get("pageElementOverrides", {}).get(row["targetId"]) for p in snapshot["scene"]["pages"].values()
+                     if row["targetId"] in p.get("pageElementOverrides", {})), None)
+
+    def color(label, value):
+        control = page.locator('.documentation-rich-controls').get_by_label(label, exact=True)
+        control.click(); control.press("Control+a"); page.keyboard.insert_text(value); control.press("Tab")
+        record("p3a3_" + label.replace(" ", "_"), control.input_value() == value)
+
+    chosen = {kind: choose(ops, kind) for kind in ("paragraph", "note", "cad_figure")}
+    before, after = {}, {}
+    for kind, (descriptor, block) in chosen.items():
+        alias = block["blockId"]
+        page = h.open_document(ops, descriptor["pageId"], pointer_refresh=True)
+        before[alias] = deepcopy(override(ops, alias))
+        current = field(ops, alias)
+        editor = h.mount(alias, generated=True)
+        controls = page.locator('.documentation-rich-controls')
+        record("p3a3_" + kind + "_no_style", controls.get_by_label("Style", exact=True).count() == 0)
+        if kind != "paragraph":
+            record("p3a3_" + kind + "_marks_only", all(controls.get_by_label(label, exact=True).count() == 0
+                for label in ("Font", "Size", "Space before", "Space after", "Line spacing")) and all(
+                controls.get_by_role("button", name=label, exact=True).count() == 0
+                for label in ("Bullets", "Numbering", "Align center", "Increase indent")))
+        word = re.search(r"[A-Za-z]+", current["text"]).group()
+        if kind == "note":
+            editor.press("Control+Home"); editor.press("Backspace")
+            stored_text = page.evaluate("() => DocumentationRichTextCore.plainText(DocumentationRichText.active.editor.getJSON())")
+            record("p3a3_signal_immutable", stored_text == current["text"]
+                   and editor.locator('.documentation-rich-signal:visible').inner_text() == current["richTextStyle"]["signalWord"])
+        rich_select_word(page, editor, word)
+        mark = "Italic" if kind == "note" else "Bold"
+        controls.get_by_role("button", name=mark, exact=True).click()
+        record("p3a3_" + kind + "_toggle", controls.get_by_role("button", name=mark, exact=True).get_attribute("aria-pressed") == "true")
+        if kind == "paragraph":
+            color("Text color", "#2468ac")
+            controls.get_by_role("button", name="Bullets", exact=True).click()
+            record("p3a3_paragraph_bullets", controls.get_by_role("button", name="Bullets", exact=True).get_attribute("aria-pressed") == "true")
+        if kind == "note":
+            color("Highlight color", "#ffee80")
+        h.screenshot("part3-" + kind + "-editor")
+        h.finish()
+        after[alias] = deepcopy(override(ops, alias))
+        record("p3a3_" + kind + "_projection", after[alias]["text"] == plain_text(after[alias]["richText"]))
+        read = tool("read_document_pages", {"documentType": ops, "targets": [{"pageId": descriptor["pageId"], "targetId": alias}]})
+        assert read.get("ok"), read
+        row = read["data"]["targets"][0]
+        record("p3a3_" + kind + "_read", row["richTextEligible"] and row["richText"] == after[alias]["richText"]
+               and row["richTextCapabilities"]["listDepth"] == (6 if kind == "paragraph" else 0)
+               and "heading" not in row["richTextCapabilities"]["features"])
+
+    def export_proofs(kind, selected, stem, *, capture_first=True):
+        artifacts = {}
+        if capture_first:
+            capture()
+        for format in ("pdf", "docx"):
+            response, result = h.press_export(kind, format)
+            assert response.ok, result
+            artifacts[format] = h.download(result[format], stem + "." + format)
+        snapshot = h.scene(kind)["document"]
+        for type_name, (descriptor, block) in selected.items():
+            h.navigate(descriptor["pageId"])
+            alias = block["blockId"]
+            current = field(kind, alias)
+            box = h.box(alias, generated=True)
+            measured = box.evaluate(CANVAS_LINES_JS)
+            name = stem + "-" + type_name
+            h.screenshot(name)
+            box.screenshot(path=str(output / (name + "-canvas.png")))
+            details = canvas_matches_layout(snapshot, descriptor["pageId"], alias, name + "-canvas", measured, record, typography=True)
+            pdf = compare_pdf(artifacts["pdf"], snapshot, descriptor["pageId"], alias, output / (name + "-pdf.png"))
+            docx = compare_docx(artifacts["docx"], current["targetId"], content_model(current["richText"], current["richTextStyle"]))
+            record(name + "-exports", True)
+            if type_name == "note":
+                record(name + "-signal-first", pdf["text"].startswith(current["richTextStyle"]["signalWord"]))
+            proofs[name] = {"canvas": details, "pdf": pdf, "docx": docx}
+            # Mounting the same stored envelope must not alter line wrapping or baselines.
+            editor = h.mount(alias, generated=True)
+            editing = h.box(alias, generated=True).evaluate(CANVAS_LINES_JS)
+            record(name + "-editor-static", len(measured["lines"]) == len(editing["lines"]) and all(
+                a["text"] == b["text"] and all(abs(a[k] - b[k]) <= 1 for k in ("left", "top", "bottom"))
+                for a, b in zip(measured["lines"], editing["lines"])), {"static": measured, "editor": editing})
+            editor.press("Escape")
+        return artifacts
+
+    export_proofs(ops, chosen, "p3a3-operations")
+    # Three independent document steps, in edit order and reverse edit order.
+    for direction, aliases, expected in (("undo", list(reversed(after)), before), ("redo", list(after), after)):
+        for alias in aliases:
+            with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/" + direction), timeout=120000) as response:
+                page.locator("#documentation" + direction.title() + "Ribbon").click()
+            response.value.finished(); assert response.value.ok, response.value.text()[:1000]
+            h.idle()
+            record("p3a3_" + direction + "_" + alias, canonical_bytes(override(ops, alias)) == canonical_bytes(expected[alias]))
+    for kind, (descriptor, block) in chosen.items():
+        page = h.open_document(ops, descriptor["pageId"], pointer_refresh=True)
+        record("p3a3_reopen_" + kind, override(ops, block["blockId"]) == after[block["blockId"]])
+        canvas_matches_layout(h.scene(ops)["document"], descriptor["pageId"], block["blockId"], "p3a3_reopen_canvas_" + kind,
+                              h.box(block["blockId"], generated=True).evaluate(CANVAS_LINES_JS), record, typography=True)
+
+    heading_page, heading = choose(ops, "heading")
+    page = h.open_document(ops, heading_page["pageId"], pointer_refresh=True)
+    read = tool("read_document_pages", {"documentType": ops, "targets": [{"pageId": heading_page["pageId"], "targetId": heading["blockId"]}]})
+    assert read.get("ok"), read
+    record("p3a3_heading_ineligible", not read["data"]["targets"][0].get("richTextEligible"))
+    heading_element = h.box(heading["blockId"], generated=True)
+    h.begin_edit(heading_element)
+    record("p3a3_heading_plain_editor", heading_element.get_attribute("contenteditable") == "true"
+           and page.locator('.documentation-rich-editor').count() == 0)
+    heading_element.fill("P3a plain heading proof")
+    record("p3a3_heading_plain_typing", heading_element.inner_text() == "P3a plain heading proof")
+    heading_element.press("Escape")
+
+    wi_page, wi_block = choose(wi, "paragraph")
+    page = h.open_document(wi, wi_page["pageId"], pointer_refresh=True)
+    capture()  # The following rich edit must reuse these real captures.
+    figures = {p["pageId"]: p.get("figureRevision") for p in h.scene(wi)["document"]["pages"] if p.get("renderRequest")}
+    read = tool("read_document_pages", {"documentType": wi, "targets": [{"pageId": wi_page["pageId"], "targetId": wi_block["blockId"]}]})
+    assert read.get("ok"), read
+    data, row = read["data"], read["data"]["targets"][0]
+    value = from_plain(row["text"])
+    leaf = next(c for c in value["doc"]["content"][0].get("content", []) if c["type"] == "text")
+    leaf["marks"] = [{"type": "bold"}, {"type": "textStyle", "attrs": {"color": "#2468ac"}}]
+    result = tool("apply_document_edits", {"documentId": data["documentId"], "expectedRevision": row["binding"]["revision"],
+        "requestId": "p3a3-wi-sage", "operations": [{"operation": "replace_rich_text", "targetId": row["targetId"],
+            "expectedContentHash": row["contentHash"], "richText": value}]})
+    assert result.get("ok"), result
+    page = h.open_document(wi, wi_page["pageId"], pointer_refresh=True)
+    current = h.scene(wi)
+    record("p3a3_wi_capture_reused", figures == {p["pageId"]: p.get("figureRevision") for p in current["document"]["pages"] if p.get("renderRequest")}
+           and all(p["renderRequest"]["image"].get("status") == "ready" for p in current["document"]["pages"] if p.get("renderRequest")))
+    record("p3a3_wi_sage_value", field(wi, wi_block["blockId"])["richText"] == validate(value))
+    export_proofs(wi, {"paragraph": (wi_page, wi_block)}, "p3a3-work-instructions", capture_first=False)
+    report["p3a3Exports"] = proofs
+    write_json(output / "p3a3-comparison.json", proofs)
 
 
 def main():
@@ -2387,7 +2580,7 @@ def main():
             reopened = get_scene()
             write_json(output / "reopened.json", reopened)
             page.screenshot(path=str(output / "reopened.png"), full_page=True)
-            record("scene_upgraded_in_place", reopened["scene"]["schemaVersion"] == 5
+            record("scene_upgraded_in_place", reopened["scene"]["schemaVersion"] == 6
                    and not (server.manual / "edit.json").exists())
             record("original_v2_bytes_retained", sha(server.manual / "documentation-scene.v2.json") == copied_scene_hash)
             record("manual_plan_unchanged", sha(server.manual / "manual-plan.json") == legacy_before["manual-plan.json"])

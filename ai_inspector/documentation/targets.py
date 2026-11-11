@@ -18,6 +18,21 @@ def target_id(state: Mapping[str, Any], page_id: str, alias: str) -> str:
     return str(uuid.uuid5(uuid.UUID(state["documentId"]), key))
 
 
+# The only generated-block eligibility table. Both stores and readers use it.
+RICH_BLOCK_KINDS = {"paragraph": "paragraph", "note": "notice", "status_panel": "notice", "cad_figure": "caption"}
+RICH_DOCUMENT_TYPES = {"operations_and_maintenance_manual", "work_instructions"}
+
+
+def rich_block_capabilities(document_type, block_type):
+    from .rich_text import FEATURES
+    kind = RICH_BLOCK_KINDS.get(block_type) if document_type in RICH_DOCUMENT_TYPES else None
+    if kind is None:
+        return None
+    features = ([name for name in FEATURES if name not in {"heading", "namedStyle"}] if kind == "paragraph" else
+                ["bold", "italic", "underline", "strike", "subscript", "superscript", "highlight", "color", "link"])
+    return {"schemaVersions": [1, 2], "features": features, "listDepth": 6 if kind == "paragraph" else 0}
+
+
 def text_targets(state: Mapping[str, Any], document: Mapping[str, Any]) -> dict[str, dict]:
     """Full values, including provenance/type attributes, never a shortened string."""
     result = {}
@@ -30,6 +45,8 @@ def text_targets(state: Mapping[str, Any], document: Mapping[str, Any]) -> dict[
         stable = entry["targetId"] if entry else (alias if target_type == "document_object" else target_id(state, page_id, alias))
         storage_id = stable if entry else alias
         override = ((state["scene"].get("pages") or {}).get("page-parts-index" if alias.startswith("part.") else page_id) or {}).get("pageElementOverrides", {}).get(alias, {})
+        stored_page = state.get("scene", {}).get("identities", {}).get(storage_id, {}).get("storagePage", page_id)
+        override = state["scene"].get("pages", {}).get(stored_page, {}).get("pageElementOverrides", {}).get(storage_id, override)
         override = page.get("identityOverrides", {}).get(stable, override)
         if kind == "replace_text" and "text" in override:
             value = override["text"]
@@ -41,15 +58,24 @@ def text_targets(state: Mapping[str, Any], document: Mapping[str, Any]) -> dict[
             attributes["sourceIds"] = list(meta.get("activeSourceIds") or [])
             attributes["activeEvidenceClaimIds"] = list(meta.get("activeClaimIds") or [])
             attributes["activeSourceIds"] = list(meta.get("activeSourceIds") or [])
-        rich = field_read(value, reserved=reserved_ids(state.get("scene", {}).get("pages", {}), page_id, alias)) if target_type == "document_object" else None
+        eligible = target_type == "document_object" or rich_block_capabilities(document.get("documentType"), attributes.get("blockType")) is not None
+        rich_value = value if target_type == "document_object" else override.get("richText", value)
+        storage_page = state.get("scene", {}).get("identities", {}).get(storage_id, {}).get("storagePage", page_id)
+        rich = field_read(rich_value, reserved=reserved_ids(state.get("scene", {}).get("pages", {}), storage_page, storage_id,
+            aliases=[(page_id, alias)] if target_type == "page_element" else ())) if eligible else None
+        if rich and target_type == "page_element":
+            from .rich_blocks import base_style
+            rich["richTextStyle"] = base_style(attributes, override)
+            if rich["richTextError"]:
+                rich["text"] = str(value or "")  # Keep the legacy projection visible, read-only.
         if rich and rich["isRichText"]:
             # Valid rich hashes cover the canonical envelope; corrupt values are
             # opaque read-only data, including JSON with an unpaired surrogate.
             attributes["content"] = (rich["richText"] if not rich["richTextError"] else
-                {"invalidRichText": json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"))})
+                {"invalidRichText": json.dumps(rich_value, ensure_ascii=True, sort_keys=True, separators=(",", ":"))})
         text = rich["text"] if rich else "" if value is None else str(value)
         descriptor = {"targetId": stable, "alias": alias, "pageId": page_id,
-                      "targetType": target_type, "storageId": storage_id, "text": text, "operation": kind,
+                      "targetType": target_type, "documentType": document.get("documentType"), "storageId": storage_id, "text": text, "operation": kind,
                       "attributes": deepcopy(attributes), "override": deepcopy(override),
                       "versionKey": alias if kind == "set_slot_value" else scene_field_key(page_id, target_type, storage_id),
                       "versionPage": page_id if kind == "replace_text" and not storage_id.startswith(("part.", "gen-")) else ""}
@@ -57,6 +83,8 @@ def text_targets(state: Mapping[str, Any], document: Mapping[str, Any]) -> dict[
             descriptor["richField"] = rich
             if rich["richTextError"]:
                 descriptor["operation"] = "read_only"
+                if "richText" in descriptor["override"]:
+                    descriptor["override"]["richText"] = attributes["content"]
         if stable in result:
             # Definition-keyed parts occur on multiple pages. Different effective
             # values are ambiguous, never selected by whichever page came last.
@@ -143,7 +171,7 @@ def hash_values(targets: Mapping[str, dict]) -> dict[str, dict]:
                 "pageId", "pageIds", "alias", "displayName", "frame", "itemNumber",
                 "displayText", "lines", "height", "continued", "rowContinuation"}}
         return value
-    return {key: semantic({field: value for field, value in target.items() if field not in {"targetId", "richField"}})
+    return {key: semantic({field: value for field, value in target.items() if field not in {"targetId", "richField", "documentType"}})
             for key, target in targets.items()}
 
 
@@ -175,15 +203,16 @@ def capabilities(target):
 
 
 def rich_text_capabilities(target):
-    """Authored text boxes only this round; no new narrative targets are admitted."""
     from .rich_text import FEATURES
-    if target.get("targetType") != "document_object" or target.get("richField") is None:
-        return None
-    return {"schemaVersions": [1, 2], "features": list(FEATURES), "listDepth": 6}
+    if target.get("targetType") == "document_object" and target.get("richField") is not None:
+        return {"schemaVersions": [1, 2], "features": list(FEATURES), "listDepth": 6}
+    if target.get("targetType") == "page_element":
+        return rich_block_capabilities(target.get("documentType"), target.get("attributes", {}).get("blockType"))
+    return None
 
 
-def read_targets(state: dict, targets: Mapping[str, dict], requested: list[dict], *, limit=65536) -> dict:
-    if not 1 <= len(requested) <= 12:
+def read_targets(state: dict, targets: Mapping[str, dict], requested: list[dict], *, limit=65536, internal=False) -> dict:
+    if not (1 <= len(requested) and (internal or len(requested) <= 12)):
         raise DocumentEditError("invalid_document_operation", "Read 1-12 targets at a time.")
     values = hash_values(targets)
     output = []
@@ -292,6 +321,8 @@ class ReadBindings:
             if operation["operation"] == "replace_rich_text":
                 from .rich_text import require_enabled
                 require_enabled()
+                if read.get("conflictIds"):
+                    raise DocumentEditError("manual_edit_conflict", "Resolve this target's open conflict first.", targetId=read["targetId"])
                 if operation["operation"] not in read.get("capabilities", []):
                     raise DocumentEditError("read_only_derived_field", "This read does not permit rich text replacement.")
             captured.append(read["binding"])

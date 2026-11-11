@@ -28,7 +28,7 @@ class OperationsManualExportError(RuntimeError):
 
 _SAFE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,180}$")
 _EXPORT_LOCK = threading.RLock()
-_DOCX_RENDERER_VERSION = "operations-docx-theme-v3"
+_DOCX_RENDERER_VERSION = "operations-docx-rich-v4"
 
 
 def _safe(value: Any, label: str) -> str:
@@ -186,6 +186,9 @@ def _edited_block(page: Mapping[str, Any], block: Mapping[str, Any]) -> Mapping[
 
 def _block_text(page: Mapping[str, Any], block: Mapping[str, Any]) -> str:
     override = _page_override(page, str(block.get("blockId") or ""))
+    if "richText" in override:
+        from ai_inspector.documentation.rich_text import plain_text
+        return plain_text(override["richText"])
     if "text" in override:
         return str(override.get("text") or "")
     return str(block.get("text") or "\n".join(block.get("lines") or []))
@@ -601,8 +604,13 @@ def _draw_block(
     document: Mapping[str, Any],
     root: str | Path,
     assembly_number: str,
+    rich_plan=None,
 ) -> None:
-    frame = _block_frame(descriptor, block, document)
+    if rich_plan is not None:
+        from ai_inspector.documentation.rich_blocks import block_frame
+        frame = block_frame(document, descriptor, block)
+    else:
+        frame = _block_frame(descriptor, block, document)
     rect = fitz.Rect(frame["x"], frame["y"], frame["x"] + frame["width"], frame["y"] + frame["height"])
     block = _edited_block(descriptor, block)
     block_type = str(block.get("blockType") or "")
@@ -615,7 +623,12 @@ def _draw_block(
     override = _page_override(descriptor, str(block.get("blockId") or ""))
     if isinstance(override.get("style"), Mapping):
         style.update(override["style"])
-    if block_type in {"table", "key_value_table"}:
+    if rich_plan is not None and block_type != "cad_figure":
+        from ai_inspector.documentation.rich_layout import draw_pdf_object
+        if block_type in {"note", "status_panel"}:
+            _draw_safety_symbol(fitz, page, rect, rich_plan.style["signalWord"])
+        draw_pdf_object(fitz, page, rich_plan)
+    elif block_type in {"table", "key_value_table"}:
         _draw_table(fitz, page, block, rect)
     elif block_type in {"list", "figure_legend"}:
         _draw_list(fitz, page, block, rect)
@@ -630,7 +643,11 @@ def _draw_block(
         page.draw_rect(image_rect, color=(0.76, 0.81, 0.84), fill=(1, 1, 1), width=0.55)
         page.insert_image(fitted, filename=str(image_path), keep_proportion=True)
         draw_balloon_manifest(fitz, page, fitted, image)
-        page.insert_textbox(fitz.Rect(rect.x0, rect.y1 - 16, rect.x1, rect.y1), str(block.get("caption") or ""), fontsize=6.5, fontname="helv", color=(0.35, 0.42, 0.47), align=fitz.TEXT_ALIGN_CENTER)
+        if rich_plan is not None:
+            from ai_inspector.documentation.rich_layout import draw_pdf_object
+            draw_pdf_object(fitz, page, rich_plan)
+        else:
+            page.insert_textbox(fitz.Rect(rect.x0, rect.y1 - 16, rect.x1, rect.y1), str(block.get("caption") or ""), fontsize=6.5, fontname="helv", color=(0.35, 0.42, 0.47), align=fitz.TEXT_ALIGN_CENTER)
     elif block_type in {"note", "status_panel", "draft_banner"}:
         _draw_note(fitz, page, block, rect, text)
     else:
@@ -683,6 +700,8 @@ def build_prototype_pdf_bytes(
     pages = [row for row in document.get("pages") or [] if isinstance(row, Mapping)]
     page_width, page_height, layout = _publication_page_geometry(document)
     text_plans = prepare_pdf_objects(fitz, document, (page_width, page_height))
+    from ai_inspector.documentation.rich_blocks import prepare_pdf_blocks
+    block_plans = prepare_pdf_blocks(fitz, document)
     pdf = fitz.open()
     for descriptor in pages:
         page = pdf.new_page(width=page_width, height=page_height)
@@ -745,7 +764,8 @@ def build_prototype_pdf_bytes(
             _draw_header_footer(fitz, page, descriptor, document)
         for block in descriptor.get("layoutBlocks") or []:
             if isinstance(block, Mapping):
-                _draw_block(fitz, page, descriptor, block, document, root, assembly_number)
+                _draw_block(fitz, page, descriptor, block, document, root, assembly_number,
+                            block_plans.get(descriptor["pageId"], {}).get(block.get("blockId")))
         draw_pdf_objects(fitz, page, descriptor, text_plans)
     toc = [[1, str(document.get("title") or "Operations and Maintenance Manual"), 1]]
     seen_sections: set[str] = set()
@@ -774,7 +794,7 @@ def build_prototype_pdf_bytes(
     })
     mark_pdf(pdf, document)
     from ai_inspector.documentation.rich_layout import finish_pdf_fonts
-    finish_pdf_fonts(pdf, text_plans)
+    finish_pdf_fonts(pdf, {**text_plans, **{key + ":blocks": value for key, value in block_plans.items()}})
     payload = pdf.tobytes(garbage=4, deflate=True)
     pdf.close()
     return payload
@@ -1133,7 +1153,9 @@ def build_prototype_docx_bytes(
         content_width_inches=content_width_inches,
     )
 
-    from ai_inspector.documentation.rich_docx import DocxObjects
+    from ai_inspector.documentation.rich_docx import DocxObjects, write_content
+    from ai_inspector.documentation.rich_layout import content_model
+    from ai_inspector.documentation.rich_blocks import rich_value, base_style, effective_override
     from ai_inspector.specification_sheet.exports import _docx_set_cell_border, _docx_clear_table_borders
     authored = DocxObjects(output, document, (page_width_pt, page_height_pt), shade_cell=_docx_cell_shading,
                            border_cell=_docx_set_cell_border, clear_borders=_docx_clear_table_borders)
@@ -1189,7 +1211,41 @@ def build_prototype_docx_bytes(
                 notice = output.add_paragraph((conflict_marker(block, EDITED_MARKER) + ". " if _marked(block) else "") + EDITED_LEGEND)
                 for run in notice.runs:
                     run.font.size = Pt(7)
-            if block_type in {"heading", "continuation_heading"}:
+            rich = rich_value(document, descriptor, block)
+            rich_style = base_style(block, effective_override(descriptor, block)) if rich is not None else None
+            rich_target = {"pageId": descriptor["pageId"], "targetId": block.get("stableId") or block.get("blockId", "")}
+            if rich is not None and block_type != "cad_figure":
+                first = None
+                if block_type in {"note", "status_panel"}:
+                    # Preserve the safety symbol in its own copy-column table, with native text beside it.
+                    table = output.add_table(rows=1, cols=2)
+                    table.autofit = False
+                    _docx_clear_table_borders(table)
+                    from docx.oxml.ns import qn
+                    from ai_inspector.documentation.rich_docx import _element
+                    borders = table._tbl.tblPr.find(qn("w:tblBorders"))
+                    table._tbl.tblPr.remove(borders)
+                    table._tbl.tblPr.find(qn("w:tblLayout")).addprevious(borders)
+                    for cell in table.rows[0].cells:
+                        margins = _element("w:tcMar")
+                        for edge in ("top", "left", "bottom", "right"):
+                            margins.append(_element("w:" + edge, w=40 if edge in {"top", "bottom"} else 0, type="dxa"))
+                        cell._tc.get_or_add_tcPr().append(margins)
+                    table.cell(0, 0).width = Pt(68)
+                    table.cell(0, 1).width = Pt(max(1, content_width_inches * 72 - 68))
+                    table.columns[0].width = Pt(68)
+                    table.columns[1].width = Pt(max(1, content_width_inches * 72 - 68))
+                    table.cell(0, 0).paragraphs[0].add_run().add_picture(
+                        io.BytesIO(_safety_symbol_png(rich_style["signalWord"])), width=Inches(.48))
+                    copy_cell = table.cell(0, 1)
+                    from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_ROW_HEIGHT_RULE
+                    table.rows[0].height = Pt(_block_frame(descriptor, block, document)["height"])
+                    table.rows[0].height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
+                    copy_cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+                    first = copy_cell.paragraphs[0]
+                write_content(output, content_model(rich, rich_style), rich_target,
+                              copy_cell.add_paragraph if first is not None else None, first=first, narrative=True)
+            elif block_type in {"heading", "continuation_heading"}:
                 level = 1 if float((block.get("style") or {}).get("fontSize") or 14) >= 18 else 2
                 output.add_heading(text, level=level)
             elif block_type in {"paragraph", "cover_kicker", "cover_title"}:
@@ -1294,10 +1350,13 @@ def build_prototype_docx_bytes(
                     )
                 else:
                     output.add_picture(str(image_path), width=Inches(figure_width))
-                caption = output.add_paragraph(str(block.get("caption") or ""))
-                caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                caption.runs[0].font.size = Pt(8)
-                caption.runs[0].font.italic = True
+                if rich is not None:
+                    write_content(output, content_model(rich, rich_style), rich_target, narrative=True)
+                else:
+                    caption = output.add_paragraph(str(block.get("caption") or ""))
+                    caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    caption.runs[0].font.size = Pt(8)
+                    caption.runs[0].font.italic = True
 
         authored.flush(descriptor["pageId"])
 
@@ -1346,7 +1405,8 @@ def _store_export(
         descriptor.update(artifact_metadata(document, _publication_page_geometry(document)[:2], 1.56 * 72))
     elif kind == "pdf":
         from ai_inspector.documentation.rich_layout import PDF_RENDERER_VERSION, has_text_objects
-        if has_text_objects(document):
+        from ai_inspector.documentation.rich_blocks import has_rich_blocks
+        if has_text_objects(document) or has_rich_blocks(document):
             descriptor["rendererVersion"] = PDF_RENDERER_VERSION
     _write_atomic(
         metadata_path,
@@ -1398,7 +1458,8 @@ def _cached_export(
         expected.update(artifact_metadata(document, _publication_page_geometry(document)[:2], 1.56 * 72))
     elif kind == "pdf":
         from ai_inspector.documentation.rich_layout import PDF_RENDERER_VERSION, has_text_objects
-        if has_text_objects(document):
+        from ai_inspector.documentation.rich_blocks import has_rich_blocks
+        if has_text_objects(document) or has_rich_blocks(document):
             expected["rendererVersion"] = PDF_RENDERER_VERSION
     if any(descriptor.get(key) != value for key, value in expected.items()):
         return None

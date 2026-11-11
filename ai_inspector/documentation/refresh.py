@@ -333,6 +333,8 @@ def refresh(state, document, *, refresh_id, actor, at, slots=False):
         field = "value" if slots or key.startswith("slot:") else "text"
         C = ({field: override["value" if slots else "text"]} if ("value" if slots else "text") in override
              else deepcopy((B or {}).get("payload", (N or {}).get("payload", {}))))
+        if "richText" in override:
+            C["richText"] = deepcopy(override["richText"])
         existing = next((c for c in conflicts if c.get("status", "open") == "open"
                          and key in {c.get("targetId"), c.get("previousTargetId")}), None)
         policy = three_way(B, C, N, revision_scoped=scoped)
@@ -364,7 +366,7 @@ def refresh(state, document, *, refresh_id, actor, at, slots=False):
             if policy == "adopted":
                 if slots:
                     return None, None
-                override = {k: deepcopy(v) for k, v in override.items() if k != "text"}
+                override = {k: deepcopy(v) for k, v in override.items() if k not in {"text", "richText"}}
                 if not override:
                     return None, None
         if new_key != key:

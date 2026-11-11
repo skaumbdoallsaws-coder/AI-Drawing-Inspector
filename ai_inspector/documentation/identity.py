@@ -542,6 +542,9 @@ def normalize_command(scene, command, page_targets):
             storage = scene.get("identities", {}).get(stable, {}).get("storagePage", original_page)
             result["pageId"] = storage
             targets.setdefault(storage, {}).setdefault("page_element", []).append(stable)
+            rich = targets.get(original_page, {}).get("richTextTargets", {}).get(stable) or targets.get(original_page, {}).get("richTextTargets", {}).get(alias)
+            if rich:
+                targets[storage].setdefault("richTextTargets", {})[stable] = rich
             for meta in result.get("fieldMeta", {}).values():
                 meta["pageId"] = storage
     return result, targets
@@ -549,6 +552,17 @@ def normalize_command(scene, command, page_targets):
 
 def editable_targets(document, targets):
     result = deepcopy(targets)
+    from .targets import rich_block_capabilities
+    for page in document.get("pages", []):
+        rich = result.setdefault(page["pageId"], {}).setdefault("richTextTargets", {})
+        for block in page.get("layoutBlocks", []):
+            if rich_block_capabilities(document.get("documentType"), block.get("blockType")):
+                descriptor = {"documentType": document["documentType"], "attributes": {"blockType": block["blockType"]}}
+                alias = block["blockId"]
+                rich[alias] = descriptor
+                entry = document.get("aliasMap", {}).get(page["pageId"], {}).get(alias)
+                if entry and entry.get("safe"):
+                    rich[entry["targetId"]] = descriptor
     for page, entries in document.get("aliasMap", {}).items():
         unresolved = {entry["targetId"] for entry in entries.values() if not entry.get("safe")}
         known = [key for key in result.get(page, {}).get("page_element", [])

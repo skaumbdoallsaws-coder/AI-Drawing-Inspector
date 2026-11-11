@@ -32,6 +32,17 @@ api.ready = import('/static/vendor/tiptap/tiptap.bundle.js?v=c36fd989775f').then
     return status;
 });
 
+function applyBoxStyle(element, style = {}) {
+    element.style.fontFamily = core.font(style.fontFamily).canvas;
+    for (const name of ['fontSize', 'fontStyle', 'color', 'textAlign']) {
+        if (style[name] != null) element.style[name] = String(style[name]) + (name === 'fontSize' ? 'px' : '');
+    }
+    // The exports draw a weight of 600 or more as bold (rich_layout content_model). Above 700, Windows Arial
+    // resolves to Arial Black, so the canvas uses the same two weights (supervisor P3a-3).
+    if (style.fontWeight != null) element.style.fontWeight = style.fontWeight === 'bold' || Number(style.fontWeight) >= 600 ? '700' : '400';
+    element.style.lineHeight = String(core.baseLineHeight(style));
+}
+
 // Only the validated read envelope is rendered here. No HTML strings or URL navigation.
 function render(element, envelope, boxStyle = {}) {
     const tags = { paragraph: 'p', bulletList: 'ul', orderedList: 'ol', listItem: 'li', hardBreak: 'br' };
@@ -40,7 +51,7 @@ function render(element, envelope, boxStyle = {}) {
     const root = document.createElement('div');
     root.className = 'documentation-rich-content';
     root.dataset.schemaVersion = String(envelope.schemaVersion);
-    root.style.fontFamily = core.font(boxStyle.fontFamily).canvas;
+    applyBoxStyle(root, boxStyle);
     function node(value) {
         if (value.type === 'text' || value.type === 'hardBreak') {
             let child = document.createElement(value.type === 'text' ? 'span' : 'br');
@@ -102,6 +113,13 @@ function render(element, envelope, boxStyle = {}) {
         return result;
     }
     for (const child of envelope.doc.content || []) root.appendChild(node(child));
+    if (boxStyle.signalWord && root.firstElementChild?.tagName === 'P') {
+        const signal = document.createElement('span');
+        signal.className = 'documentation-rich-signal';
+        signal.contentEditable = 'false';
+        signal.textContent = boxStyle.signalWord;
+        root.firstElementChild.prepend(signal);
+    }
     element.replaceChildren(root);
 }
 
@@ -117,7 +135,7 @@ function cssColor(value) {
     return result;
 }
 
-function extensions(capabilities, sink, toggleList, boxUnderline) {
+function extensions(capabilities, sink, toggleList, boxUnderline, signalWord) {
     const { Extension, Mark, StarterKit, TextStyle, Color, FontFamily, FontSize, Highlight, Subscript, Superscript, TextAlign } = kit;
     const allows = name => capabilities.features.includes(name);
     // Preserve the static renderer's outer link/color precedence. A presentation
@@ -127,6 +145,14 @@ function extensions(capabilities, sink, toggleList, boxUnderline) {
     const starter = StarterKit.extend({
         addExtensions() {
             return this.parent().map(extension => {
+                if (extension.name === 'paragraph' && signalWord) return extension.extend({
+                    // The signal belongs to the frame, outside ProseMirror's contentDOM. Backspace, selection,
+                    // copy and JSON serialization cannot edit it. CSS displays it on the first paragraph only.
+                    renderHTML({ HTMLAttributes }) { return ['p', HTMLAttributes,
+                        ['span', { class: 'documentation-rich-signal', contenteditable: 'false' }, signalWord],
+                        ['span', { 'data-rich-copy': '' }, 0]]; },
+                    parseHTML() { return [{ tag: 'p', contentElement: node => node.querySelector('[data-rich-copy]') || node }]; },
+                });
                 if (extension.type !== 'mark') return extension;
                 if (extension.name === 'link') return extension.extend({ priority: priorities.link,
                     renderHTML(args) {
@@ -244,7 +270,7 @@ function mount(element, options) {
     element.classList.add('documentation-rich-mounted');
     const editorHost = document.createElement('div');
     editorHost.className = 'documentation-rich-editor documentation-rich-content';
-    editorHost.style.fontFamily = core.font(options.boxStyle?.fontFamily).canvas;
+    applyBoxStyle(editorHost, options.boxStyle);
     element.appendChild(editorHost);
     const panel = document.createElement('div');
     panel.className = 'documentation-rich-panel';
@@ -304,7 +330,7 @@ function mount(element, options) {
         editor = new Editor({
             element: editorHost,
             enableCoreExtensions: { textDirection: false },
-            extensions: [...extensions(capabilities, () => changeIndent(1), toggleList, boxUnderline), identities],
+            extensions: [...extensions(capabilities, () => changeIndent(1), toggleList, boxUnderline, options.boxStyle?.signalWord), identities],
             content: core.editorDocument(field.richText || core.fromPlain(field.text), { boxUnderline }),
             parseOptions: { preserveWhitespace: 'full' },
             editorProps: {
@@ -674,12 +700,14 @@ function mount(element, options) {
         number(label, 0, 36, .5, value => paragraph(name, value || null), () => blockValue(name));
     }
     if (allows('lineHeight')) {
-        const spacing = select('Line spacing', ['1', '1.15', '1.2', '1.5', '2'].map(value => [value, value === '1.2' ? '1.2 (default)' : value]),
-            value => { if (value) paragraph('lineHeight', Number(value) === 1.2 ? null : Number(value)); },
+        const base = core.baseLineHeight(options.boxStyle);
+        const values = [...new Set([1, 1.15, 1.2, 1.5, 2, base])].sort((a, b) => a - b);
+        const spacing = select('Line spacing', values.map(value => [String(value), String(value) + (value === base ? ' (default)' : '')]),
+            value => { if (value) paragraph('lineHeight', Number(value) === base ? null : Number(value)); },
             () => {
                 const current = blockValue('lineHeight');
                 if (current != null && ![...spacing.options].some(option => option.value === String(current))) spacing.add(new Option(String(current), String(current)));
-                return current === null ? 1.2 : current;
+                return current === null ? base : current;
             });
     }
     function toggleList(command) {

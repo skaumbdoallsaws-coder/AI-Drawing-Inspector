@@ -223,7 +223,7 @@ def test_docx_no_outline_padding_and_explicit_link_color(tmp_path):
 def test_docx_cache_rebuilds_previously_dropped_plain_objects(tmp_path):
     document = attach(fixture_document("operations"), "Previously missing")
     result = ops.store_prototype_docx(tmp_path, NUMBER, document)
-    assert result["rendererVersion"] == "authored-text-docx-3"
+    assert result["rendererVersion"] == "rich-text-docx-4"
     metadata = next(tmp_path.rglob("review-docx.json"))
     old = json.loads(metadata.read_text("ascii"))
     old["rendererVersion"] = ops._DOCX_RENDERER_VERSION

@@ -144,6 +144,7 @@ def test_the_tool_set_is_exact_typed_and_closed():
         "top-level paragraphs only", "minimal version", "6 in schema 2"))
     reader = next(s for s in specs if s["name"] == "read_document_pages")
     assert "richTextCapabilities" in reader["description"]
+    assert all(name in batch["description"] for name in ("paragraph", "note", "status_panel", "cad_figure", "capabilities differ per target"))
     plain = next(s for s in specs if s["name"] == "edit_document_text")["input_schema"]
     assert plain["properties"]["edits"]["items"]["properties"]["wholeFieldReplacement"] == {"type": "boolean"}
     assert "product_specification_sheet" in plain["properties"]["documentType"]["enum"]

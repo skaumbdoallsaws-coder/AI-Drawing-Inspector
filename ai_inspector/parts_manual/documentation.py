@@ -44,7 +44,7 @@ from ai_inspector.documentation.rich_text import (
     reserved_ids as rich_reserved_ids, field_read as rich_field_read, guard_restored_fields,
 )
 
-DOCUMENTATION_SCENE_SCHEMA_VERSION = 5
+DOCUMENTATION_SCENE_SCHEMA_VERSION = 6
 DOCUMENTATION_TARGET_TYPES = frozenset(
     {
         "manual_group",
@@ -1043,6 +1043,10 @@ def _replay_target_command(
         if len(text) > _MAX_DOCUMENT_TEXT:
             raise DocumentationSceneError("documentation text is too long")
         current["text"] = text
+        current.pop("richText", None)
+    elif operation == "replace_rich_text":
+        current["richText"] = copy.deepcopy(command["richText"])
+        current["text"] = command.get("text", rich_field_read(current["richText"])["text"])
     elif operation == "update_style":
         style = dict(current.get("style") or {})
         style.update(_document_style(command.get("style"), allow_empty=False))
@@ -1294,7 +1298,7 @@ def _arrange_transforms(value: Any) -> list[Dict[str, Any]]:
 
 def _upgrade_documentation_scene(scene: Dict[str, Any]) -> Dict[str, Any]:
     schema_version = scene.get("schemaVersion")
-    if schema_version not in {1, 2, 3, 4, DOCUMENTATION_SCENE_SCHEMA_VERSION}:
+    if schema_version not in {1, 2, 3, 4, 5, DOCUMENTATION_SCENE_SCHEMA_VERSION}:
         raise DocumentationSceneError("unsupported documentation scene schema")
     commands = scene.get("commands")
     if not isinstance(commands, list):
@@ -1591,9 +1595,9 @@ class DocumentationSceneRepository:
         if path.is_file():
             original = path.read_bytes()
             old_version = json.loads(original).get("schemaVersion")
-            if old_version not in {1, 2, 3, 4, DOCUMENTATION_SCENE_SCHEMA_VERSION}:
+            if old_version not in {1, 2, 3, 4, 5, DOCUMENTATION_SCENE_SCHEMA_VERSION}:
                 raise DocumentEditError("unsupported_document_schema", "This scene needs a newer editor.")
-            if old_version in {1, 2, 3, 4}:
+            if old_version in {1, 2, 3, 4, 5}:
                 backup = path.with_name("documentation-scene.v" + str(max(2, old_version)) + ".json")
                 if backup.exists():
                     if backup.read_bytes() != original:
@@ -2300,21 +2304,26 @@ def apply_documentation_command_candidate(
     # must not depend on the current flag (undo and read retain stored values).
     rich_text = None
     current_object = scene.get("pages", {}).get(page_id, {}).get("documentObjects", {}).get(target_id, {})
-    current_value = current_object.get("content", "")
-    if target_type == "document_object" and current_object and is_rich(current_value):
+    current_override = scene.get("pages", {}).get(page_id, {}).get("pageElementOverrides", {}).get(target_id, {})
+    current_value = current_object.get("content", "") if target_type == "document_object" else current_override.get("richText", current_override.get("text", ""))
+    if target_type in {"document_object", "page_element"} and is_rich(current_value):
         status = rich_field_read(current_value, reserved=rich_reserved_ids(scene.get("pages", {}), page_id, target_id))
         if status["richTextError"]:
             raise DocumentEditError(status["richTextError"], "This stored rich field is read-only.", targetId=target_id)
         if operation == "update_text" and command.get("wholeFieldReplacement") is not True:
             raise DocumentEditError("rich_text_replacement_required", "Explicit whole-field replacement is required to remove rich formatting.", targetId=target_id)
     if operation == "replace_rich_text":
-        if target_type != "document_object" or current_object.get("type") != "text" or current_object.get("locked"):
-            raise DocumentEditError("read_only_derived_field", "Only an unlocked authored text object supports rich text.")
+        generated = page_targets.get(page_id, {}).get("richTextTargets", {}).get(target_id)
+        if not (target_type == "document_object" and current_object.get("type") == "text" and not current_object.get("locked")
+                or target_type == "page_element" and generated):
+            raise DocumentEditError("read_only_derived_field", "This target does not support rich text.")
         rich_text = validate_rich_text(command.get("richText"), reserved_ids=rich_reserved_ids(scene.get("pages", {}), page_id, target_id))
         from ai_inspector.documentation.targets import rich_text_capabilities
         from ai_inspector.documentation.rich_text import require_capabilities
         target = {"targetType": target_type, "targetId": target_id, "pageId": page_id,
                   "attributes": current_object, "richField": rich_field_read(current_value)}
+        if target_type == "page_element":
+            target.update(generated)
         require_capabilities(rich_text, rich_text_capabilities(target) or {},
                              targets=[{"pageId": page_id, "targetId": target_id}])
     document_object = None
@@ -2387,6 +2396,9 @@ def apply_documentation_command_candidate(
         persisted_command["documentObject"] = copy.deepcopy(document_object)
     if rich_text is not None:
         persisted_command["richText"] = rich_text
+        if target_type == "page_element":
+            from ai_inspector.documentation.rich_text import plain_text
+            persisted_command["text"] = plain_text(rich_text)
     if text is not None:
         persisted_command["text"] = text
         if is_rich(current_value):

@@ -79,6 +79,11 @@ def _source_ids(document, claims, supplied=()):
 def _value(page, alias, generated):
     override = (page.get("documentationComposition") or {}).get("pageElementOverrides", {}).get(alias, {})
     override = page.get("identityOverrides", {}).get(alias, override)
+    if "richText" in override:
+        from .rich_text import field_read
+        status = field_read(override["richText"])
+        if not status["richTextError"]:
+            return status["richText"]
     return override.get("text", generated)
 
 
@@ -319,8 +324,10 @@ def confirmation_command(target, *, by):
     # Reuse the existing text-history shape with the exact current value. The
     # metadata is the change; older scene-3 readers still understand this entry.
     alias = next(iter(target["values"]))
-    return {"operation": "update_text", "pageId": target["pageId"], "targetType": "page_element",
-            "targetId": alias, "text": target["values"][alias], "fieldMeta": {target["targetId"]: meta}}
+    from .rich_text import is_rich
+    value = target["values"][alias]
+    return {"operation": "replace_rich_text" if is_rich(value) else "update_text", "pageId": target["pageId"], "targetType": "page_element",
+            "targetId": alias, "richText" if is_rich(value) else "text": value, "fieldMeta": {target["targetId"]: meta}}
 
 
 def unconfirmed_targets(document):

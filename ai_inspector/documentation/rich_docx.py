@@ -6,7 +6,7 @@ from .commands import DocumentEditError
 from .rich_fonts import font
 from .rich_layout import authored_objects, content_model, PADDING, LIST_INDENT
 
-DOCX_RENDERER_VERSION = "authored-text-docx-3"
+DOCX_RENDERER_VERSION = "rich-text-docx-4"
 
 
 def font_family(value):
@@ -61,6 +61,9 @@ def _properties(run, paragraph):
     props.append(_element("w:u", val="single" if run.underline else "none"))
     if run.highlight:
         props.append(_element("w:shd", val="clear", color="auto", fill=run.highlight.lstrip("#").upper()))
+    if run.kind == "gap":
+        # Fit the native spacer run to exactly three points; ordinary character spacing rounds its added advance.
+        props.append(_element("w:fitText", val=round(run.gap * 20)))
     if run.script:
         # Word chooses its own script scale/offset; retain the authored nominal size.
         props.append(_element("w:vertAlign", val=run.script))
@@ -255,72 +258,102 @@ class DocxObjects:
             margins.append(_element("w:" + edge, w=round((PADDING + outline) * 20), type="dxa"))
         cell._tc.get_or_add_tcPr().append(margins)
         cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
-        for index, model in enumerate(item.content.paragraphs):
-            paragraph = cell.paragraphs[0] if index == 0 else cell.add_paragraph()
-            if model.named_style:
-                from docx.enum.style import WD_STYLE_TYPE
-                name = model.named_style.title()
-                if name not in self.output.styles:
-                    added = self.output.styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)
-                    added.base_style = self.output.styles["Normal"]
-                paragraph.style = self.output.styles[name]
-            elif model.heading_level:
-                paragraph.style = self.output.styles[f"Heading {model.heading_level}"]
-            fmt = paragraph.paragraph_format
-            fmt.space_before = Pt(model.space_before)
-            fmt.space_after = Pt(model.space_after)
-            fmt.keep_with_next = fmt.keep_together = fmt.widow_control = False
-            props = paragraph._p.get_or_add_pPr()
-            spacing = props.find(qn("w:spacing"))
-            spacing.set(qn("w:line"), str(round(model.line_height * model.font_size * 20)))
-            spacing.set(qn("w:lineRule"), "atLeast")
-            # A paragraph's own textAlign wins over the box's justify, as on the canvas (content_model keeps "justify").
-            align = "both" if model.align == "justify" else model.align
-            props.append(_element("w:jc", val=align))
-            if model.list_path:
-                depth = len(model.list_path)
-                if model.marker is not None:
-                    number = self.numbering.number((item.target["pageId"], item.target["targetId"]), model.list_path[-1],
-                                                   depth, marker_gap(model))
-                    numpr = props.get_or_add_numPr()
-                    numpr.append(_element("w:ilvl", val=depth - 1))
-                    numpr.append(_element("w:numId", val=number))
-                # Continuations retain the text start but have no numbering.
-                indent = props.get_or_add_ind()
-                indent.set(qn("w:left"), str(round((LIST_INDENT * depth + model.indent) * 20)))
-                indent.set(qn("w:hanging"), str(round(model.indent * 20) + marker_gap(model)) if model.marker is not None else "0")
-                if model.indent and model.marker is not None:
-                    # Numbering positions the outside marker at the li start, not the indented paragraph. Word starts the
-                    # text at the first tab stop after the number, and the level's own list tab (at the li start, see
-                    # _Numbering) comes first: clear it so the text starts at the indent (Word 16 render, P3a-1 gate).
-                    tabs = props.get_or_add_tabs()
-                    tabs.append(_element("w:tab", val="clear", pos=round(LIST_INDENT * depth * 20)))
-                    tabs.append(_element("w:tab", val="num", pos=round((LIST_INDENT * depth + model.indent) * 20)))
-            elif model.indent:
-                props.get_or_add_ind().set(qn("w:left"), str(round(model.indent * 20)))
-            if model.named_style:
-                # The template's Title style draws a bottom border and its contextual spacing drops the space between
-                # two Title paragraphs; the canvas has neither (supervisor P3a-2). Direct formatting turns both off.
-                borders = _element("w:pBdr")
-                for side in ("top", "left", "bottom", "right", "between", "bar"):
-                    borders.append(_element("w:" + side, val="nil"))
-                props.insert_element_before(borders, *_PPR_ORDER[_PPR_ORDER.index("w:pBdr") + 1:])
-                props.insert_element_before(_element("w:contextualSpacing", val=0),
-                                            *_PPR_ORDER[_PPR_ORDER.index("w:contextualSpacing") + 1:])
-            base = model.base_run or replace(item.content.base_run, bold=item.content.base_run.bold or bool(model.heading_level))
-            props.append(_properties(base, model))
-            for run, kind, value in tokens(model):
-                element = _element("w:r")
-                element.append(_properties(run, model))
-                leaf = _element("w:" + kind)
-                if kind == "t":
-                    leaf.set(qn("xml:space"), "preserve")
-                    leaf.text = value  # No NFC or glyph filtering in DOCX.
-                element.append(leaf)
-                if run.href:
-                    link = _element("w:hyperlink")
-                    link.set(qn("r:id"), paragraph.part.relate_to(run.href, RT.HYPERLINK, is_external=True))
-                    link.append(element)
-                    paragraph._p.append(link)
-                else:
-                    paragraph._p.append(element)
+        write_content(self.output, item.content, item.target, cell.add_paragraph,
+                      first=cell.paragraphs[0], numbering=self.numbering)
+
+
+def narrative_bookmark(target):
+    import hashlib
+    return "rich_" + hashlib.sha256(str(target).encode("utf-8")).hexdigest()[:24]
+
+
+def write_content(output, content, target, add_paragraph=None, *, first=None, numbering=None, narrative=False):
+    """Native paragraphs in the caller's flow (or an authored object's existing cell)."""
+    from dataclasses import replace
+    from docx.oxml.ns import qn
+    from docx.opc.constants import RELATIONSHIP_TYPE as RT
+    from docx.shared import Pt
+    add_paragraph = add_paragraph or output.add_paragraph
+    numbering = numbering or _Numbering(output)
+    invalid = sorted({ord(c) for p in content.paragraphs for r in p.runs for c in r.text
+                      if ord(c) < 32 and c not in "\t\n\r" or ord(c) in {0xfffe, 0xffff}})
+    if invalid:
+        raise DocumentEditError("unsupported_export_character", "DOCX XML cannot represent these characters.",
+                                targets=[target], codePoints=[f"U+{c:04X}" for c in invalid])
+    for index, model in enumerate(content.paragraphs):
+        paragraph = first if index == 0 and first is not None else add_paragraph()
+        if narrative:
+            bookmark = max((int(n.get(qn("w:id"))) for n in output.element.iter(qn("w:bookmarkStart"))), default=0) + 1
+            start = _element("w:bookmarkStart", id=bookmark)
+            # _element's own first parameter is called name; pass the bookmark name as an attribute (supervisor P3a-3).
+            start.set(qn("w:name"), narrative_bookmark(target["targetId"]) + "_" + str(index))
+            paragraph._p.append(start)
+        if model.named_style:
+            from docx.enum.style import WD_STYLE_TYPE
+            name = model.named_style.title()
+            if name not in output.styles:
+                added = output.styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)
+                added.base_style = output.styles["Normal"]
+            paragraph.style = output.styles[name]
+        elif model.heading_level:
+            paragraph.style = output.styles[f"Heading {model.heading_level}"]
+        fmt = paragraph.paragraph_format
+        fmt.space_before = Pt(model.space_before)
+        fmt.space_after = Pt(model.space_after)
+        fmt.keep_with_next = fmt.keep_together = fmt.widow_control = False
+        props = paragraph._p.get_or_add_pPr()
+        spacing = props.find(qn("w:spacing"))
+        spacing.set(qn("w:line"), str(round(model.line_height * model.font_size * 20)))
+        spacing.set(qn("w:lineRule"), "atLeast")
+        # A paragraph's own textAlign wins over the box's justify, as on the canvas (content_model keeps "justify").
+        align = "both" if model.align == "justify" else model.align
+        props.append(_element("w:jc", val=align))
+        if model.list_path:
+            depth = len(model.list_path)
+            if model.marker is not None:
+                number = numbering.number((target["pageId"], target["targetId"]), model.list_path[-1],
+                                               depth, marker_gap(model))
+                numpr = props.get_or_add_numPr()
+                numpr.append(_element("w:ilvl", val=depth - 1))
+                numpr.append(_element("w:numId", val=number))
+            # Continuations retain the text start but have no numbering.
+            indent = props.get_or_add_ind()
+            indent.set(qn("w:left"), str(round((LIST_INDENT * depth + model.indent) * 20)))
+            indent.set(qn("w:hanging"), str(round(model.indent * 20) + marker_gap(model)) if model.marker is not None else "0")
+            if model.indent and model.marker is not None:
+                # Numbering positions the outside marker at the li start, not the indented paragraph. Word starts the
+                # text at the first tab stop after the number, and the level's own list tab (at the li start, see
+                # _Numbering) comes first: clear it so the text starts at the indent (Word 16 render, P3a-1 gate).
+                tabs = props.get_or_add_tabs()
+                tabs.append(_element("w:tab", val="clear", pos=round(LIST_INDENT * depth * 20)))
+                tabs.append(_element("w:tab", val="num", pos=round((LIST_INDENT * depth + model.indent) * 20)))
+        elif model.indent:
+            props.get_or_add_ind().set(qn("w:left"), str(round(model.indent * 20)))
+        if model.named_style:
+            # The template's Title style draws a bottom border and its contextual spacing drops the space between
+            # two Title paragraphs; the canvas has neither (supervisor P3a-2). Direct formatting turns both off.
+            borders = _element("w:pBdr")
+            for side in ("top", "left", "bottom", "right", "between", "bar"):
+                borders.append(_element("w:" + side, val="nil"))
+            props.insert_element_before(borders, *_PPR_ORDER[_PPR_ORDER.index("w:pBdr") + 1:])
+            props.insert_element_before(_element("w:contextualSpacing", val=0),
+                                        *_PPR_ORDER[_PPR_ORDER.index("w:contextualSpacing") + 1:])
+        base = model.base_run or replace(content.base_run, bold=content.base_run.bold or bool(model.heading_level))
+        props.append(_properties(base, model))
+        for run, kind, value in tokens(model):
+            element = _element("w:r")
+            element.append(_properties(run, model))
+            leaf = _element("w:" + kind)
+            if kind == "t":
+                leaf.set(qn("xml:space"), "preserve")
+                leaf.text = value  # No NFC or glyph filtering in DOCX.
+            element.append(leaf)
+            if run.href:
+                link = _element("w:hyperlink")
+                link.set(qn("r:id"), paragraph.part.relate_to(run.href, RT.HYPERLINK, is_external=True))
+                link.append(element)
+                paragraph._p.append(link)
+            else:
+                paragraph._p.append(element)
+        if narrative:
+            paragraph._p.append(_element("w:bookmarkEnd", id=bookmark))

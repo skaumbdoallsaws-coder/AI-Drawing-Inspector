@@ -27,9 +27,15 @@ def compare_docx(payload, target, model):
         document = etree.fromstring(package.read("word/document.xml"))
         numbering = etree.fromstring(package.read("word/numbering.xml"))
         relationships = {node.get("Id"): node for node in etree.fromstring(package.read("word/_rels/document.xml.rels"))}
-    table = next(t for t in _xp(document, '//w:tbl')
-                 if _value(t, './w:tblPr/w:tblCaption/@w:val') == "Authored text: " + target)
-    paragraphs = _xp(table, './w:tr/w:tc/w:p')
+    tables = [t for t in _xp(document, '//w:tbl')
+              if _value(t, './w:tblPr/w:tblCaption/@w:val') == "Authored text: " + target]
+    if tables:
+        paragraphs = _xp(tables[0], './w:tr/w:tc/w:p')
+    else:
+        from ai_inspector.documentation.rich_docx import narrative_bookmark
+        prefix = narrative_bookmark(target) + "_"
+        paragraphs = [p for p in _xp(document, '//w:p') if any(
+            str(name).startswith(prefix) for name in _xp(p, './w:bookmarkStart/@w:name'))]
     assert len(paragraphs) == len(model.paragraphs)
     actual, expected, list_records, ids = [], [], [], {}
     for index, (xml, p) in enumerate(zip(paragraphs, model.paragraphs)):
@@ -126,7 +132,13 @@ def compare_pdf(payload, document, page_id, target, output_path):
     with fitz.open(stream=payload, filetype="pdf") as pdf:
         page_index = next(i for i, page in enumerate(document["pages"]) if page["pageId"] == page_id)
         page = pdf[page_index]
-        plan = prepare_pdf_objects(fitz, document, (page.rect.width, page.rect.height))[page_id][target]
+        objects = prepare_pdf_objects(fitz, document, (page.rect.width, page.rect.height))[page_id]
+        if target in objects:
+            plan = objects[target]
+        else:
+            from ai_inspector.documentation.rich_blocks import prepare_pdf_blocks
+            rows = prepare_pdf_blocks(fitz, document)[page_id]
+            plan = next(p for key, p in rows.items() if key == target or p.target["targetId"] == target)
         traces = page.get_texttrace()
         fills = [span for span in traces if span["type"] == 0]
         drawings = page.get_drawings()

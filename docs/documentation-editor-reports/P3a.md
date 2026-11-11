@@ -267,3 +267,157 @@ Caption and Note table; CSS auto decorations in every schema with skip-ink none 
 - The editing toolbar is a three-row strip that overlays the top of the canvas (about 90 px at 1720 x 1080). A box at
   the very top of a page can sit under it while editing. Reserve the space or dock the strip in the UX pass (P5a).
 - DOCX scripts and half-point sizes stay Word's own (the build's note): a 0.85 x 12 pt caption is 10 pt in Word.
+
+
+## P3a-3
+
+Implemented by Codex; reviewed, fixed and gated by the supervisor (see the gate section below).
+
+### CHANGED
+
+- `targets.py`, `identity.py`, `rich_text.py`, `parts_manual/documentation.py`, and `server.py`: one eligibility/capability table for operations-manual and work-instruction paragraphs, notices, and captions; canonical override `richText` with its plain projection; whole-field replacement protection; shared node-ID reservation; scene 6 with first-write v5 backup; one batched editor read. Reads add `richTextStyle` for the shared base style.
+- `provenance.py` and `refresh.py`: rich formatting participates in manual provenance, confirmation, and three-way refresh, including formatting-only edits whose plain text still equals the generated source. Existing reset, resolution, and restore paths retain their contracts.
+- New `rich_blocks.py`, plus `rich_layout.py`, `rich_docx.py`, and both manuals' exporters: rich paragraphs, centred notice copy columns, immutable signal prefixes with a 3 pt gap, and centred captions; native DOCX runs; PDF overflow refusal; renderer-version bumps. Legacy plain drawing branches remain in place. Generated DOCX paragraphs receive invisible standard bookmarks for export comparison.
+- `documentation_rich_text.js`, its core/CSS, and `index.html`: generated fields mount the existing capability-limited editor, render with the advertised base style, and commit page-element rich replacements. The signal is outside the editor's content DOM. Line spacing resets to the target's base ratio. Static cache URLs are bumped.
+- `documentation_tools.py`, regression tests and pins: updated Sage description without new tool names; generated-field storage, capability, refresh, restore, migration, service, PDF/DOCX, and Node coverage. Export comparisons now support generated native paragraphs. P3a smoke part 3 reuses navigation, editing, export, and canvas helpers and adds operations/WI checks, captures, screenshots, undo/redo, reopening, and capture-reuse checks.
+
+### TESTS
+
+- Passed static Python AST parsing for 25 changed/new Python files, then rechecked the final test/smoke edits.
+- Passed `node --check` for both changed JavaScript modules and `tests/documentation_rich_text.test.cjs`; parsed all four executable inline scripts in `index.html`.
+- Passed `git diff --check`. Written files use LF. Added server/index lines are ASCII; existing non-ASCII text is unchanged and the server BOM is preserved.
+- No runtime tests, browser measurements, baselines, exports, or Word rendering were run. No commits, branches, or index changes.
+
+### NOT RUN
+
+Claude must run these in the equipped isolated environment:
+
+```text
+python -m pytest -q tests/test_documentation_rich_blocks.py tests/test_documentation_typography.py tests/test_documentation_rich_text.py tests/test_documentation_rich_exports.py
+python -m pytest -q tests/test_documentation_transactions.py tests/test_documentation_provenance.py tests/test_documentation_change_undo.py tests/test_documentation_refresh.py tests/test_documentation_store_chokepoint.py tests/test_documentation_editor_smoke.py tests/test_documentation_conflicts_ui.py tests/test_codex_documentation_tools.py tests/test_codex_specification_sheet_tools.py tests/test_codex_readonly_pilot.py tests/test_codex_assisted_tools.py
+python -m pytest -q tests/test_parts_manual.py tests/test_specification_sheet_workflow.py tests/test_operations_manual_workspace.py tests/test_work_instruction_workflow.py
+node --test tests/documentation*.test.cjs
+python tools/documentation_baseline.py --check
+python tools/documentation_baseline.py --local --check
+python tests/smoke_documentation_editor.py --phase P1a
+python tests/smoke_documentation_editor.py --phase P1b
+python tests/smoke_documentation_editor.py --phase P1c
+python tests/smoke_documentation_editor.py --phase P2a
+python tests/smoke_documentation_editor.py --phase P2b
+python tests/smoke_documentation_editor.py --phase P3a
+python -c "import glob,sys,pytest; sys.exit(pytest.main(['-q']+sorted({p for pattern in ('tests/test_documentation*.py','tests/test_parts_manual*.py','tests/test_operations_manual*.py','tests/test_specification_sheet*.py','tests/test_work_instruction*.py','tests/test_inspection_sheet*.py') for p in glob.glob(pattern)})))"
+python -c "import glob,sys,pytest; sys.exit(pytest.main(['-q']+sorted({p for pattern in ('tests/test_codex*.py','tests/test_facility*.py','tests/test_authored*.py','tests/test_sage*.py','tests/test_industrial*.py') for p in glob.glob(pattern)})))"
+```
+
+Review the saved part-3 canvas/PDF PNGs and render the DOCX in Word. The new plain-export oracle loads the actual de5e171 exporter; the existing 49cdaed oracle remains.
+
+### DEVIATIONS
+
+No intentional scope deviation. The additive `richTextStyle` read field avoids a second client eligibility/style table. The notice's DOCX spacer uses native `w:fitText=60` (twips) to request exactly 3 pt instead of approximating it with rounded character spacing. Its Word rendering is not yet verified.
+
+### OPEN QUESTIONS
+
+- Supervisor measurement must confirm generated-block baselines, line wrapping, notice centring, immutable signal behavior, caption centring, and editor/static equality before shipping.
+- Verify Word's 3 pt fitted spacer and notice table geometry. Existing Word script sizing/offset and half-point size rounding remain as accepted at P3a-2.
+- Runtime compatibility, migration backups, the complete smoke chain, and both baselines remain unverified here. The previously measured Chromium auto-decoration rules are unchanged.
+
+
+## P3a-3 supervisor gate
+
+Reviewed, fixed and gated by Claude on 2026-11-11 on the worktree (doc-editor at de5e171 plus this round). Codex
+built the round in 42 minutes and ran static checks only; every runtime gate below was run by the supervisor, one
+heavy job at a time.
+
+### Findings fixed by the supervisor
+
+1. Every DOCX export of a generated rich block failed with a TypeError: `write_content` passed the bookmark name as
+   `_element(..., name=...)`, which collides with `_element`'s own first parameter (the tag name). The bookmark name
+   is now set as an attribute. All eight `test_rich_generated_pdf_docx_geometry` cases had failed on it.
+2. Canvas weights. On Windows, Arial weights above 700 resolve to Arial Black, a wider and taller face that no
+   export draws. Two paths reached it. Bold marks render as `strong`, whose UA weight is `bolder` (900 inside a box
+   whose base weight is 700): the work-instruction stage paragraph's glyph boxes were 13 px tall instead of 10. The
+   notice signal word was CSS weight 800: "DANGER" was 46.8 px wide on the canvas and 43.33 pt (Helvetica-Bold) in
+   the PDF, so the copy started 3.5 px later and the line box grew from 14 to 15 px. Rich content now draws bold at
+   exactly 700, the signal at 700, and a box's base weight as the exports do (600 or more is 700). The plain
+   notice's signal CSS was 800 as well (Arial Black on the canvas, Helvetica-Bold in every export); it is now 700,
+   so a notice keeps its signal face when it becomes rich. The same rule closes a latent P2b case: a bold mark in a
+   text box whose box style is bold.
+3. `test_scene_v5_backup_and_future_refusal` expected `DocumentEditError` or `ValueError` from a read of a future
+   scene. Reads refuse an unknown schema with `DocumentationSceneError`, as for every earlier version; the test now
+   asserts that error and that the refused file is unchanged.
+4. Editor read cost. `_documentation_editor_read` lost its early return, so every scene GET built a full snapshot,
+   also for parts manuals and specification sheets, which have no eligible generated blocks (10-15 ms per read on
+   MMLE-50D, with zero fields). The early return is restored for those types when they hold no text objects; it is
+   exactly equivalent (their request list was always empty). Operations manuals and work instructions now pay for
+   a real read: 67-99 ms and 48-94 ms per GET for 49 and 96 eligible fields (about 8-13 % of the GET). Accepted;
+   see the notes.
+5. Baseline: the synthetic `table/scene` fingerprint changed. Re-fingerprinting the new scene with
+   `schemaVersion: 5` gives exactly the recorded value, so the scene schema number is the only change; the
+   expectation is promoted as at P2a-1. The local MMLE baseline is unchanged.
+
+### Accepted
+
+- The rich notice in DOCX is a two-column borderless table (the symbol, then the vertically centred copy), where
+  the plain notice is one paragraph (picture, signal, text in the template's Normal style). The rich path follows
+  the canvas; the plain-block export mismatches remain P4b work.
+- Refresh treats a formatting-only override as a user edit: it is never adopted, and it conflicts when the source
+  text changes. As designed.
+- The workspace route now checks open conflicts for whole-field replacements too. Only user and Sage edits send
+  `wholeFieldReplacement`; conflict resolution never does.
+- Generated DOCX narrative paragraphs carry invisible bookmarks (`rich_<hash>_<n>`, about 31 characters, under
+  Word's 40) for the export comparison.
+
+### Visual review
+
+- Canvas and PDF crops of all four proofs agree after finding 2: the notice ("DANGER" bold, "Never" italic on
+  #ffee80, the copy 3 px after the signal), the bulleted operations paragraph (bold #2468ac "Complete"), the centred
+  caption ("Figure" bold, #596a76) and the Sage-written work-instruction stage paragraph (bold #2468ac at 9 px).
+- Editors: the notice mounts with the marks-only ribbon and the signal outside the editable copy; the paragraph
+  ribbon has Font, Size, alignment, indents, spacing and lists, no Style; Line spacing offers "1.4 (default)" (14/10
+  for operations body text). The mounted signal measures as bold (ink density 61.8 against 61.7 for a plain bold
+  signal and 37-42 for regular copy).
+- Word 16 render of both DOCX exports (41 and 38 pages): the notice table draws the symbol, then "DANGER"
+  (Arial-BoldMT) and "Never" (Arial-ItalicMT, highlighted) at 170.3 pt, so the fitText spacer gives 2.8 pt against
+  the requested 3; the bullet paragraph's text starts at the 40 pt list indent with Word's Symbol bullet; the
+  caption is centred at 7.5 pt with "Figure" bold; the work-instruction paragraph is Arial-BoldMT 9 pt #2468ac.
+  The copy column is centred in a row of the frame's height while the symbol stays at the top of its cell, so the
+  copy sits a little lower beside the symbol than on the canvas (flow layout; accepted).
+
+### Numbers
+
+- Node 276/276 (rich text 258, conflicts 18).
+- Focused suite: Codex's build 1280 passed and 10 failed (the eight DOCX geometry cases of finding 1, the
+  future-schema test of finding 3 and the baseline check of finding 5). After the fixes the rich-block and baseline
+  files pass 132/132, and the documentation suites below ran on the final code.
+- Smoke P3a: run 1 172/176 (the four canvas weight checks of finding 2), run 2 175/176 (only the browser-failures
+  check: two THREE.WebGLProgram shader errors while the machine was short of memory), run 3 176/176.
+- Smokes P2b 36/36, P2a 23/23, P1a 27/27, P1c 35/35. P1b stopped at 39/40 in the gate chain ("THREE.WebGLRenderer:
+  Error creating WebGL context", the same low-memory period) and passed 46/46 on the rerun.
+- Both baseline checks exit 0 (stores reopened unchanged).
+- Documentation suites 1347 passed plus the 1 pre-existing failure
+  (test_operations_manual_precoding_contracts::test_source_ids_references_and_local_hashes_are_closed).
+- Wide suites 170 failed / 9 errors / 3851 passed / 68 skipped: the same 179 failure IDs as at P3a-1, nothing new.
+  The first run hung for an hour without CPU in
+  test_facility_layout_generation_run_repository::test_cross_process_single_writer_lease_is_synchronized (a
+  multiprocessing spawn test outside this work, during the low-memory period). It was stopped and the suite rerun in
+  four parts on the same code; that test passed.
+- Every file of the round was last written at 01:07; smoke run 2 and every later gate ran after that.
+- Word 16 render of both smoke DOCX exports (41 and 38 pages), checked against the canvas and the PDF.
+
+### Notes for later
+
+- P5a: the editor read on operations manuals and work instructions reads every eligible field on every scene GET
+  (about 50-100 ms on MMLE-50D). If documents grow, read on demand or cache by revision.
+- P4b: the plain notice PDF draws 8.4 pt copy at x+64; the canvas and the rich path draw 10 px at x+68. The plain
+  DOCX notice is one paragraph in the template font.
+- P4b (since P2b-1, every rich bullet list): Chromium draws disc, circle and square markers as shapes, not text. With
+  a rounded ascent A (9 for Arial at 10 px), the symbol is (A*2/3 + 1)/2 px square (3 px), its box starts A*2/3 + 7 +
+  1 px before the text and the symbol is inset 1 px (text - 13 to text - 10, centre text - 11.5; the canvas measured
+  12), 3*(A - A*2/3)/2 px below the line's ascent top. The PDF draws the U+2022 glyph and a space, ending at the text
+  (centre about text - 4.5 pt, a 2.6 pt dot). Ordered markers ("1. ") already match. The smokes exclude markers from
+  the line comparison, which is why no gate caught it.
+- P4b: the operations DOCX header band reaches about 8 pt into the body, so the top of every chapter heading (at
+  48.6 pt) is covered in Word. Pre-existing: plain export bytes are unchanged since de5e171, and the overlap is on
+  pages without rich content.
+- The smoke's "Target closed" asyncio messages (123 this run, 57 at P3a-2) are Playwright response-finished
+  callbacks for pages the harness closed; they are not failures.

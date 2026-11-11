@@ -29,7 +29,7 @@ class WorkInstructionExportError(RuntimeError):
 
 _SAFE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,180}$")
 _EXPORT_LOCK = threading.RLock()
-_DOCX_RENDERER_VERSION = "work-instructions-docx-v1"
+_DOCX_RENDERER_VERSION = "work-instructions-docx-rich-v2"
 
 
 def _safe(value: Any, label: str) -> str:
@@ -142,6 +142,10 @@ def store_review_pdf(
                 f"{revision}/pdf"
             ),
         }
+        from ai_inspector.documentation.rich_layout import PDF_RENDERER_VERSION, has_text_objects
+        from ai_inspector.documentation.rich_blocks import has_rich_blocks
+        if has_text_objects(document) or has_rich_blocks(document):
+            artifact["rendererVersion"] = PDF_RENDERER_VERSION
         _write_atomic(
             metadata_path,
             (

@@ -246,7 +246,7 @@ def test_legacy_override_marked_edited(tmp_path):
         "targetType": "page_element", "targetId": "old.r0.c1", "text": "900 lb"})
     adopted = repo.apply_command("legacy", "source", "plan", base_revision=loaded["revision"], command=command,
                                 page_targets={"page-old": {"page_element": ["old.r0.c1"]}}, identity_document=old)
-    assert adopted["scene"]["schemaVersion"] == 5 and adopted["scene"]["fieldMeta"]
+    assert adopted["scene"]["schemaVersion"] == 6 and adopted["scene"]["fieldMeta"]
     assert path.with_name("documentation-scene.v3.json").read_bytes() == before["legacy/documentation-scene.json"]
 
 

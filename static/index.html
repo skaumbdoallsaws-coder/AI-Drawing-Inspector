@@ -12,9 +12,9 @@
     <link rel="stylesheet" href="/static/packaging_ribbon_icons.css">
     <script src="/static/documentation_commands.js?v=20261109-p1b-3"></script>
     <script src="/static/documentation_conflicts.js?v=20261110-p2a-1"></script>
-    <script src="/static/documentation_rich_text_core.js?v=20261110-p3a-2"></script>
-    <script type="module" src="/static/documentation_rich_text.js?v=20261110-p3a-2"></script>
-    <link rel="stylesheet" href="/static/documentation_rich_text.css?v=20261110-p3a-2">
+    <script src="/static/documentation_rich_text_core.js?v=20261110-p3a-3"></script>
+    <script type="module" src="/static/documentation_rich_text.js?v=20261110-p3a-3"></script>
+    <link rel="stylesheet" href="/static/documentation_rich_text.css?v=20261110-p3a-3">
     <script src="/static/cad_viewport.js"></script>
     <script>
         // Theme bootstrap — set data-theme BEFORE the stylesheet is parsed
@@ -2638,7 +2638,8 @@
             margin-right: 3px;
             color: var(--doc-text);
             font-family: var(--doc-heading-font);
-            font-weight: 800;
+            /* 700 as in the PDF and DOCX notice; Windows Arial at 800 is Arial Black (supervisor P3a-3). */
+            font-weight: 700;
         }
         .documentation-operations-block.note.draft,
         .documentation-operations-block.note.prototype,
@@ -39555,9 +39556,10 @@
             if (DocumentationRichText.active) return true;
             const stillHere = () => bound.apiBase === _documentationApiBase()
                 && page.pageId === _documentationActivePage()?.pageId;
+            if (field.richTextStyle) _documentationApplyElementStyle(element, field.richTextStyle);
             const controller = DocumentationRichText.mount(element, {
                 field, snapshot: payload, noticeHost: document.getElementById('documentationWorkspace'),
-                boxStyle: _documentationResolvedObjectStyle(page.documentationObjects[target.targetId]),
+                boxStyle: field.richTextStyle || _documentationResolvedObjectStyle(page.documentationObjects[target.targetId]),
                 findField: snapshot => _documentationRichField(page.pageId, target.targetId, snapshot),
                 read: () => _partsManualApi(`${bound.apiBase}/documentation-scene`),
                 commit: (snapshot, current, richText) => {
@@ -39572,7 +39574,7 @@
                             sourceRevision: context.payload.scene.sourceRevision,
                             manualPlanRevision: context.payload.scene.manualPlanRevision,
                             operation: 'replace_rich_text', pageId: page.pageId,
-                            targetType: 'document_object', targetId: target.targetId,
+                            targetType: target.targetType, targetId: target.targetId,
                             expectedContentHash: current.contentHash, richText, actor: 'user',
                         }),
                     });
@@ -39597,7 +39599,8 @@
 
         async function _documentationBeginInlineTextEdit(event, target, element) {
             if (!target || !element || element.isContentEditable || window.DocumentationRichText?.active) return;
-            if (target.targetType === 'document_object') {
+            if (DocumentationConflicts.blockEdit(_documentationActivePage()?.pageId, target.targetId)) return;
+            if (target.targetType === 'document_object' || _documentationRichField(_documentationActivePage()?.pageId, target.targetId)?.richTextEligible) {
                 event?.preventDefault?.();
                 event?.stopPropagation?.();
                 if (await _documentationBeginRichEdit(target, element)) return;
@@ -43210,6 +43213,20 @@
             }
         }
 
+        function _documentationRenderRichBlock(page, targetId, element) {
+            const field = _documentationRichField(page.pageId, targetId);
+            if (!field?.richTextEligible || !field.isRichText) return false;
+            if (field.richTextError || !field.richText) {
+                element.textContent = field.text || '';
+                element.dataset.richTextError = field.richTextError || 'invalid_rich_text';
+                element.title = 'This rich text field is read-only. ' + element.dataset.richTextError;
+                return true;
+            }
+            _documentationApplyElementStyle(element, field.richTextStyle);
+            DocumentationRichText.render(element, field.richText, field.richTextStyle);
+            return true;
+        }
+
         function _documentationOperationsBlock(page, block) {
             const targetId = String(block.blockId || 'content');
             const element = document.createElement('div');
@@ -43245,6 +43262,7 @@
             } else if (figureType) {
                 element.classList.add('cad_figure_caption');
                 element.textContent = Object.hasOwn(override, 'text') ? override.text : (block.caption || '');
+                _documentationRenderRichBlock(page, targetId, element);
                 if (specSlots) _specSheetDecorateSlot(element, block.slot);
                 else if (editablePage) {
                     element.classList.add('editable');
@@ -43289,6 +43307,7 @@
                 const signal = document.createElement('strong');
                 signal.textContent = signalWord;
                 copy.append(signal, document.createTextNode(String(text || '')));
+                _documentationRenderRichBlock(page, targetId, copy);
                 copy.addEventListener('dblclick', event => {
                     const target = _documentationPageElementTarget(page, targetId);
                     if (target) _documentationBeginInlineTextEdit(event, target, copy);
@@ -43303,6 +43322,7 @@
                 if (Number(style.lineHeight) > 0) {
                     element.style.lineHeight = `${Number(style.lineHeight)}px`;
                 }
+                _documentationRenderRichBlock(page, targetId, element);
                 if (block.tone) element.classList.add(String(block.tone));
                 if (specSlots) {
                     _specSheetDecorateSlot(element, block.slot);
@@ -43451,7 +43471,8 @@
                 const rendered = _documentationOperationsBlock(page, block);
                 if (block.blockType === 'cad_figure') {
                     const captionHeight = 16;
-                    const rect = block.frame;
+                    const rect = _documentationRichField(page.pageId, block.blockId)?.isRichText
+                        ? _documentationPageElementRect(page, block.blockId, block.frame) : block.frame;
                     _documentationSetPublicationRect(rendered, {
                         x: rect.x,
                         y: Number(rect.y) + Number(rect.height) - captionHeight,

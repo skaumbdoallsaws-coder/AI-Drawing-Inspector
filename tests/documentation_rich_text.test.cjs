@@ -216,3 +216,61 @@ test('the box underline wrapper is editor presentation and never becomes stored 
     foreign.doc.content[0].content[0].marks = [{ type: 'documentationInheritedUnderline' }];
     assert.throws(() => core.normalize(foreign), { code: 'invalid_rich_text' });
 });
+
+
+test('generated base line height is explicit in both static and editing wrappers', () => {
+    const fs = require('node:fs'), vm = require('node:vm');
+    const source = fs.readFileSync(require.resolve('../static/documentation_rich_text.js'), 'utf8');
+    const apply = source.slice(source.indexOf('function applyBoxStyle('), source.indexOf('// Only the validated read'));
+    const render = source.slice(source.indexOf('function render('), source.indexOf('// Paste reads'));
+    class Element {
+        constructor(tag) { this.tagName = tag.toUpperCase(); this.style = {}; this.dataset = {}; this.children = []; }
+        appendChild(child) { this.children.push(child); return child; }
+        replaceChildren(...children) { this.children = children; }
+        prepend(child) { this.children.unshift(child); }
+        get firstElementChild() { return this.children[0]; }
+        setAttribute() {} addEventListener() {}
+    }
+    const context = vm.createContext({ core, document: { createElement: tag => new Element(tag) } });
+    vm.runInContext(apply + render, context);
+    for (const base of [1.35, 1.4, 1.6, 10 / 7.4]) {
+        const style = { fontFamily: 'Arial', fontSize: 7.4, baseLineHeight: base, color: '#596a76' };
+        const host = new Element('div');
+        context.render(host, normalize(doc([paragraph([text('Copy')])])), style);
+        const editing = new Element('div'); context.applyBoxStyle(editing, style);
+        assert.deepEqual(host.children[0].style, editing.style);
+        assert.equal(editing.style.lineHeight, String(base));
+        assert.equal(editing.style.fontSize, '7.4px');
+    }
+    assert.equal(core.baseLineHeight({}), 1.2);
+    const notice = new Element('div');
+    context.render(notice, normalize(doc([paragraph([text('Copy')])])), { signalWord: 'NOTICE', baseLineHeight: 1.4 });
+    const signal = notice.children[0].children[0].children[0];
+    assert.equal(signal.textContent, 'NOTICE');
+    assert.equal(signal.contentEditable, 'false');
+    assert.match(source, /applyBoxStyle\(editorHost, options.boxStyle\)/);
+    assert.match(source, /Number\(value\) === base \? null/);
+});
+
+test('notice and caption capability sets register only allowed schema extensions', () => {
+    const fs = require('node:fs'), vm = require('node:vm');
+    const source = fs.readFileSync(require.resolve('../static/documentation_rich_text.js'), 'utf8');
+    const extensionSource = source.slice(source.indexOf('function extensions('), source.indexOf('function mount('));
+    const fake = name => ({ name, extend(spec) { return { ...fake(name), spec }; }, configure(options) { return { ...this, options }; } });
+    const kit = Object.fromEntries(['StarterKit', 'TextStyle', 'Color', 'FontFamily', 'FontSize', 'Highlight', 'Subscript', 'Superscript', 'TextAlign'].map(n => [n, fake(n)]));
+    kit.Extension = kit.Mark = { create: value => value };
+    const context = vm.createContext({ kit, core, cssColor: core.color });
+    vm.runInContext(extensionSource, context);
+    const caps = { schemaVersions: [1, 2], features: ['bold', 'italic', 'underline', 'strike', 'subscript', 'superscript', 'highlight', 'color', 'link'], listDepth: 0 };
+    const installed = context.extensions(caps, () => {}, () => {}, false, 'NOTICE');
+    const starter = installed.find(e => e.name === 'StarterKit');
+    for (const name of ['heading', 'bulletList', 'orderedList', 'listItem', 'listKeymap']) assert.equal(starter.options[name], false);
+    for (const name of ['FontFamily', 'FontSize', 'TextAlign']) assert.ok(!installed.some(e => e.name === name));
+    assert.ok(installed.some(e => e.name === 'Highlight'));
+    const global = installed.find(e => e.name === 'documentationParagraphTypography').addGlobalAttributes();
+    assert.equal(Object.keys(global[0].attributes).length, 0);
+    const size = normalize(doc([paragraph([text('too large', [{ type: 'textStyle', attrs: { fontSize: '12px' } }])])]));
+    assert.match(core.readOnlyReason({ richText: size, richTextCapabilities: caps }), /read-only/);
+    const marks = normalize(doc([paragraph([text('allowed', [{ type: 'italic' }, { type: 'highlight', attrs: { color: '#aabbcc' } }])])]));
+    assert.equal(core.readOnlyReason({ richText: marks, richTextCapabilities: caps }), '');
+});

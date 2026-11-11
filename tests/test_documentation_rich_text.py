@@ -194,7 +194,7 @@ def test_size_and_depth_bounds():
             rich.validate(value)
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 4])
+@pytest.mark.parametrize("version", [1, 2, 3, 4, 5])
 def test_old_scene_no_rewrite(tmp_path, version):
     scene = RichScene(tmp_path)
     original = json.loads(scene.path.read_bytes())
@@ -202,7 +202,7 @@ def test_old_scene_no_rewrite(tmp_path, version):
     raw = ("  " + json.dumps(original, indent=2) + "\n").encode("ascii")
     scene.path.write_bytes(raw)
     loaded = scene.load()
-    assert loaded["scene"]["schemaVersion"] == 5
+    assert loaded["scene"]["schemaVersion"] == 6
     assert isinstance(scene.value(), str) and scene.path.read_bytes() == raw
     assert not scene.path.with_name("documentation-scene.v4.json").exists()
     scene.command({"operation": "update_text", "text": "A plain edit"})
@@ -246,7 +246,8 @@ def test_plain_hash_input_unchanged_and_flag_independent(scene, monkeypatch):
     assert scene.field()["contentHash"] == content_hash(state, OBJECT, before[OBJECT])
 
 
-def test_generated_text_and_locked_objects_never_accept_rich(scene):
+def test_generated_headings_and_locked_objects_never_accept_rich(scene):
+    scene.base["pages"][0]["layoutBlocks"][0]["blockType"] = "heading"
     with pytest.raises(DocumentEditError) as caught:
         scene.command({"operation": "replace_rich_text", "targetType": "page_element",
                        "targetId": "generated-note", "richText": envelope()})

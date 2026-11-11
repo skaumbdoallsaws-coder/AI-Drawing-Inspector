@@ -45,7 +45,7 @@ function applyBoxStyle(element, style = {}) {
 
 // Only the validated read envelope is rendered here. No HTML strings or URL navigation.
 function render(element, envelope, boxStyle = {}) {
-    const tags = { paragraph: 'p', bulletList: 'ul', orderedList: 'ol', listItem: 'li', hardBreak: 'br' };
+    const tags = { paragraph: 'p', bulletList: 'ul', orderedList: 'ol', listItem: 'li', hardBreak: 'br', table: 'table', tableRow: 'tr', tableCell: 'td', tableHeader: 'th' };
     // This wrapper maps legacy rich box families without changing the box font
     // selector or the style of any plain object. The caller sets box styles later.
     const root = document.createElement('div');
@@ -57,7 +57,7 @@ function render(element, envelope, boxStyle = {}) {
             let child = document.createElement(value.type === 'text' ? 'span' : 'br');
             if (value.type === 'text') child.textContent = value.text;
             const marks = [...(value.marks || [])].sort((a, b) => core.RENDER_MARKS.indexOf(a.type) - core.RENDER_MARKS.indexOf(b.type));
-            const schema2 = envelope.schemaVersion === 2;
+            const schema2 = envelope.schemaVersion >= 2;
             if (schema2 && (marks.some(m => m.type === 'link') || boxStyle.textDecoration === 'underline')
                 && !marks.some(m => m.type === 'underline')) {
                 // Keep the link outermost; link and box underlines use each run's size.
@@ -93,6 +93,21 @@ function render(element, envelope, boxStyle = {}) {
             return child;
         }
         const result = document.createElement(value.type === 'heading' ? 'h' + value.attrs.level : tags[value.type] || 'div');
+        if (value.attrs?.id) result.dataset.richId = value.attrs.id;
+        if (value.type === 'table') {
+            result.dataset.tableStyle = value.attrs.style;
+            const cols = document.createElement('colgroup');
+            for (const column of value.attrs.columns) {
+                const col = document.createElement('col'); col.dataset.richId = column.id;
+                col.style.width = (column.width / 10) + '%'; cols.appendChild(col);
+            }
+            result.appendChild(cols);
+        }
+        if (['tableCell', 'tableHeader'].includes(value.type)) {
+            result.colSpan = value.attrs.colspan || 1; result.rowSpan = value.attrs.rowspan || 1;
+            result.style.verticalAlign = value.attrs.verticalAlign || 'top';
+            result.style.backgroundColor = value.attrs.fill || (value.type === 'tableHeader' ? '#e9eef2' : 'transparent');
+        }
         if (value.type === 'orderedList') result.start = value.attrs.start;
         result.style.whiteSpace = 'pre-wrap';
         if (['paragraph', 'heading', 'bulletList', 'orderedList'].includes(value.type)) result.style.margin = '0';

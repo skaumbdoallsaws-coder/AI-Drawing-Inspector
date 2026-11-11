@@ -113,3 +113,9 @@
 .documentation-symbol-picker fieldset { display: flex; flex-wrap: wrap; padding: 4px; border: 0; }
 .documentation-symbol-picker legend { font: 12px Arial, sans-serif; color: #b9cfdf; padding: 0 2px; }
 .documentation-symbol-picker button { font: 18px Arial, sans-serif; min-width: 30px; min-height: 30px; }
+
+/* Schema 3 static authored tables. The editor remains read-only this round. */
+.documentation-rich-content table { border-collapse: collapse; table-layout: fixed; width: 100%; margin: 0; border-spacing: 0; }
+.documentation-rich-content td, .documentation-rich-content th { border: 1px solid #8a98a5; padding: 4px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.documentation-rich-content th { font-weight: 700; }
+.documentation-rich-content table[data-table-style=plain] td, .documentation-rich-content table[data-table-style=plain] th { border-color: transparent; }

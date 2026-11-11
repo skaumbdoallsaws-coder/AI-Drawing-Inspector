@@ -133,15 +133,20 @@ def test_the_tool_set_is_exact_typed_and_closed():
     assert {s["name"] for s in specs if s["name"] in {"read_document_pages", "edit_document_text", "apply_document_edits"}} == {"read_document_pages", "edit_document_text", "apply_document_edits"}
     batch = next(s for s in specs if s["name"] == "apply_document_edits")
     assert batch["read_only"] is False
-    assert batch["input_schema"]["properties"]["operations"]["maxItems"] == 200
+    assert batch["input_schema"]["properties"]["operations"]["maxItems"] == 224
     finder = next(s for s in specs if s["name"] == "find_document_text")
     assert finder["read_only"] is True
     assert finder["input_schema"]["properties"]["limit"]["maximum"] == 200
     variants = batch["input_schema"]["properties"]["operations"]["items"]["anyOf"]
-    assert {item["properties"]["operation"]["enum"][0] for item in variants} == {"replace_text", "set_slot_value", "replace_rich_text", "replace_range", "format_range"}
+    assert {item["properties"]["operation"]["enum"][0] for item in variants} == {"replace_text", "set_slot_value", "replace_rich_text", "replace_range", "format_range", "create_table", "modify_table"}
     rich = next(v for v in variants if v["properties"]["operation"]["enum"] == ["replace_rich_text"])
+    table_variants = [v for v in variants if v["properties"]["operation"]["enum"] == ["modify_table"]]
+    assert {v["properties"]["action"]["enum"][0] for v in table_variants} == {
+        "insert_row", "delete_row", "insert_column", "delete_column", "merge_cells", "split_cells",
+        "set_widths", "set_cell_style", "set_table_style", "delete_table"}
+    assert all(v["additionalProperties"] is False for v in table_variants)
     schema = rich["properties"]["richText"]["properties"]
-    assert schema["schemaVersion"]["enum"] == [1, 2]
+    assert schema["schemaVersion"]["enum"] == [1, 2, 3]
     assert all(word in schema["doc"]["description"] for word in (
         "strike", "subscript", "superscript", "highlight", "fontFamily", "fontSize", "textAlign",
         "spaceBefore", "spaceAfter", "lineHeight", "namedStyle", "title", "caption", "note",

@@ -71,7 +71,7 @@ def test_eligibility_and_capability_table(document_type, kind):
     assert bool(caps) == eligible
     if caps:
         assert caps["schemaVersions"] == [1, 2]
-        expected = set(FEATURES) - {"heading", "namedStyle"} if kind == "paragraph" else {
+        expected = set(FEATURES) - {"heading", "namedStyle", "table"} if kind == "paragraph" else {
             "bold", "italic", "underline", "strike", "subscript", "superscript", "highlight", "color", "link"}
         assert set(caps["features"]) == expected
         assert caps["listDepth"] == (6 if kind == "paragraph" else 0)

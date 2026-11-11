@@ -175,9 +175,12 @@ def test_mark_order_minimal_version_and_schema_1_feature_refusal():
         assert rich_text.validate(value)["schemaVersion"] == 2
         value["schemaVersion"] = 1
         invalid(value, "unsupported_rich_text_schema")
-    for version in (0, 3, True, 2.0, "2", None):
+    for version in (0, 4, True, 2.0, "2", None):
         ordinary["schemaVersion"] = version
         invalid(ordinary, "unsupported_rich_text_schema")
+    # Schema 3 (P3b, tables) is accepted; a document without a table is still stored as its minimal version.
+    ordinary["schemaVersion"] = 3
+    assert canonical_bytes(rich_text.validate(ordinary)) == canonical_bytes(rich_text.validate(one))
 
 
 def test_six_list_levels_and_unchanged_resource_bounds():
@@ -661,7 +664,7 @@ def test_rich_capability_read_shape_and_feature_inventory(tmp_path, monkeypatch)
     scene = RichScene(tmp_path)
     field = scene.field()
     assert field["richTextEligible"]
-    assert field["richTextCapabilities"] == {"schemaVersions": [1, 2], "features": list(rich_text.FEATURES), "listDepth": 6}
+    assert field["richTextCapabilities"] == {"schemaVersions": [1, 2, 3], "features": list(rich_text.FEATURES), "listDepth": 6}
     value = rich_text.validate(envelope(paragraph(text("title", mark("textStyle", fontSize=12, color="#112233")), namedStyle="title"), nested(6)))
     assert rich_text.used_features(value) == {"features": ["bulletList", "color", "fontSize", "namedStyle"], "listDepth": 6}
     scene.batch(value)

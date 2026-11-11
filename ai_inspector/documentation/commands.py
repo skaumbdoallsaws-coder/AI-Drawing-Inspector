@@ -126,21 +126,30 @@ def retain_receipt(state: dict, receipt: dict) -> None:
 
 
 def operation_store(operations: list[dict]) -> str:
-    if not isinstance(operations, list) or not 1 <= len(operations) <= 200 or any(not isinstance(o, dict) for o in operations):
+    if not isinstance(operations, list) or not 1 <= len(operations) <= 224 or any(not isinstance(o, dict) for o in operations):
         raise DocumentEditError("invalid_document_operation", "Submit at most 200 range operations or 12 whole-field operations.")
     if any(not isinstance(o.get("targetId"), str) or not o["targetId"]
            or not isinstance(o.get("operation"), str) for o in operations):
         raise DocumentEditError("invalid_document_operation", "Each operation needs a target ID and operation name.")
     kinds = {o.get("operation") for o in operations}
     ranges = {"replace_range", "format_range"}
-    if sum(o.get("operation") not in ranges for o in operations) > 12:
+    tables = {"create_table", "modify_table"}
+    if sum(o.get("operation") in tables for o in operations) > 24:
+        raise DocumentEditError("invalid_table_operation", "At most 24 table operations per batch.")
+    if sum(o.get("operation") not in tables for o in operations) > 200:
+        raise DocumentEditError("invalid_document_operation", "At most 200 range and whole-field operations per batch.")
+    if sum(o.get("operation") not in ranges | tables for o in operations) > 12:
         raise DocumentEditError("invalid_document_operation", "At most 12 whole-field operations per batch.")
-    if "set_slot_value" in kinds and kinds & {"replace_text", "replace_rich_text", *ranges}:
+    if "set_slot_value" in kinds and kinds & {"replace_text", "replace_rich_text", *ranges, *tables}:
         raise DocumentEditError("invalid_document_operation", "send text and value edits as separate requests")
-    if not (kinds <= {"replace_text", "replace_rich_text", *ranges} or kinds == {"set_slot_value"}):
+    if not (kinds <= {"replace_text", "replace_rich_text", *ranges, *tables} or kinds == {"set_slot_value"}):
         raise DocumentEditError("invalid_document_operation", "Unsupported edit operation.")
     for target in {o.get("targetId") for o in operations}:
         group = [o for o in operations if o.get("targetId") == target]
+        if any(o.get("operation") in tables for o in group):
+            if any(o.get("operation") not in tables for o in group):
+                raise DocumentEditError("invalid_table_operation", "Table operations cannot share a target with range or whole-field operations.")
+            continue
         if len(group) > 1 and any(o.get("operation") not in ranges for o in group):
             code = "overlapping_ranges" if any(o.get("operation") in ranges for o in group) else "invalid_document_operation"
             raise DocumentEditError(code, "Only non-overlapping ranges may share a target.")

@@ -18,6 +18,8 @@ from .rich_fonts import FONT_MAP, NAMED_STYLES
 FEATURE_FLAG = "INSPECTORPRO_DOCUMENTATION_RICH_TEXT"
 MAX_BYTES = 24 * 1024
 MAX_NODES = 512
+TABLE_MAX_NODES = 2048
+TABLE_MAX_BYTES = 96 * 1024
 MAX_LIST_DEPTH = 6
 MAX_DEPTH = 14
 NODE_ID_PATTERN = r"rt-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
@@ -31,7 +33,7 @@ _PARAGRAPH_ATTRS = {"textAlign", "indent", "spaceBefore", "spaceAfter", "lineHei
 # One target feature vocabulary, mirrored in documentation_rich_text_core.js.
 FEATURES = ("bold", "italic", "underline", "strike", "subscript", "superscript", "highlight", "color",
             "fontFamily", "fontSize", "link", "heading", "bulletList", "orderedList", "textAlign", "indent",
-            "spaceBefore", "spaceAfter", "lineHeight", "namedStyle")
+            "spaceBefore", "spaceAfter", "lineHeight", "namedStyle", "table")
 
 
 def used_features(value):
@@ -43,7 +45,7 @@ def used_features(value):
         if kind in {"bulletList", "orderedList"}:
             depth += 1
             deepest = max(deepest, depth)
-        if kind in {"heading", "bulletList", "orderedList"}:
+        if kind in {"heading", "bulletList", "orderedList", "table"}:
             found.add(kind)
         found.update(_PARAGRAPH_ATTRS & node.get("attrs", {}).keys())
         for item in node.get("marks", []):
@@ -116,10 +118,22 @@ def _href(value):
 def validate(value, *, reserved_ids=()):
     """Return canonical JSON; reject unsupported shapes instead of stripping data."""
     _keys(value, {"format", "schemaVersion", "doc"}, {"format", "schemaVersion", "doc"})
-    if value["format"] != "tiptap" or type(value["schemaVersion"]) is not int or value["schemaVersion"] not in {1, 2}:
+    if value["format"] != "tiptap" or type(value["schemaVersion"]) is not int or value["schemaVersion"] not in {1, 2, 3}:
         _invalid("Unsupported rich text envelope.", "unsupported_rich_text_schema")
     ids, reserved, count = set(), set(reserved_ids), 0
     uses_v2 = False
+    from .tables import TABLE_NODES, grid
+    raw_blocks = value.get("doc", {}).get("content", []) if isinstance(value.get("doc"), dict) else []
+    has_table = isinstance(raw_blocks, list) and any(isinstance(n, dict) and n.get("type") == "table" for n in raw_blocks)
+    max_nodes = TABLE_MAX_NODES if has_table else MAX_NODES
+
+    def identity(raw):
+        if not isinstance(raw, str) or re.fullmatch(NODE_ID_PATTERN, raw) is None:
+            _invalid("Authored node IDs must be rt- followed by a lowercase UUID.", "invalid_rich_text_node_id")
+        if raw in ids or raw in reserved:
+            _invalid("Authored node IDs must be unique across this document.", "rich_text_node_id_collision")
+        ids.add(raw)
+        return raw
 
     def feature_v2():
         nonlocal uses_v2
@@ -176,12 +190,16 @@ def validate(value, *, reserved_ids=()):
     def node(raw, depth=0, lists=0):
         nonlocal count
         count += 1
-        if count > MAX_NODES or depth > MAX_DEPTH:
+        if count > max_nodes or depth > MAX_DEPTH:
             _invalid("Rich text exceeds its node or depth bound.", "rich_text_too_large")
         _keys(raw, {"type", "attrs", "content", "text", "marks"}, {"type"})
         kind = raw["type"]
-        if not isinstance(kind, str) or kind not in {"doc", "text", "hardBreak", "listItem", *_BLOCKS} or (kind == "doc") != (depth == 0):
+        if not isinstance(kind, str) or kind not in {"doc", "text", "hardBreak", "listItem", *_BLOCKS, *TABLE_NODES} or (kind == "doc") != (depth == 0):
             _invalid("Unsupported rich text node.")
+        if kind in TABLE_NODES and value["schemaVersion"] < 3:
+            _invalid("Tables require schemaVersion 3.", "unsupported_rich_text_schema")
+        if kind == "table" and depth != 1:
+            _invalid("Tables must be direct children of doc.", "invalid_table_grid")
         result = {"type": kind}
         attrs = raw.get("attrs", {})
         if kind in {"doc", "text"}:
@@ -190,14 +208,12 @@ def validate(value, *, reserved_ids=()):
             extra = {"level"} if kind == "heading" else {"start"} if kind == "orderedList" else set()
             if kind in {"paragraph", "heading"}:
                 extra |= _PARAGRAPH_ATTRS
-            _keys(attrs, {"id", *extra}, {"id"})
-            identity = attrs["id"]
-            if not isinstance(identity, str) or re.fullmatch(NODE_ID_PATTERN, identity) is None:
-                _invalid("Authored node IDs must be rt- followed by a lowercase UUID.", "invalid_rich_text_node_id")
-            if identity in ids or identity in reserved:
-                _invalid("Authored node IDs must be unique across this document.", "rich_text_node_id_collision")
-            ids.add(identity)
-            result["attrs"] = {"id": identity}
+            if kind == "table":
+                extra |= {"ownership", "style", "columns"}
+            if kind in {"tableCell", "tableHeader"}:
+                extra |= {"colspan", "rowspan", "verticalAlign", "fill"}
+            _keys(attrs, {"id", *extra}, {"id", "ownership", "style", "columns"} if kind == "table" else {"id"})
+            result["attrs"] = {"id": identity(attrs["id"])}
             if kind in {"paragraph", "heading"}:
                 for name in sorted(_PARAGRAPH_ATTRS & attrs.keys()):
                     feature_v2()
@@ -213,6 +229,37 @@ def validate(value, *, reserved_ids=()):
                     else:
                         limits = (1, 2, .05) if name == "lineHeight" else (0, 72 if name == "indent" else 36, .5)
                         result["attrs"][name] = number(attr_value, *limits)
+            if kind == "table":
+                if attrs["ownership"] != "authored" or not isinstance(attrs["style"], str) or attrs["style"] not in {"grid", "plain"}:
+                    _invalid("Tables must be authored with grid or plain style.", "invalid_table_grid")
+                columns = attrs["columns"]
+                if not isinstance(columns, list) or not columns:
+                    _invalid("A table needs columns.", "invalid_table_grid")
+                if len(columns) > 12:
+                    _invalid("At most twelve columns.", "table_too_large")
+                normalized = []
+                for column in columns:
+                    _keys(column, {"id", "width"}, {"id", "width"})
+                    if type(column["width"]) is not int or column["width"] < 1:
+                        _invalid("Column widths are positive integer shares.", "invalid_table_grid")
+                    normalized.append({"id": identity(column["id"]), "width": column["width"]})
+                if sum(c["width"] for c in normalized) != 1000:
+                    _invalid("Column widths must sum to 1000.", "invalid_table_grid")
+                result["attrs"].update(ownership="authored", style=attrs["style"], columns=normalized)
+            if kind in {"tableCell", "tableHeader"}:
+                for name in ("colspan", "rowspan"):
+                    span = attrs.get(name, 1)
+                    if type(span) is not int or span < 1:
+                        _invalid("Cell spans must be positive integers.", "invalid_table_grid")
+                    if span > 1:
+                        result["attrs"][name] = span
+                alignment = attrs.get("verticalAlign", "top")
+                if not isinstance(alignment, str) or alignment not in {"top", "middle", "bottom"}:
+                    _invalid("Invalid cell alignment.", "invalid_table_grid")
+                if alignment != "top":
+                    result["attrs"]["verticalAlign"] = alignment
+                if "fill" in attrs:
+                    result["attrs"]["fill"] = color(attrs["fill"])
             if kind == "heading":
                 if type(attrs.get("level")) is not int or not 1 <= attrs["level"] <= 3:
                     _invalid("Heading levels are limited to 1-3.")
@@ -239,7 +286,7 @@ def validate(value, *, reserved_ids=()):
             if marks:
                 result["marks"] = sorted(marks, key=lambda item: _MARKS.index(item["type"]))
         children = raw.get("content", [])
-        if not isinstance(children, list) or len(children) > MAX_NODES:
+        if not isinstance(children, list) or len(children) > max_nodes:
             _invalid("Invalid rich text children.")
         if kind in {"text", "hardBreak"}:
             if "content" in raw:
@@ -251,39 +298,53 @@ def validate(value, *, reserved_ids=()):
                     _invalid("List nesting exceeds six levels.", "rich_text_too_large")
                 if lists > 3:
                     feature_v2()
+            if kind == "table" and (len(children) > 50 or sum(len(r.get("content", [])) for r in children if isinstance(r, dict) and isinstance(r.get("content"), list)) > 600):
+                _invalid("Tables are limited to 50 rows and 600 cells.", "table_too_large")
             content = [node(child, depth + 1, lists) for child in children]
             types = [child["type"] for child in content]
             allowed = {"text", "hardBreak"} if kind in {"paragraph", "heading"} else {"listItem"} if kind in {"bulletList", "orderedList"} else _BLOCKS
-            if any(t not in allowed for t in types) or (kind in {"doc", "bulletList", "orderedList", "listItem"} and not types):
-                _invalid("Invalid rich text child structure.")
+            if kind == "doc":
+                allowed = {*_BLOCKS, "table"}
+            elif kind == "table":
+                allowed = {"tableRow"}
+            elif kind == "tableRow":
+                allowed = {"tableCell", "tableHeader"}
+            elif kind in {"tableCell", "tableHeader"}:
+                allowed = {"paragraph"}
+            if any(t not in allowed for t in types) or (kind in {"doc", "bulletList", "orderedList", "listItem", *TABLE_NODES} and not types):
+                _invalid("Invalid rich text child structure.", "invalid_table_grid" if kind in TABLE_NODES or any(t in TABLE_NODES for t in types) else "invalid_rich_text")
             if kind == "listItem" and types[0] != "paragraph":
                 _invalid("A list item must start with a paragraph.")
             if content:
                 result["content"] = content
 
+        if kind == "table":
+            grid(result)
         return result
 
     doc = node(value["doc"])
-    result = {"format": "tiptap", "schemaVersion": 2 if uses_v2 else 1, "doc": doc}
+    result = {"format": "tiptap", "schemaVersion": 3 if has_table else 2 if uses_v2 else 1, "doc": doc}
     try:
         size = len(canonical_bytes(result))
     except (ValueError, UnicodeError, TypeError):
         _invalid("Rich text must be valid UTF-8 JSON.")
-    if size > MAX_BYTES:
-        _invalid("Rich text exceeds 24 KiB of canonical JSON.", "rich_text_too_large")
+    if size > (TABLE_MAX_BYTES if has_table else MAX_BYTES):
+        _invalid("Rich text exceeds its canonical JSON byte bound.", "rich_text_too_large")
     return result
 
 
 def node_ids(value):
     """Bounded best-effort inventory also reserves IDs in malformed stored fields."""
     pending, result, visited = [value], set(), 0
-    while pending and visited < 8192:
+    while pending and visited < 32768:
         item = pending.pop()
         visited += 1
         if isinstance(item, dict):
             identity = item.get("attrs", {}).get("id") if isinstance(item.get("attrs"), dict) else None
             if isinstance(identity, str):
                 result.add(identity)
+            if "width" in item and isinstance(item.get("id"), str):
+                result.add(item["id"])
             pending.extend(item.values())
         elif isinstance(item, list):
             pending.extend(item)

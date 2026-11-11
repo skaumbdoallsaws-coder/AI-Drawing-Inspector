@@ -18,6 +18,64 @@ def _value(node, expression):
     return values[0] if values else None
 
 
+def _table_paragraphs(outer, model):
+    """Verify nested table structure and return just the authored paragraph flow."""
+    from ai_inspector.documentation.rich_layout import Table
+    from ai_inspector.documentation.tables import column_widths
+    cell = _xp(outer, './w:tr/w:tc')[0]
+    width = (int(_value(outer, './w:tblPr/w:tblW/@w:w'))
+             - sum(int(_value(cell, './w:tcPr/w:tcMar/w:' + side + '/@w:w')) for side in ('left', 'right'))) / 20
+    flow = _xp(cell, './w:p | ./w:tbl')
+    if isinstance(model.blocks[-1], Table):
+        tail = flow.pop()
+        assert tail.tag.endswith('}p') and not _xp(tail, './/w:t')
+        assert _value(tail, './w:pPr/w:spacing/@w:line') == '1'
+    assert len(flow) == len(model.blocks)
+    paragraphs = []
+    for xml, block in zip(flow, model.blocks):
+        if not isinstance(block, Table):
+            assert xml.tag.endswith('}p')
+            paragraphs.append(xml)
+            continue
+        assert xml.tag.endswith('}tbl')
+        assert _value(xml, './w:tblPr/w:tblLayout/@w:type') == 'fixed'
+        widths = column_widths(width, [c["width"] for c in block.columns])
+        twips = [round(w * 20) for w in widths[:-1]]
+        twips.append(round((width - 1) * 20) - sum(twips))
+        assert list(map(int, _xp(xml, './w:tblGrid/w:gridCol/@w:w'))) == twips
+        assert _value(xml, './w:tblPr/w:tblW/@w:w') == str(sum(twips))
+        occupied = {(y, x): c for c in block.cells for y in range(c.row, c.row + c.rowspan)
+                    for x in range(c.column, c.column + c.colspan)}
+        rows = _xp(xml, './w:tr')
+        assert len(rows) == len(block.row_ids) and not _xp(xml, './/w:trHeight')
+        for y, row in enumerate(rows):
+            assert len(_xp(row, './w:trPr/w:cantSplit')) == 1
+            x = 0
+            for tc in _xp(row, './w:tc'):
+                c = occupied[y, x]
+                assert _value(tc, './w:tcPr/w:gridSpan/@w:val') == (str(c.colspan) if c.colspan > 1 else None)
+                merge = ('restart' if y == c.row else 'continue') if c.rowspan > 1 else None
+                assert _value(tc, './w:tcPr/w:vMerge/@w:val') == merge
+                assert _value(tc, './w:tcPr/w:tcW/@w:w') == str(sum(twips[x:x + c.colspan]))
+                assert _value(tc, './w:tcPr/w:vAlign/@w:val') == ('center' if c.vertical_align == 'middle' else c.vertical_align)
+                assert _value(tc, './w:tcPr/w:shd/@w:fill') == (c.fill[1:].upper() if c.fill else None)
+                for edge in ('top', 'left', 'bottom', 'right'):
+                    assert _value(tc, './w:tcPr/w:tcMar/w:' + edge + '/@w:w') == '90'
+                    border = './w:tcPr/w:tcBorders/w:' + edge
+                    assert _value(tc, border + '/@w:val') == ('single' if block.style == 'grid' else 'nil')
+                    if block.style == 'grid':
+                        assert _value(tc, border + '/@w:sz') == '8' and _value(tc, border + '/@w:color') == '8A98A5'
+                ps = _xp(tc, './w:p')
+                if y == c.row:
+                    assert len(ps) == len(c.content.paragraphs)
+                    paragraphs.extend(ps)
+                else:
+                    assert len(ps) == 1 and not _xp(tc, './/w:t')
+                x += c.colspan
+            assert x == len(block.columns)
+    return paragraphs
+
+
 def compare_docx(payload, target, model):
     from ai_inspector.documentation.rich_docx import font_family, marker_gap
     from docx import Document
@@ -30,7 +88,7 @@ def compare_docx(payload, target, model):
     tables = [t for t in _xp(document, '//w:tbl')
               if _value(t, './w:tblPr/w:tblCaption/@w:val') == "Authored text: " + target]
     if tables:
-        paragraphs = _xp(tables[0], './w:tr/w:tc/w:p')
+        paragraphs = _table_paragraphs(tables[0], model) if getattr(model, "blocks", ()) else _xp(tables[0], './w:tr/w:tc/w:p')
     else:
         from ai_inspector.documentation.rich_docx import narrative_bookmark
         prefix = narrative_bookmark(target) + "_"
@@ -189,6 +247,25 @@ def compare_pdf(payload, document, page_id, target, output_path):
                               "strike": run.strike, "highlight": run.highlight, "script": run.script,
                               "baseline": run.baseline, "rect": list(run.rect)})
             rows.append(found)
+        for table in plan.layout.tables:
+            for cell in table.cells.values():
+                if cell.model.fill:
+                    color = tuple(int(cell.model.fill[i:i + 2], 16) / 255 for i in (1, 3, 5))
+                    assert any(d.get("fill") is not None and all(abs(a - b) < .1 for a, b in zip(d["rect"], cell.box))
+                               and all(abs(a - b) < .002 for a, b in zip(d["fill"], color)) for d in drawings)
+            if table.model.style == "grid":
+                color = tuple(int("#8a98a5"[i:i + 2], 16) / 255 for i in (1, 3, 5))
+                for rule in table.rules:
+                    assert any(item[0] == "l" and all(abs(a - b) < .1 for a, b in zip(
+                        (item[1].x, item[1].y, item[2].x, item[2].y), rule)) and abs(d["width"] - 1) < .01
+                        and all(abs(a - b) < .002 for a, b in zip(d["color"], color))
+                        for d in drawings if d.get("color") is not None for item in d["items"])
+            # A repeated table run at the same position is a duplicate. Underlying page text can remain
+            # extractable behind an authored box's opaque fill, so it is not table text.
+            cell_runs = [r for c in table.cells.values() for line in c.layout.lines for r in line.runs]
+            assert not any(abs(s["chars"][0][2][0] - r.x) < .15 and abs(s["chars"][0][2][1] - r.baseline) < .15
+                           and "".join(chr(c[0]) for c in s["chars"]) == r.text
+                           for s in fills if s["chars"] for r in cell_runs)
         page.get_pixmap(matrix=fitz.Matrix(2, 2)).save(str(output_path))
         page.get_pixmap(matrix=fitz.Matrix(2, 2), clip=fitz.Rect(plan.frame)).save(str(output_path.with_name(output_path.stem + "-region.png")))
         return {"lines": rows, "text": "\n".join("".join(run["text"] for run in line if not run["marker"]) for line in rows),

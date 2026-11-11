@@ -55,6 +55,7 @@ and binds omitted preconditions to those reads. apply_document_edits accepts exp
 bindings. find_document_text returns literal matches with code-point ranges and exact hashes; these reads authorize
 replace_range and format_range only, not whole-field replacement. Keep all offsets in a batch relative to the same
 pre-image, with no overlapping ranges or line breaks in replace_range. Use only the target's format features.
+For authored tables use create_table/modify_table with read/result IDs and width shares summing to 1000; never restructure generated or BOM tables.
 Send text and value edits as separate requests. A text batch is atomic and one undo step; a slot batch is
 atomic inside the slot store (slot undo comes later). Report success only from the returned receipt. Retry the same
 request ID and payload after transport failure. On a stale/hash conflict, read again and preserve the user's newer

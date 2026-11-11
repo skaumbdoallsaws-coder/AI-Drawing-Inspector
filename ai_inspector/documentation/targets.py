@@ -28,7 +28,7 @@ def rich_block_capabilities(document_type, block_type):
     kind = RICH_BLOCK_KINDS.get(block_type) if document_type in RICH_DOCUMENT_TYPES else None
     if kind is None:
         return None
-    features = ([name for name in FEATURES if name not in {"heading", "namedStyle"}] if kind == "paragraph" else
+    features = ([name for name in FEATURES if name not in {"heading", "namedStyle", "table"}] if kind == "paragraph" else
                 ["bold", "italic", "underline", "strike", "subscript", "superscript", "highlight", "color", "link"])
     return {"schemaVersions": [1, 2], "features": features, "listDepth": 6 if kind == "paragraph" else 0}
 
@@ -202,13 +202,16 @@ def capabilities(target):
         result.append("replace_range")
     if target.get("richField") is not None and rich_text_enabled():
         result.extend(["replace_rich_text", "format_range"])
+        caps = rich_text_capabilities(target) or {}
+        if "table" in caps.get("features", []) and 3 in caps.get("schemaVersions", []):
+            result.extend(["create_table", "modify_table"])
     return result
 
 
 def rich_text_capabilities(target):
     from .rich_text import FEATURES
     if target.get("targetType") == "document_object" and target.get("richField") is not None:
-        return {"schemaVersions": [1, 2], "features": list(FEATURES), "listDepth": 6}
+        return {"schemaVersions": [1, 2, 3], "features": list(FEATURES), "listDepth": 6}
     if target.get("targetType") == "page_element":
         return rich_block_capabilities(target.get("documentType"), target.get("attributes", {}).get("blockType"))
     return None

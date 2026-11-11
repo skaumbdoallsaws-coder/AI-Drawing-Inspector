@@ -322,7 +322,7 @@ def edit_rich(value, operation, capabilities, target_id):
         if not inserted and new["text"]:
             result.append(new)
         block["content"] = result
-    value["schemaVersion"] = 2
+    value["schemaVersion"] = max(2, value["schemaVersion"])
     value = rich_text.validate(value)
     # Validation put every mark list in canonical order, so equal neighbours now compare equal.
     _merge_runs(value["doc"])

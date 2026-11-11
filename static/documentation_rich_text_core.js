@@ -8,7 +8,9 @@
     const LIMITS = Object.freeze({ nodes: 512, lists: 6, depth: 14, bytes: 24 * 1024 });
     const ID = /^rt-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
     const BLOCKS = ['paragraph', 'heading', 'bulletList', 'orderedList'];
+    const TABLE_NODES = ['table', 'tableRow', 'tableCell', 'tableHeader'];
     const IDENTIFIED = [...BLOCKS, 'listItem', 'hardBreak'];
+    const hasTable = value => Array.isArray((value?.doc || value)?.content) && (value.doc || value).content.some(node => node?.type === 'table');
     const MARKS = ['bold', 'italic', 'underline', 'strike', 'subscript', 'superscript', 'highlight', 'textStyle', 'link'];
     const INVALID_UNICODE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u;
     const LINK = Object.freeze({ target: '_blank', rel: 'noopener noreferrer nofollow', class: null });
@@ -60,18 +62,18 @@
     }
     const FEATURES = Object.freeze(['bold', 'italic', 'underline', 'strike', 'subscript', 'superscript', 'highlight', 'color',
         'fontFamily', 'fontSize', 'link', 'heading', 'bulletList', 'orderedList', 'textAlign', 'indent',
-        'spaceBefore', 'spaceAfter', 'lineHeight', 'namedStyle']);
+        'spaceBefore', 'spaceAfter', 'lineHeight', 'namedStyle', 'table']);
     const NAMED_STYLES = Object.freeze({ title: { scale: 2.25, bold: true },
         caption: { scale: .85, italic: true, color: '#5b6670' }, note: { scale: .9, color: '#5b6670' } });
     const PARAGRAPH_ATTRS = Object.freeze(['textAlign', 'indent', 'spaceBefore', 'spaceAfter', 'lineHeight', 'namedStyle']);
     const SCHEMA2_FEATURES = Object.freeze(['strike', 'subscript', 'superscript', 'highlight', 'fontFamily', 'fontSize', ...PARAGRAPH_ATTRS]);
-    const FULL_CAPABILITIES = Object.freeze({ schemaVersions: [1, 2], features: FEATURES, listDepth: 6 });
+    const FULL_CAPABILITIES = Object.freeze({ schemaVersions: [1, 2, 3], features: FEATURES, listDepth: 6 });
     function usedFeatures(value) {
-        const found = new Set(); let deepest = 0, count = 0;
+        const found = new Set(), maxNodes = hasTable(value) ? 2048 : LIMITS.nodes; let deepest = 0, count = 0;
         function walk(node, depth = 0) {
-            if (++count > LIMITS.nodes) fail('Rich text exceeds its node bound.', 'rich_text_too_large');
+            if (++count > maxNodes) fail('Rich text exceeds its node bound.', 'rich_text_too_large');
             if (['bulletList', 'orderedList'].includes(node.type)) { depth++; deepest = Math.max(deepest, depth); }
-            if (['heading', 'bulletList', 'orderedList'].includes(node.type)) found.add(node.type);
+            if (['heading', 'bulletList', 'orderedList', 'table'].includes(node.type)) found.add(node.type);
             for (const name of PARAGRAPH_ATTRS) if (node.attrs?.[name] != null) found.add(name);
             for (const mark of node.marks || []) {
                 if (mark.type === 'textStyle') {
@@ -95,6 +97,7 @@
     function readOnlyReason(field) {
         if (field?.richTextError) return 'This rich text field is read-only: ' + field.richTextError;
         if (!field?.richText) return '';
+        if (field.richText.schemaVersion === 3) return 'This text box contains a table. Tables cannot be edited here yet.';
         try {
             const value = normalize(field.richText);
             // A stored non-minimal version remains stored, and must also be supported.
@@ -156,10 +159,11 @@
     function nodeIds(value) {
         const result = new Set(), pending = [value];
         let visited = 0;
-        while (pending.length && visited++ < 8192) {
+        while (pending.length && visited++ < 32768) {
             const item = pending.pop();
             if (!item || typeof item !== 'object') continue;
             if (typeof item.attrs?.id === 'string') result.add(item.attrs.id);
+            if (Object.hasOwn(item, 'width') && typeof item.id === 'string') result.add(item.id);
             pending.push(...(Array.isArray(item) ? item : Object.values(item)));
         }
         return result;
@@ -191,11 +195,13 @@
         }
         if (envelopeInput) {
             keys(value, ['format', 'schemaVersion', 'doc'], ['format', 'schemaVersion', 'doc']);
-            if (value.format !== 'tiptap' || !Number.isInteger(value.schemaVersion) || ![1, 2].includes(value.schemaVersion)) {
+            if (value.format !== 'tiptap' || !Number.isInteger(value.schemaVersion) || ![1, 2, 3].includes(value.schemaVersion)) {
                 fail('Unsupported rich text envelope.', 'unsupported_rich_text_schema');
             }
         }
         const raw = envelopeInput ? value.doc : value;
+        const tableDocument = hasTable(raw), maxNodes = tableDocument ? 2048 : LIMITS.nodes;
+        if (editor && tableDocument) fail('Tables cannot be edited here yet.', 'unsupported_rich_text_schema');
         const used = new Set(options.reservedIds || []), makeId = options.idFactory || allocate;
         let count = 0;
         function feature2() {
@@ -268,16 +274,21 @@
             return MARKS.filter(type => found.has(type)).map(type => found.get(type));
         }
         function node(item, depth = 0, lists = 0) {
-            if (++count > LIMITS.nodes || depth > LIMITS.depth) fail('Rich text exceeds its node or depth bound.', 'rich_text_too_large');
+            if (++count > maxNodes || depth > LIMITS.depth) fail('Rich text exceeds its node or depth bound.', 'rich_text_too_large');
             keys(item, ['type', 'attrs', 'content', 'text', 'marks'], ['type']);
             const type = item.type;
-            if (!['doc', 'text', ...IDENTIFIED].includes(type) || (type === 'doc') !== (depth === 0)) fail('Unsupported rich text node.');
+            if (!['doc', 'text', ...IDENTIFIED, ...TABLE_NODES].includes(type) || (type === 'doc') !== (depth === 0)) fail('Unsupported rich text node.');
+            if (TABLE_NODES.includes(type) && value.schemaVersion < 3) fail('Tables require schemaVersion 3.', 'unsupported_rich_text_schema');
+            if (type === 'table' && depth !== 1) fail('Tables must be top-level blocks.', 'invalid_table_grid');
+            const identified = IDENTIFIED.includes(type) || TABLE_NODES.includes(type);
             const result = { type };
             const attrs = item.attrs === undefined ? {} : item.attrs;
             const allowed = ['paragraph', 'heading'].includes(type) ? [...PARAGRAPH_ATTRS, ...(type === 'heading' ? ['level'] : [])]
-                : type === 'orderedList' ? ['start', ...(editor ? ['type'] : [])] : [];
-            keys(attrs, [...allowed, ...(IDENTIFIED.includes(type) ? ['id'] : [])], !editor && IDENTIFIED.includes(type) ? ['id'] : []);
-            if (IDENTIFIED.includes(type)) result.attrs = { id: identity(attrs.id) };
+                : type === 'orderedList' ? ['start', ...(editor ? ['type'] : [])]
+                : type === 'table' ? ['ownership', 'style', 'columns']
+                : ['tableCell', 'tableHeader'].includes(type) ? ['colspan', 'rowspan', 'fill', 'verticalAlign'] : [];
+            keys(attrs, [...allowed, ...(identified ? ['id'] : [])], !editor && identified ? (type === 'table' ? ['id', ...allowed] : ['id']) : []);
+            if (identified) result.attrs = { id: identity(attrs.id) };
             for (const name of PARAGRAPH_ATTRS) if (Object.hasOwn(attrs, name)) {
                 if (editor && attrs[name] == null) continue;
                 feature2();
@@ -285,6 +296,29 @@
                 if (parsed == null) { if (!editor) fail('Invalid paragraph attribute.'); continue; }
                 if (name === 'namedStyle' && (type !== 'paragraph' || depth !== 1)) fail('Named styles are allowed on top-level paragraphs only.');
                 result.attrs[name] = parsed;
+            }
+            if (type === 'table') {
+                if (attrs.ownership !== 'authored' || !['grid', 'plain'].includes(attrs.style) || !Array.isArray(attrs.columns) || !attrs.columns.length)
+                    fail('Invalid authored table attributes.', 'invalid_table_grid');
+                if (attrs.columns.length > 12) fail('At most twelve columns.', 'table_too_large');
+                const columns = attrs.columns.map(col => {
+                    keys(col, ['id', 'width'], ['id', 'width']);
+                    if (!Number.isInteger(col.width) || col.width < 1) fail('Invalid column share.', 'invalid_table_grid');
+                    return { id: identity(col.id), width: col.width };
+                });
+                if (columns.reduce((sum, col) => sum + col.width, 0) !== 1000) fail('Column shares must sum to 1000.', 'invalid_table_grid');
+                Object.assign(result.attrs, { ownership: 'authored', style: attrs.style, columns });
+            }
+            if (['tableCell', 'tableHeader'].includes(type)) {
+                for (const name of ['colspan', 'rowspan']) {
+                    const span = attrs[name] === undefined ? 1 : attrs[name];
+                    if (!Number.isInteger(span) || span < 1) fail('Invalid cell span.', 'invalid_table_grid');
+                    if (span > 1) result.attrs[name] = span;
+                }
+                const align = attrs.verticalAlign === undefined ? 'top' : attrs.verticalAlign;
+                if (!['top', 'middle', 'bottom'].includes(align)) fail('Invalid cell alignment.', 'invalid_table_grid');
+                if (align !== 'top') result.attrs.verticalAlign = align;
+                if (Object.hasOwn(attrs, 'fill')) result.attrs.fill = hex(attrs.fill);
             }
             if (type === 'heading') {
                 if (!Number.isInteger(attrs.level) || attrs.level < 1 || attrs.level > 3) fail('Heading levels are limited to 1-3.');
@@ -305,7 +339,7 @@
                 if (normalized.length) result.marks = normalized;
             }
             const children = item.content === undefined ? [] : item.content;
-            if (!Array.isArray(children) || children.length > LIMITS.nodes) fail('Invalid rich text children.');
+            if (!Array.isArray(children) || children.length > maxNodes) fail('Invalid rich text children.');
             if (['text', 'hardBreak'].includes(type)) {
                 if (Object.hasOwn(item, 'content')) fail('Inline leaves cannot have children.');
             } else {
@@ -313,13 +347,35 @@
                     if (++lists > LIMITS.lists) fail('List nesting exceeds six levels.', 'rich_text_too_large');
                     if (lists > 3) feature2();
                 }
+                if (type === 'table' && (children.length > 50 || children.reduce((n, row) => n + (Array.isArray(row?.content) ? row.content.length : 0), 0) > 600))
+                    fail('Table exceeds its row or cell cap.', 'table_too_large');
                 const content = children.map(child => node(child, depth + 1, lists));
                 const types = ['paragraph', 'heading'].includes(type) ? ['text', 'hardBreak']
-                    : ['bulletList', 'orderedList'].includes(type) ? ['listItem'] : BLOCKS;
+                    : ['bulletList', 'orderedList'].includes(type) ? ['listItem']
+                    : type === 'doc' ? [...BLOCKS, 'table'] : type === 'table' ? ['tableRow']
+                    : type === 'tableRow' ? ['tableCell', 'tableHeader'] : ['tableCell', 'tableHeader'].includes(type) ? ['paragraph'] : BLOCKS;
                 if (content.some(child => !types.includes(child.type))
-                    || (!content.length && ['doc', 'bulletList', 'orderedList', 'listItem'].includes(type))
-                    || (type === 'listItem' && content[0]?.type !== 'paragraph')) fail('Invalid rich text child structure.');
+                    || (!content.length && ['doc', 'bulletList', 'orderedList', 'listItem', ...TABLE_NODES].includes(type))
+                    || (type === 'listItem' && content[0]?.type !== 'paragraph')) fail('Invalid rich text child structure.', TABLE_NODES.includes(type) || content.some(c => TABLE_NODES.includes(c.type)) ? 'invalid_table_grid' : 'invalid_rich_text');
                 if (content.length) result.content = content;
+            }
+            if (type === 'table') {
+                const width = result.attrs.columns.length;
+                const grid = result.content.map(() => Array(width).fill(false));
+                result.content.forEach((row, y) => {
+                    let x = 0;
+                    for (const cell of row.content) {
+                        while (x < width && grid[y][x]) x++;
+                        const w = cell.attrs.colspan || 1, h = cell.attrs.rowspan || 1;
+                        if (x + w > width || y + h > grid.length) fail('Cell leaves table.', 'invalid_table_grid');
+                        for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) {
+                            if (grid[yy][xx]) fail('Cells overlap.', 'invalid_table_grid');
+                            grid[yy][xx] = true;
+                        }
+                        x += w;
+                    }
+                });
+                if (grid.some(row => row.some(taken => !taken))) fail('Table has gaps.', 'invalid_table_grid');
             }
             return result;
         }
@@ -328,8 +384,8 @@
         const usedFeatures_ = usedFeatures({ doc });
         const v2 = usedFeatures_.listDepth > 3 || usedFeatures_.features.some(name =>
             SCHEMA2_FEATURES.includes(name));
-        const result = { format: 'tiptap', schemaVersion: v2 ? 2 : 1, doc };
-        if (new TextEncoder().encode(canonical(result)).length > LIMITS.bytes) fail('Rich text exceeds 24 KiB of canonical JSON.', 'rich_text_too_large');
+        const result = { format: 'tiptap', schemaVersion: tableDocument ? 3 : v2 ? 2 : 1, doc };
+        if (new TextEncoder().encode(canonical(result)).length > (tableDocument ? 96 * 1024 : LIMITS.bytes)) fail('Rich text exceeds 24 KiB of canonical JSON.', 'rich_text_too_large');
         if (options.capabilities) requireCapabilities(result, options.capabilities);
         return result;
     }

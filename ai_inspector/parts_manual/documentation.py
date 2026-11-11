@@ -1098,7 +1098,7 @@ def _leaf_commands(commands):
             continue
         if command.get("operation") == "batch":
             children = command.get("commands")
-            if (not isinstance(children, list) or not 1 <= len(children) <= (200 if command.get("rangeBatch") is True else 12)
+            if (not isinstance(children, list) or not 1 <= len(children) <= (224 if command.get("tableBatch") is True else 200 if command.get("rangeBatch") is True else 12)
                     or any(not isinstance(c, Mapping) or c.get("operation") == "batch" for c in children)
                     or command.get("actor") not in DOCUMENTATION_COMMAND_ACTORS
                     or not isinstance(command.get("requestId"), str)
@@ -1892,11 +1892,11 @@ class DocumentationSceneRepository:
     def apply_batch(self, assembly_number, source_revision, manual_plan_revision, *,
                     base_revision, expected_revision, request_id, commands, page_targets,
                     expected_hashes, current_hashes, hashes_revision, actor="sage", payload=None,
-                    allow_confirmation=False, identity_document=None, range_batch=False):
+                    allow_confirmation=False, identity_document=None, range_batch=False, table_results=None):
         """One history entry and one replace. The host compiles/hash-checks under
         transaction_lock and supplies hashes_revision to reject an unlocked race.
         """
-        if not isinstance(commands, list) or not 1 <= len(commands) <= (200 if range_batch else 12):
+        if not isinstance(commands, list) or not 1 <= len(commands) <= (224 if table_results is not None else 200 if range_batch else 12):
             raise DocumentEditError("invalid_document_operation", "Too many commands in this batch.")
         if any(meta.get("confirmation") for command in commands
                for meta in (command.get("fieldMeta") or {}).values()) and not allow_confirmation:
@@ -1947,9 +1947,14 @@ class DocumentationSceneRepository:
             receipt = make_receipt(scene, request_id=request_id, payload_hash=payload_hash,
                 document=document_id(self.document_type, assembly_number), expected_revision=expected_revision,
                 changed=changed, undoable=True)
+            if table_results is not None:
+                receipt["operationResults"] = copy.deepcopy(table_results)
             removed = [target for target, command in zip(changed, persisted) if command.get("richTextRemoved")]
             if removed:
                 receipt["validation"].append({"code": "rich_text_replaced_with_plain", "targetIds": removed})
+            if table_results is not None and len(json.dumps({"ok": True, "data": {"receipt": receipt,
+                    "changed": receipt["changedIds"]}}, ensure_ascii=False, allow_nan=False).encode("utf-8")) > 65536:
+                raise DocumentEditError("codex_result_too_large", "Retry fewer table operations so their identity results fit the tool response.")
             if not changed:
                 retain_receipt(candidate, receipt)
                 guard_restored_fields(scene, candidate)
@@ -1964,7 +1969,8 @@ class DocumentationSceneRepository:
             cursor = scene["historyCursor"]
             candidate["commands"] = list(scene["commands"][:cursor]) + [{
                 "operation": "batch", "commands": persisted, "requestId": request_id, "actor": actor,
-                **({"rangeBatch": True} if range_batch else {})}]
+                **({"rangeBatch": True} if range_batch else {}),
+                **({"tableBatch": True} if table_results is not None else {})}]
             candidate["historyCursor"] = cursor + 1
             candidate["commands"][-1]["change"] = change_record(scene, candidate,
                 scene_paths(scene, candidate, persisted), change_id=receipt["changeId"], actor=actor,

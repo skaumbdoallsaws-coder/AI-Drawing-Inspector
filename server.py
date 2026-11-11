@@ -42070,16 +42070,34 @@ class _DocumentationAgentHost:
             check_alias_binding(observed, snapshot["state"])
             from ai_inspector.documentation.search import coalesce_ranges, RANGE_OPERATIONS
             from ai_inspector.documentation.commands import check_preconditions
+            from ai_inspector.documentation.tables import coalesce_tables, TABLE_OPERATIONS, require_target
+            table_batch = any(op["operation"] in TABLE_OPERATIONS for op in operations)
+            table_results = None
             range_batch = any(op["operation"] in RANGE_OPERATIONS for op in operations)
-            if range_batch:
+            if range_batch or table_batch:
                 # Check every supplied pre-image, including repeated target hashes, before computing edits.
                 for op in operations:
                     target = snapshot["targets"].get(op["targetId"])
+                    if target is not None and op["operation"] in TABLE_OPERATIONS:
+                        require_target(target)
                     if target is not None and op["operation"] in RANGE_OPERATIONS and op["operation"] not in documentation_target_capabilities(target):
                         raise DocumentEditError("read_only_derived_field", "This target does not permit this range edit.", targetId=op["targetId"])
                     check_preconditions(scene, observed["expectedRevision"],
                         {op["targetId"]: op["expectedContentHash"]}, snapshot["hashes"])
-                operations = coalesce_ranges(snapshot["targets"], operations)
+                if table_batch:
+                    from ai_inspector.parts_manual.pdf import _document_object_style, _document_theme
+                    default_width = 792 if document_type == "illustrated_parts_manual" else 612 if document_type == "product_specification_sheet" else 960
+                    page_width = float(snapshot["document"].get("publicationLayout", {}).get("page", {}).get("width") or default_width)
+                    widths = {}
+                    for op in operations:
+                        if op["operation"] in TABLE_OPERATIONS:
+                            item = snapshot["targets"][op["targetId"]]["attributes"]
+                            style = _document_object_style(_document_theme(snapshot["document"]), item)
+                            border = max(0, float(style.get("lineWidth") or 0)) if "outlineColor" in item.get("styleOverrides", {}) else 0
+                            widths[op["targetId"]] = float(item.get("frame", {}).get("width") or 0) * page_width - 2 * (3 + border)
+                    operations, table_results = coalesce_tables(snapshot["targets"], operations, widths)
+                if range_batch:
+                    operations = coalesce_ranges(snapshot["targets"], operations)
             commands, expected = [], {}
             for index, operation in enumerate(operations):
                 target = snapshot["targets"].get(operation["targetId"])
@@ -42113,7 +42131,7 @@ class _DocumentationAgentHost:
                 request_id=observed["requestId"], commands=commands, page_targets=targets,
                 expected_hashes=expected, current_hashes=snapshot["hashes"],
                 hashes_revision=snapshot["state"]["sceneRevision"], actor=actor, payload=observed,
-                identity_document=snapshot["identity_document"], range_batch=range_batch)
+                identity_document=snapshot["identity_document"], range_batch=range_batch, table_results=table_results)
             if document_type == "work_instructions" and result["changed"]:
                 # Adopt legacy figure captures only after a committed mutation.
                 next_document = self._text_scene(assembly_number, document_type)["document"]

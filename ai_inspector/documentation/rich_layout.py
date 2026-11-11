@@ -1,4 +1,4 @@
-"""Bounded authored-text export model and PDF layout (schemas 1 and 2).
+"""Bounded authored-text export model and PDF layout (schemas 1-3).
 
 content_model() is independent of PyMuPDF and contains no PDF positions. DOCX
 consumes that model in P2b-2. Layout uses only PyMuPDF's built-in font programs;
@@ -16,7 +16,7 @@ from .commands import DocumentEditError
 from .rich_text import from_plain, is_rich, validate
 from .rich_fonts import font as canvas_font, line_box, decoration, rounded_metrics, NAMED_STYLES, SCRIPT_SIZE, SUB_OFFSET, SUP_OFFSET
 
-PDF_RENDERER_VERSION = "rich-text-pdf-4"
+PDF_RENDERER_VERSION = "rich-text-pdf-5"
 # The PDF mirrors the canvas: documentation_rich_text.js render() inside a
 # .documentation-object.text box, where one page px is one PDF point. These are
 # that box's CSS and the browser defaults it relies on.
@@ -110,13 +110,36 @@ class Content:
     paragraphs: tuple[Paragraph, ...]
     base_size: float
     base_run: Run
+    blocks: tuple = ()  # Present only for table-bearing documents; old paragraph models are unchanged.
+
+
+@dataclass(frozen=True)
+class TableCell:
+    identity: str
+    row: int
+    column: int
+    rowspan: int
+    colspan: int
+    header: bool
+    fill: str | None
+    vertical_align: str
+    content: Content
+
+
+@dataclass(frozen=True)
+class Table:
+    identity: str
+    style: str
+    columns: tuple
+    row_ids: tuple
+    cells: tuple[TableCell, ...]
 
 
 def _color(value, fallback="#18212a"):
     return value.lower() if isinstance(value, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", value) else fallback
 
 
-def content_model(value, style=None):
+def content_model(value, style=None, *, _validated=False):
     """Native paragraphs/runs/list membership, with no font engine or positions.
 
     Plain strings pass through the schema's lossless from_plain conversion. Its
@@ -130,7 +153,7 @@ def content_model(value, style=None):
         next_id += 1
         return f"rt-00000000-0000-4000-8000-{next_id:012x}"
 
-    envelope = from_plain(value, id_factory=allocate) if isinstance(value, str) else validate(value)
+    envelope = from_plain(value, id_factory=allocate) if isinstance(value, str) else value if _validated else validate(value)
     size = float(style.get("fontSize") or 10)
     if not math.isfinite(size) or not 4 <= size <= 144:
         raise DocumentEditError("invalid_export_layout", "Text object font size must be between 4 and 144 points.")
@@ -141,7 +164,7 @@ def content_model(value, style=None):
     # The PDF lays a justified box out flush left (justification is later work); "justify" is kept so the DOCX can
     # tell the box's alignment from a paragraph's own textAlign, which wins on the canvas.
     align = style.get("textAlign") if style.get("textAlign") in {"left", "center", "right", "justify"} else "left"
-    paragraphs, list_count = [], 0
+    paragraphs, flow, list_count = [], [], 0
 
     def inline(node, paragraph_base):
         marks = {mark["type"]: mark.get("attrs", {}) for mark in node.get("marks", [])}
@@ -160,6 +183,25 @@ def content_model(value, style=None):
     def block(node, path=(), marker=None):
         nonlocal list_count
         kind = node["type"]
+        if kind == "table":
+            from .tables import grid
+            cells = []
+            for entry in grid(node)[0]:
+                cell = entry["cell"]
+                attrs = cell["attrs"]
+                header = cell["type"] == "tableHeader"
+                cell_style = {**style, "textAlign": "left"}
+                cell_style.pop("signalWord", None)
+                if header:
+                    cell_style["fontWeight"] = 700
+                model = content_model({"format": "tiptap", "schemaVersion": 2,
+                    "doc": {"type": "doc", "content": cell["content"]}}, cell_style, _validated=True)
+                paragraphs.extend(model.paragraphs)
+                cells.append(TableCell(attrs["id"], entry["row"], entry["column"], entry["rowspan"], entry["colspan"],
+                    header, attrs.get("fill", "#e9eef2" if header else None), attrs.get("verticalAlign", "top"), model))
+            flow.append(Table(node["attrs"]["id"], node["attrs"]["style"], tuple(node["attrs"]["columns"]),
+                              tuple(row["attrs"]["id"] for row in node["content"]), tuple(cells)))
+            return
         if kind in {"bulletList", "orderedList"}:
             list_count += 1
             identity = f"list-{list_count}"
@@ -189,6 +231,7 @@ def content_model(value, style=None):
                                     path, marker, tuple(runs), attrs.get("indent", 0), attrs.get("spaceBefore", 0),
                                     attrs.get("spaceAfter", 0), attrs.get("lineHeight", style.get("baseLineHeight") or LINE_HEIGHT),
                                     attrs.get("namedStyle"), paragraph_base))
+        flow.append(paragraphs[-1])
 
     for node in envelope["doc"]["content"]:
         block(node)
@@ -196,7 +239,7 @@ def content_model(value, style=None):
         first = paragraphs[0]
         prefix = (replace(base, text=str(style["signalWord"]), bold=True), replace(base, kind="gap", text=" ", gap=3))
         paragraphs[0] = replace(first, runs=prefix + first.runs)
-    return Content(tuple(paragraphs), size, base)
+    return Content(tuple(paragraphs), size, base, tuple(flow) if any(isinstance(b, Table) for b in flow) else ())
 
 
 class _Fonts:
@@ -289,6 +332,8 @@ class Layout:
     overflow: bool
     unrenderable: tuple[str, ...]
     fonts: _Fonts = field(repr=False, compare=False)
+    tables: tuple = ()
+    reasons: tuple = ()
 
 
 def layout_text(value, frame, style=None, *, fitz_module=None, canvas_rounding=False):
@@ -311,10 +356,12 @@ def layout_text(value, frame, style=None, *, fitz_module=None, canvas_rounding=F
         import fitz as fitz_module
     from ai_inspector.parts_manual.pdf import _pdf_font
 
-    content = content_model(value, style)
+    content = value if isinstance(value, Content) else content_model(value, style)
     bounds = tuple(float(n) for n in frame)
     if len(bounds) != 4 or not all(math.isfinite(n) for n in bounds):
         raise DocumentEditError("invalid_export_layout", "Text object frame must contain finite point coordinates.")
+    if content.blocks:
+        return _layout_blocks(content, bounds, fitz_module, canvas_rounding)
     x0, y0, x1, y1 = bounds
     fonts = _Fonts(fitz_module)
 
@@ -500,6 +547,110 @@ def layout_text(value, frame, style=None, *, fitz_module=None, canvas_rounding=F
                   tuple(f"U+{code:04X}" for code in sorted(fonts.missing)), fonts)
 
 
+
+@dataclass(frozen=True)
+class CellLayout:
+    model: TableCell
+    box: tuple
+    content_box: tuple
+    layout: Layout
+
+
+@dataclass(frozen=True)
+class TableLayout:
+    model: Table
+    box: tuple
+    column_edges: tuple
+    row_edges: tuple
+    cells: dict
+    rules: tuple
+
+
+def _translate(plan, x, y, paragraph_offset=0):
+    def rect(r):
+        return (r[0] + x, r[1] + y, r[2] + x, r[3] + y) if r else ()
+    lines = tuple(replace(line, paragraph=line.paragraph + paragraph_offset, top=line.top + y,
+        baseline=line.baseline + y, runs=tuple(replace(run, x=run.x + x, baseline=run.baseline + y,
+        rect=rect(run.rect), highlight_rect=rect(run.highlight_rect)) for run in line.runs)) for line in plan.lines)
+    return replace(plan, frame=rect(plan.frame), lines=lines)
+
+
+def _table_rules(cells):
+    # Merge collinear cell edges so a shared rule is painted once, even at a T junction.
+    edges = {}
+    for cell in cells.values():
+        x0, y0, x1, y1 = cell.box
+        for axis, fixed, start, end in ((0, x0, y0, y1), (0, x1, y0, y1), (1, y0, x0, x1), (1, y1, x0, x1)):
+            edges.setdefault((axis, fixed), []).append((start, end))
+    result = []
+    for (axis, fixed), intervals in edges.items():
+        merged = []
+        for start, end in sorted(intervals):
+            if merged and start <= merged[-1][1] + 1e-9:
+                merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
+            else:
+                merged.append((start, end))
+        result.extend((fixed, start, fixed, end) if axis == 0 else (start, fixed, end, fixed) for start, end in merged)
+    return tuple(result)
+
+
+def _layout_blocks(content, bounds, fitz, canvas_rounding):
+    from .tables import column_widths, row_heights
+    x0, y0, x1, y1 = bounds
+    lines, tables, top, offset = [], [], y0, 0
+    fonts, reasons = _Fonts(fitz), set()
+    overflow = x1 <= x0 or y1 <= y0
+    def adopt(plan):
+        nonlocal overflow
+        lines.extend(plan.lines)
+        fonts.fonts.update(plan.fonts.fonts)
+        fonts.missing.update(plan.fonts.missing)
+        overflow = overflow or plan.overflow
+    for block in content.blocks:
+        if isinstance(block, Paragraph):
+            plan = layout_text(Content((block,), content.base_size, content.base_run),
+                (x0, top, x1, top + 1e9), fitz_module=fitz, canvas_rounding=canvas_rounding)
+            adopt(_translate(plan, 0, 0, offset))
+            top += plan.measured_height
+            offset += 1
+            continue
+        widths = column_widths(x1 - x0, [col["width"] for col in block.columns], canvas_rounding=canvas_rounding)
+        if any(width < 12 for width in widths):
+            reasons.add("table_column_too_narrow")
+        columns = [x0 + .5]
+        for width in widths:
+            columns.append(columns[-1] + width)
+        cell_plans, needed = {}, []
+        for cell in block.cells:
+            width = columns[cell.column + cell.colspan] - columns[cell.column] - 9
+            plan = layout_text(cell.content, (0, 0, width, 1e9), fitz_module=fitz, canvas_rounding=canvas_rounding)
+            cell_plans[cell.identity] = plan
+            needed.append({"row": cell.row, "column": cell.column, "rowspan": cell.rowspan,
+                           "boxHeight": plan.measured_height + 9})
+        heights = row_heights(len(block.row_ids), needed, canvas_rounding=canvas_rounding)
+        rows = [top + .5]
+        for height in heights:
+            rows.append(rows[-1] + height)
+        cells = {}
+        for cell in block.cells:
+            box = (columns[cell.column], rows[cell.row], columns[cell.column + cell.colspan], rows[cell.row + cell.rowspan])
+            content_box = (box[0] + 4.5, box[1] + 4.5, box[2] - 4.5, box[3] - 4.5)
+            plan = cell_plans[cell.identity]
+            spare = max(0, content_box[3] - content_box[1] - plan.measured_height)
+            shift = spare / 2 if cell.vertical_align == "middle" else spare if cell.vertical_align == "bottom" else 0
+            plan = _translate(plan, content_box[0], content_box[1] + shift, offset)
+            plan = replace(plan, frame=content_box)
+            cells[cell.identity] = CellLayout(cell, box, content_box, plan)
+            adopt(plan)
+            offset += len(cell.content.paragraphs)
+        height = sum(heights) + 1
+        tables.append(TableLayout(block, (x0, top, x1, top + height), tuple(columns), tuple(rows), cells, _table_rules(cells)))
+        top += height
+    height = top - y0
+    return Layout(content, bounds, tuple(lines), height, overflow or bool(reasons) or height > y1 - y0 + _EPSILON,
+                  tuple(f"U+{c:04X}" for c in sorted(fonts.missing)), fonts, tuple(tables), tuple(sorted(reasons)))
+
+
 def authored_objects(descriptor):
     """Return a display object plus its canonical content, never its projection."""
     display = descriptor.get("documentationObjects") or {}
@@ -563,6 +714,7 @@ def prepare_pdf_objects(fitz, document, page_size, *, rich_only=False, canvas_ro
             reasons = [reason for reason, failed in (
                 ("outside_page", x < 0 or y < 0 or x + w > 1 + 1e-9 or y + h > 1 + 1e-9),
                 ("text_does_not_fit", layout.overflow)) if failed]
+            reasons.extend(reason for reason in layout.reasons if reason not in reasons)
             if reasons:
                 overflowing.append({**target, "reasons": reasons, "measuredHeight": layout.measured_height,
                                     "frame": list(bounds)})
@@ -597,6 +749,16 @@ def draw_pdf_object(fitz, page, plan):
         border = fitz.Rect(rect.x0 + outline_width / 2, rect.y0 + outline_width / 2,
                            rect.x1 - outline_width / 2, rect.y1 - outline_width / 2)
         page.draw_rect(border, color=_hex_rgb(style.get("outlineColor"), "#ABBAC4"), width=outline_width, stroke_opacity=opacity)
+    for table in plan.layout.tables:
+        for cell in table.cells.values():
+            if cell.model.fill:
+                page.draw_rect(fitz.Rect(cell.box), color=None, fill=_hex_rgb(cell.model.fill), fill_opacity=opacity)
+    for table in plan.layout.tables:
+        if table.model.style == "grid":
+            for x0, y0, x1, y1 in table.rules:
+                # Projecting caps: rules that meet at a corner close it, as the canvas borders do.
+                page.draw_line((x0, y0), (x1, y1), color=_hex_rgb("#8a98a5"), width=1, lineCap=2,
+                               stroke_opacity=opacity)
     # Paint all inline backgrounds before any glyphs (including adjacent runs).
     for line in plan.layout.lines:
         for run in line.runs:

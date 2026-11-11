@@ -197,7 +197,7 @@ def write_json(path, value):
 class IsolatedDocumentationServer:
     def __init__(self, output, phase=None):
         self.output = output
-        self.rich_text = phase in {"P2a", "P2b", "P3a"}
+        self.rich_text = phase in {"P2a", "P2b", "P3a", "P3b"}
         self.temporary = self.process = self.log = None
         self.original = {}
 
@@ -2160,8 +2160,10 @@ def run_p3a_editor(page, h, page_id, prior_keys, output, report, record, tool):
            None if same_canvas(before_canvas, after_canvas) else {"before": before_canvas, "after": after_canvas})
     read = tool("read_document_pages", {"documentType": h.spec, "targets": [{"pageId": page_id, "targetId": key}]})
     assert read.get("ok"), read
+    # P3b: a text box also takes schema 3 and the table feature (FEATURES now ends with it).
     record("p3a2_read_capabilities", read["data"]["targets"][0]["richTextCapabilities"] == {
-        "schemaVersions": [1, 2], "features": list(FEATURES), "listDepth": 6})
+        "schemaVersions": [1, 2, 3], "features": list(FEATURES), "listDepth": 6},
+        read["data"]["targets"][0]["richTextCapabilities"])
     write_json(output / "p3a2-comparison.json", report["p3a2Exports"])
 
 
@@ -2512,6 +2514,256 @@ def run_p3a_search(h, output, report, record, tool):
     write_json(output / "p3a4-comparison.json", report["p3a4Exports"])
 
 
+def run_p3b(page, request, server, output, report, record, begin_edit, tool, fresh_page):
+    """P3b part 1: Sage-authored table, real canvas, workspace exports and undo."""
+    from copy import deepcopy
+    import fitz
+    from ai_inspector.documentation import tables
+    from ai_inspector.documentation.commands import canonical_bytes
+    from ai_inspector.documentation.rich_text import plain_text, node_ids
+    from ai_inspector.documentation.rich_layout import prepare_pdf_objects
+    from tests.documentation_rich_export_support import compare_pdf, compare_docx
+
+    kind, key = "operations_and_maintenance_manual", "document-object-p3b"
+    h = rich_browser_helpers(page, request, server, output, report, begin_edit, fresh_page, "P3b")
+    page_id = h.create(kind, key, "Authored table", frame={"x": .12, "y": .24, "width": .7, "height": .55},
+                       style={"fontFamily": "Arial", "fontSize": 10})
+    page = h.open_document(kind, page_id, pointer_refresh=True)
+    evidence = {"steps": []}
+    sequence = 0
+
+    def read_field():
+        result = tool("read_document_pages", {"documentType": kind, "targets": [{"pageId": page_id, "targetId": key}]})
+        assert result.get("ok"), result
+        return result["data"], result["data"]["targets"][0]
+
+    def stored():
+        return h.field(h.scene(kind), key)["richText"]
+
+    def table(value):
+        return next(n for n in value["doc"]["content"] if n["type"] == "table")
+
+    def apply(operations, name):
+        nonlocal sequence
+        sequence += 1
+        full, field = read_field()
+        previous = deepcopy(field.get("richText"))
+        result = tool("apply_document_edits", {"documentId": full["documentId"],
+            "expectedRevision": field["binding"]["revision"], "requestId": "p3b-" + str(sequence),
+            "operations": [{**op, "targetId": field["targetId"], "expectedContentHash": field["contentHash"]} for op in operations]})
+        assert result.get("ok"), result
+        receipt = result["data"]["receipt"]
+        value = stored()
+        record("p3b_" + name + "_canonical", value["schemaVersion"] == 3 and plain_text(value) == h.field(h.scene(kind), key)["text"])
+        if previous:
+            # Pure style/range writes retain the complete ID inventory; structural changes are checked below.
+            if all(op["operation"] in {"replace_range", "format_range"} or op.get("action", "").startswith("set_") for op in operations):
+                record("p3b_" + name + "_ids", node_ids(previous) == node_ids(value))
+        results = receipt.get("operationResults")
+        if results:
+            record("p3b_" + name + "_result_ids", results[-1]["table"] == tables.describe(table(value)))
+        evidence["steps"].append({"name": name, "value": value, "receipt": receipt})
+        write_json(output / "p3b-table.json", evidence)
+        return value, receipt
+
+    value, created = apply([{"operation": "create_table", "rows": 3, "columns": 4, "headerRow": True}], "create")
+    identity = created["operationResults"][0]["table"]
+    record("p3b_created_grid", len(identity["rows"]) == 3 and len(identity["columnIds"]) == 4
+           and all(len(r["cellIds"]) == 4 for r in identity["rows"]))
+    initial_ids = node_ids(value)
+    # Empty cells are separated in the projection, so every insertion refers to a distinct pre-image boundary.
+    start = len("Authored table") + 1
+    text = plain_text(value)
+    fills = [{"operation": "replace_range", "start": start + n, "end": start + n, "expectedText": "", "text": "Cell " + str(n + 1)}
+             for n in range(12)]
+    value, _ = apply(fills, "fill")
+    record("p3b_fill_keeps_all_ids", node_ids(value) == initial_ids)
+    text = plain_text(value)
+    start = text.index("Cell 6")
+    value, _ = apply([{"operation": "format_range", "start": start, "end": start + 6, "expectedText": "Cell 6",
+                       "add": [{"feature": "bold"}]}], "format")
+
+    def modify(action, **extra):
+        return {"operation": "modify_table", "tableId": identity["tableId"], "action": action, **extra}
+
+    before_merge = deepcopy(value)
+    value, _ = apply([modify("merge_cells", cellIds=identity["rows"][0]["cellIds"][:2]),
+                      modify("merge_cells", cellIds=[identity["rows"][1]["cellIds"][2], identity["rows"][2]["cellIds"][2]])], "merge")
+    anchors = tables.grid(table(value))[0]
+    record("p3b_merge_survivors", any(e["cell"]["attrs"]["id"] == identity["rows"][0]["cellIds"][0] and e["colspan"] == 2 for e in anchors)
+           and any(e["cell"]["attrs"]["id"] == identity["rows"][1]["cellIds"][2] and e["rowspan"] == 2 for e in anchors))
+    record("p3b_merge_paragraph_ids", {p["attrs"]["id"] for row in table(before_merge)["content"] for cell in row["content"] for p in cell["content"]}
+           == {p["attrs"]["id"] for row in table(value)["content"] for cell in row["content"] for p in cell["content"]})
+    value, _ = apply([modify("set_widths", widths=[{"columnId": cid, "width": width}
+                        for cid, width in zip(identity["columnIds"], [200, 300, 250, 250])]),
+                      modify("set_cell_style", cellIds=[identity["rows"][1]["cellIds"][2]], style={"fill": "#fff0aa", "verticalAlign": "middle"}),
+                      modify("set_cell_style", cellIds=[identity["rows"][2]["cellIds"][3]], style={"verticalAlign": "bottom"})], "style")
+    before_insert = deepcopy(value)
+    value, inserted = apply([modify("insert_row", rowId=identity["rows"][1]["rowId"], position="before"),
+                            modify("insert_column", columnId=identity["columnIds"][1], position="after")], "insert")
+    record("p3b_insert_preserves_ids", node_ids(before_insert) < node_ids(value))
+    inserted_identity = inserted["operationResults"][-1]["table"]
+    new_row = next(r["rowId"] for r in inserted_identity["rows"] if r["rowId"] not in {r["rowId"] for r in identity["rows"]})
+    new_column = next(c for c in inserted_identity["columnIds"] if c not in identity["columnIds"])
+    value, _ = apply([modify("delete_row", rowId=new_row), modify("delete_column", columnId=new_column)], "delete")
+    record("p3b_delete_restores_ids", node_ids(value) == node_ids(before_insert))
+    # Supervisor: one-line cells cannot show a wrong row rule. Wrap one cell, and make the merged cell taller than
+    # its two rows so the canvas shares the difference between them (fractions of 1/64 px).
+    text = plain_text(value)
+    wrap = "Torque every fastener to the value on the drawing, then mark it with paint."
+    tall = ("Check the hydraulic oil level at the sight glass before every shift. Top up with ISO VG 46 oil only. "
+            "Do not mix oil grades. Record the level, the date and your initials on the lubrication chart beside "
+            "the machine.")
+    ids_before_wrap = node_ids(value)
+    value, _ = apply([{"operation": "replace_range", "start": text.index("Cell 8"), "end": text.index("Cell 8") + 6,
+                       "expectedText": "Cell 8", "text": wrap},
+                      {"operation": "replace_range", "start": text.index("Cell 7"), "end": text.index("Cell 7") + 6,
+                       "expectedText": "Cell 7", "text": tall}], "wrap")
+    record("p3b_wrap_keeps_all_ids", node_ids(value) == ids_before_wrap)
+    value, _ = apply([modify("set_cell_style", cellIds=[identity["rows"][1]["cellIds"][1]],
+                             style={"verticalAlign": "middle"})], "align")
+    before_last = deepcopy(value)
+    value, _ = apply([modify("set_cell_style", cellIds=[identity["rows"][1]["cellIds"][0]], style={"fill": "#dceeff"})], "last_batch")
+
+    page = h.open_document(kind, page_id, pointer_refresh=True)
+    record("p3b_reload_ids_and_bytes", canonical_bytes(stored()) == canonical_bytes(value))
+    _, field = read_field()
+    record("p3b_capabilities", field["richTextCapabilities"]["schemaVersions"] == [1, 2, 3]
+           and "table" in field["richTextCapabilities"]["features"])
+
+    def measure(stem="p3b"):
+        snapshot = h.scene(kind)["document"]
+        box = h.box(key)
+        whole = box.evaluate(CANVAS_LINES_JS)
+        item = next(p for p in snapshot["pages"] if p["pageId"] == page_id)["documentationObjects"][key]
+        size = (whole["width"] / item["frame"]["width"], whole["height"] / item["frame"]["height"])
+        plan = prepare_pdf_objects(fitz, snapshot, size, canvas_rounding=True)[page_id][key]
+        geometry = box.evaluate("""box => {
+            const bounds = box.getBoundingClientRect(), css = getComputedStyle(box);
+            const scale = bounds.width / parseFloat(css.width);
+            const left = bounds.left + (parseFloat(css.borderLeftWidth) + parseFloat(css.paddingLeft)) * scale;
+            const top = bounds.top + (parseFloat(css.borderTopWidth) + parseFloat(css.paddingTop)) * scale;
+            const rect = node => { const r = node.getBoundingClientRect(); return [
+                (r.left - left) / scale, (r.top - top) / scale, (r.right - left) / scale, (r.bottom - top) / scale]; };
+            const table = box.querySelector('table');
+            return {table: rect(table), columns: [...table.querySelectorAll('col')].map(rect),
+                rows: [...table.querySelectorAll('tr')].map(rect),
+                cells: [...table.querySelectorAll('td,th')].map(c => ({id:c.dataset.richId, box:rect(c)}))};
+        }""")
+        expected = plan.layout.tables[0]
+        x, y = plan.layout.frame[:2]
+        local = lambda rect: [rect[0] - x, rect[1] - y, rect[2] - x, rect[3] - y]
+        # Supervisor: 0.05 px. The table rules are measured Chromium facts to 1/64 px; one px would hide an error.
+        near = lambda a, b, tol=.05: len(a) == len(b) and all(abs(v - w) <= tol for v, w in zip(a, b))
+        record(stem + "_canvas_table_box", near(geometry["table"], local(expected.box))
+               and abs(whole["contentHeight"] - plan.layout.measured_height) <= .05,
+               {"canvas": geometry["table"], "layout": local(expected.box), "canvasHeight": whole["contentHeight"],
+                "layoutHeight": plan.layout.measured_height})
+        record(stem + "_canvas_column_edges", all(near([c[0], c[2]], [expected.column_edges[n] - x, expected.column_edges[n + 1] - x])
+            for n, c in enumerate(geometry["columns"])),
+            {"canvas": geometry["columns"], "layout": [edge - x for edge in expected.column_edges]})
+        record(stem + "_canvas_row_edges", all(near([r[1], r[3]], [expected.row_edges[n] - y, expected.row_edges[n + 1] - y])
+            for n, r in enumerate(geometry["rows"])),
+            {"canvas": geometry["rows"], "layout": [edge - y for edge in expected.row_edges]})
+        lines = {}
+        for number, cell in enumerate(geometry["cells"], 1):
+            cid = cell["id"]
+            actual = box.locator('[data-rich-id="' + cid + '"]').evaluate(CANVAS_LINES_JS)
+            element = box.locator('[data-rich-id="' + cid + '"]')
+            inset = element.evaluate("""node => {const s=getComputedStyle(node);return [
+                parseFloat(s.borderLeftWidth)+parseFloat(s.paddingLeft), parseFloat(s.borderTopWidth)+parseFloat(s.paddingTop)];}""")
+            expected_cell = expected.cells[cid]
+            want = [{"text": "".join(r.text for r in line.runs), "left": line.runs[0].x - x,
+                     "top": line.runs[0].rect[1] - y, "bottom": line.runs[0].rect[3] - y}
+                    for line in expected_cell.layout.lines if line.runs]
+            got = [{"text": line["text"], "left": line["left"] + cell["box"][0] + inset[0],
+                    "top": line["top"] + cell["box"][1] + inset[1], "bottom": line["bottom"] + cell["box"][1] + inset[1]}
+                   for line in actual["lines"] if line["text"].strip()]
+            record(stem + "_canvas_cell_%02d" % number, near(cell["box"], local(expected_cell.box)) and len(got) == len(want)
+                   and all(a["text"] == b["text"] and near([a[k] for k in ("left", "top", "bottom")],
+                       [b[k] for k in ("left", "top", "bottom")]) for a, b in zip(got, want)),
+                   {"id": cid, "canvasBox": cell["box"], "layoutBox": local(expected_cell.box), "canvas": got, "layout": want})
+            lines[cid] = got
+        h.screenshot(stem + "-table")
+        box.screenshot(path=str(output / (stem + "-canvas-table.png")))
+        return {"geometry": geometry, "lines": lines}, snapshot, plan
+
+    measured, snapshot, plan = measure()
+    shape = plan.layout.tables[0]
+    heights = [b - a for a, b in zip(shape.row_edges, shape.row_edges[1:])]
+    spare = {cid: (cell.content_box[3] - cell.content_box[1]) - cell.layout.measured_height
+             for cid, cell in shape.cells.items()}
+    # The proof must really contain what it claims: wrapped cells, a merged cell that stretches its rows to a
+    # fractional height, and aligned cells with room to move.
+    record("p3b_proof_has_wrapped_and_stretched_rows",
+           sum(len(lines) > 1 for lines in measured["lines"].values()) >= 2
+           and any(abs(h - round(h)) > .01 for h in heights)
+           and spare[identity["rows"][1]["cellIds"][1]] > 4 and spare[identity["rows"][2]["cellIds"][3]] > 4,
+           {"rowHeights": heights, "lines": {cid: len(lines) for cid, lines in measured["lines"].items()},
+            "spare": spare})
+    page.locator("#documentationCaptureAllRibbon").click(no_wait_after=True)
+    page.wait_for_function("""() => {
+        const figures = (window.__compareDbg.state.partsManualDocumentation?.document?.pages || []).filter(p => p.renderRequest);
+        return figures.length && figures.every(p => p.renderRequest.image?.status === 'ready')
+            && !document.querySelector('#documentationWorkspace.busy');
+    }""", timeout=240000)
+    artifacts = {}
+    for format in ("pdf", "docx"):
+        response, result = h.press_export(kind, format)
+        assert response.ok, result
+        artifacts[format] = h.download(result[format], "p3b-table." + format)
+    snapshot = h.scene(kind)["document"]
+    evidence["pdf"] = compare_pdf(artifacts["pdf"], snapshot, page_id, key, output / "p3b-pdf.png")
+    evidence["docx"] = compare_docx(artifacts["docx"], key, plan.layout.content)
+    record("p3b_exports", docx_run_text(artifacts["docx"], key) == plain_text(value).replace("\n", ""))
+    revision = h.scene(kind)["revision"]
+    # Supervisor: a schema-3 field must not open an editor, so wait for the notice (begin_edit otherwise waits for
+    # an editable element and gives up after three double presses).
+    h.begin_edit(h.box(key), read_only=True)
+    notice = "This text box contains a table. Tables cannot be edited here yet."
+    shown = page.locator(".documentation-rich-readonly").first
+    shown.wait_for(state="visible")
+    record("p3b_read_only", notice in shown.inner_text()
+           and page.evaluate("() => DocumentationRichText.mountedCount") == 0
+           and page.locator('[contenteditable="true"]').count() == 0
+           and h.scene(kind)["revision"] == revision and stored() == value, shown.inner_text())
+    h.screenshot("read-only")
+    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/undo"), timeout=120000) as response:
+        page.locator("#documentationUndoRibbon").click()
+    response.value.finished()
+    assert response.value.ok, response.value.text()[:1000]
+    h.idle()
+    record("p3b_one_undo_exact_preimage", canonical_bytes(stored()) == canonical_bytes(before_last))
+    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/redo"), timeout=120000) as response:
+        page.locator("#documentationRedoRibbon").click()
+    response.value.finished()
+    assert response.value.ok, response.value.text()[:1000]
+    h.idle()
+    page = h.open_document(kind, page_id, pointer_refresh=True)
+    record("p3b_reopen_after_redo", canonical_bytes(stored()) == canonical_bytes(value))
+    reopened, _, _ = measure("p3b-reopened")
+    record("p3b_reopened_canvas", same_canvas(measured, reopened))
+    evidence["canvas"] = measured
+    # Transparent rules are a distinct authored table style: measure and export it in the real app too.
+    plain, _ = apply([modify("set_table_style", style="plain")], "plain_style")
+    h.refresh(pointer=True)
+    plain_canvas, plain_snapshot, plain_plan = measure("p3b-plain")
+    plain_artifacts = {}
+    for format in ("pdf", "docx"):
+        response, result = h.press_export(kind, format)
+        assert response.ok, result
+        plain_artifacts[format] = h.download(result[format], "p3b-plain-table." + format)
+    evidence["plain"] = {"canvas": plain_canvas,
+        "pdf": compare_pdf(plain_artifacts["pdf"], plain_snapshot, page_id, key, output / "p3b-plain-pdf.png"),
+        "docx": compare_docx(plain_artifacts["docx"], key, plain_plan.layout.content)}
+    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/undo"), timeout=120000) as response:
+        page.locator("#documentationUndoRibbon").click()
+    response.value.finished(); assert response.value.ok, response.value.text()[:1000]
+    h.idle()
+    record("p3b_plain_style_undo", canonical_bytes(stored()) == canonical_bytes(value))
+    write_json(output / "p3b-table.json", evidence)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--phase", required=True, choices=PHASES)
@@ -2590,8 +2842,8 @@ def main():
         raise RuntimeError("Inline edit did not start after three double presses")
 
     try:
-        if args.phase not in {"P1a", "P1b", "P1c", "P2a", "P2b", "P3a"}:
-            raise RuntimeError("Only the P1a, P1b, P1c, P2a, P2b and P3a parts 1-2 gates are implemented.")
+        if args.phase not in {"P1a", "P1b", "P1c", "P2a", "P2b", "P3a", "P3b"}:
+            raise RuntimeError("Only the P1a-P3a and P3b part 1 gates are implemented.")
         from playwright.sync_api import sync_playwright
         server.start()
         report["isolation"] = server.isolation
@@ -2680,7 +2932,9 @@ def main():
                 raise RuntimeError(f"Tool HTTP {response.status}: {response.text()[:800]}")
             return response.json()
 
-        if args.phase == "P3a":
+        if args.phase == "P3b":
+            run_p3b(page, request, server, output, report, record, begin_edit, tool, fresh_page)
+        elif args.phase == "P3a":
             run_p3a(page, request, server, output, report, record, begin_edit, tool, fresh_page)
         elif args.phase == "P2b":
             run_p2b(page, request, server, output, report, record, begin_edit, tool, fresh_page)

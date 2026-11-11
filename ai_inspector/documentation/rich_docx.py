@@ -6,7 +6,7 @@ from .commands import DocumentEditError
 from .rich_fonts import font
 from .rich_layout import authored_objects, content_model, PADDING, LIST_INDENT
 
-DOCX_RENDERER_VERSION = "rich-text-docx-4"
+DOCX_RENDERER_VERSION = "rich-text-docx-5"
 
 
 def font_family(value):
@@ -259,7 +259,96 @@ class DocxObjects:
         cell._tc.get_or_add_tcPr().append(margins)
         cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
         write_content(self.output, item.content, item.target, cell.add_paragraph,
-                      first=cell.paragraphs[0], numbering=self.numbering)
+                      first=cell.paragraphs[0], numbering=self.numbering, container=cell,
+                      table_width=width - 2 * (PADDING + outline))
+
+
+def _write_table(output, model, target, container, width, numbering):
+    from docx.table import _Cell
+    from .tables import column_widths
+    columns = column_widths(width, [c["width"] for c in model.columns])
+    if any(w < 12 for w in columns):
+        raise DocumentEditError("layout_overflow", "Table columns must be at least twelve points wide.",
+            targets=[{**target, "reasons": ["table_column_too_narrow"]}])
+    twips = [round(w * 20) for w in columns[:-1]]
+    twips.append(round((width - 1) * 20) - sum(twips))
+    table = _element("w:tbl")
+    props = _element("w:tblPr")
+    props.append(_element("w:tblW", w=sum(twips), type="dxa"))
+    props.append(_element("w:tblLayout", type="fixed"))
+    table.append(props)
+    grid = _element("w:tblGrid")
+    for w in twips:
+        grid.append(_element("w:gridCol", w=w))
+    table.append(grid)
+    occupied = {}
+    for cell in model.cells:
+        for y in range(cell.row, cell.row + cell.rowspan):
+            for x in range(cell.column, cell.column + cell.colspan):
+                occupied[y, x] = cell
+    for y in range(len(model.row_ids)):
+        row = _element("w:tr")
+        row_props = _element("w:trPr")
+        row_props.append(_element("w:cantSplit"))
+        row.append(row_props)
+        x = 0
+        while x < len(columns):
+            model_cell = occupied[y, x]
+            cell = _element("w:tc")
+            props = _element("w:tcPr")
+            props.append(_element("w:tcW", w=sum(twips[x:x + model_cell.colspan]), type="dxa"))
+            if model_cell.colspan > 1:
+                props.append(_element("w:gridSpan", val=model_cell.colspan))
+            if model_cell.rowspan > 1:
+                props.append(_element("w:vMerge", val="restart" if y == model_cell.row else "continue"))
+            borders = _element("w:tcBorders")
+            for edge in ("top", "left", "bottom", "right"):
+                borders.append(_element("w:" + edge, **({"val": "single", "sz": 8, "color": "8A98A5"}
+                    if model.style == "grid" else {"val": "nil"})))
+            props.append(borders)
+            if model_cell.fill:
+                props.append(_element("w:shd", val="clear", color="auto", fill=model_cell.fill.lstrip("#").upper()))
+            margins = _element("w:tcMar")
+            for edge in ("top", "left", "bottom", "right"):
+                margins.append(_element("w:" + edge, w=90, type="dxa"))
+            props.append(margins)
+            props.append(_element("w:vAlign", val="center" if model_cell.vertical_align == "middle" else model_cell.vertical_align))
+            cell.append(props)
+            row.append(cell)
+            first = _element("w:p")
+            cell.append(first)
+            if y == model_cell.row:
+                proxy = _Cell(cell, container)
+                write_content(output, model_cell.content, target, proxy.add_paragraph,
+                              first=proxy.paragraphs[0], numbering=numbering)
+            x += model_cell.colspan
+        table.append(row)
+    container._tc.append(table)
+
+
+def _write_flow(output, content, target, add_paragraph, first, numbering, container, width):
+    from .rich_layout import Content, Table
+    if container is None or width is None:
+        raise DocumentEditError("invalid_export_layout", "An authored table requires its text-box flow and width.")
+    pending = first
+    for block in content.blocks:
+        if isinstance(block, Table):
+            if pending is not None:
+                pending._p.getparent().remove(pending._p)
+                pending = None
+            _write_table(output, block, target, container, width, numbering)
+        else:
+            write_content(output, Content((block,), content.base_size, content.base_run), target,
+                          add_paragraph, first=pending, numbering=numbering)
+            pending = None
+    if isinstance(content.blocks[-1], Table):
+        # OOXML requires a final paragraph in a cell, even after a nested table.
+        paragraph = add_paragraph()
+        props = paragraph._p.get_or_add_pPr()
+        props.append(_element("w:spacing", before=0, after=0, line=1, lineRule="exact"))
+        run = _element("w:rPr")
+        run.append(_element("w:sz", val=1))
+        props.append(run)
 
 
 def narrative_bookmark(target):
@@ -267,7 +356,8 @@ def narrative_bookmark(target):
     return "rich_" + hashlib.sha256(str(target).encode("utf-8")).hexdigest()[:24]
 
 
-def write_content(output, content, target, add_paragraph=None, *, first=None, numbering=None, narrative=False):
+def write_content(output, content, target, add_paragraph=None, *, first=None, numbering=None, narrative=False,
+                  container=None, table_width=None):
     """Native paragraphs in the caller's flow (or an authored object's existing cell)."""
     from dataclasses import replace
     from docx.oxml.ns import qn
@@ -280,6 +370,8 @@ def write_content(output, content, target, add_paragraph=None, *, first=None, nu
     if invalid:
         raise DocumentEditError("unsupported_export_character", "DOCX XML cannot represent these characters.",
                                 targets=[target], codePoints=[f"U+{c:04X}" for c in invalid])
+    if content.blocks:
+        return _write_flow(output, content, target, add_paragraph, first, numbering, container, table_width)
     for index, model in enumerate(content.paragraphs):
         paragraph = first if index == 0 and first is not None else add_paragraph()
         if narrative:

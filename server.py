@@ -42213,6 +42213,77 @@ class _DocumentationAgentHost:
         snapshot = self.document_snapshot(assembly_number, document_type)
         return read_objects(snapshot, page_ids, PARTS_MANUAL_ROOT, assembly_number)
 
+    def _page_setup_edit(self, assembly_number, document_type, observed, snapshot, loaded, repository, actor):
+        """The scene command's candidate check, inside the receipt-bearing scene transaction."""
+        from ai_inspector.documentation.commands import content_hash
+        from ai_inspector.documentation.layout import normalize_page_setup
+        document, scene = snapshot["document"], loaded["scene"]
+        value = observed["operations"][0]["pageSetup"]
+        if value is not None:
+            value = normalize_page_setup(document_type, value)
+        assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
+        if document_type == "illustrated_parts_manual":
+            plan = _parts_manual_repository().read(catalog["assemblyNumber"], catalog["sourceRevision"],
+                known_occurrence_ids=[row["occurrenceId"] for row in catalog["occurrences"]])
+            compile_scene = lambda candidate: build_manual_document(plan["plan"], catalog["occurrences"], assembly_data,
+                plan_revision=plan["revision"], documentation_scene=candidate,
+                documentation_scene_revision=documentation_scene_revision(candidate))
+            root = PARTS_MANUAL_ROOT
+        elif document_type == "operations_and_maintenance_manual":
+            compile_scene = lambda candidate: build_operations_manual_document(assembly_data, catalog,
+                evidence_root=OPERATIONS_MANUAL_EVIDENCE_ROOT, documentation_scene=candidate,
+                documentation_scene_revision=documentation_scene_revision(candidate))
+            root = OPERATIONS_MANUAL_ROOT
+        elif document_type == "work_instructions":
+            compile_scene = lambda candidate: _work_instruction_document_for_scene(assembly_data, catalog,
+                scene=candidate, scene_revision=documentation_scene_revision(candidate))
+            root = WORK_INSTRUCTION_ROOT
+        else:
+            compile_scene = lambda candidate: _specification_sheet_compile(assembly_data, catalog,
+                documentation_scene=candidate, identity_document=snapshot["identity_document"],
+                documentation_scene_revision=documentation_scene_revision(candidate))
+            root = SPECIFICATION_SHEET_ROOT
+        command = _documentation_prepare_scene_command(document, loaded, {
+            "operation": "set_page_setup", "targetType": "document_page_setup", "targetId": "page-setup",
+            "pageId": document["pages"][0]["pageId"], "pageSetup": value})
+        compiled = {}
+        def compile_checked(candidate):
+            compiled["document"] = compile_scene(candidate)
+            return compiled["document"]
+        check = _documentation_page_setup_check(command, compile_checked, root, assembly_number)
+        def check_candidate(current, candidate):
+            try:
+                check(current, candidate)
+            except DocumentEditError as error:
+                if error.code == "layout_overflow" and error.details.get("targets"):
+                    pages = {p["pageId"]: p for p in document["pages"]}
+                    pages.update({p["pageId"]: p for p in compiled.get("document", document)["pages"]})
+                    error.details["targets"] = [{**item,
+                        "pageNumber": pages.get(item["pageId"], {}).get("pageNumber"),
+                        "pageTitle": pages.get(item["pageId"], {}).get("title", item["pageId"])}
+                        for item in error.details["targets"]]
+                raise
+            after = compiled["document"]
+            def figures(publication):
+                from ai_inspector.work_instructions.document import page_figure_revision
+                return {p["pageId"]: (publication["figureRevision"] if document_type == "product_specification_sheet"
+                    else p["renderRequest"]["figureRevision"] if document_type == "illustrated_parts_manual"
+                    else page_figure_revision(publication, p))
+                    for p in publication["pages"] if p.get("renderRequest")}
+            before_figures, after_figures = figures(document), figures(after)
+            return {"pageSetup": copy.deepcopy(candidate.get("pageSetup")),
+                "pageCountBefore": len(document["pages"]), "pageCountAfter": len(after["pages"]),
+                "capturesStale": before_figures != after_figures}
+        targets = (_parts_manual_editable_page_targets(document) if document_type == "illustrated_parts_manual"
+                   else _operations_manual_editable_page_targets(document))
+        result = repository.apply_batch(assembly_number, observed["sourceRevision"], observed["manualPlanRevision"],
+            base_revision=observed.get("sceneRevision"), expected_revision=observed["expectedRevision"],
+            request_id=observed["requestId"], commands=[command], page_targets=targets,
+            expected_hashes={"@page-setup": observed.get("pageSetupHash")},
+            current_hashes={"@page-setup": content_hash(scene, "@page-setup", scene.get("pageSetup"))}, hashes_revision=loaded["revision"],
+            actor=actor, payload=observed, identity_document=snapshot["identity_document"], check_candidate=check_candidate)
+        return {"receipt": result["receipt"], "changed": result["changed"], **result["receipt"]["pageSetupResult"]}
+
     def apply_document_edits(self, assembly_number, document_type, observed, *, actor="sage"):
         operations = observed["operations"]
         destination = documentation_operation_store(operations)
@@ -42251,6 +42322,8 @@ class _DocumentationAgentHost:
             from ai_inspector.documentation.identity import check_alias_binding
 
             check_alias_binding(observed, snapshot["state"])
+            if destination == "page_setup":
+                return self._page_setup_edit(assembly_number, document_type, observed, snapshot, loaded, repository, actor)
             if destination == "objects":
                 from ai_inspector.documentation.objects import prepare_batch
                 commands, expected, current, operation_results = prepare_batch(

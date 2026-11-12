@@ -272,8 +272,12 @@ class ReadBindings:
         self.targets: dict[tuple[str, str, str], dict] = {}
         self.objects: dict[tuple[str, str], dict] = {}
         self.object_requests: dict[tuple[str, str], dict] = {}
+        self.page_setups: dict[str, dict] = {}
+        self.page_setup_requests: dict[tuple[str, str], dict] = {}
 
     def record(self, document_type: str, read: dict) -> None:
+        if "pageSetupBinding" in read:
+            self.page_setups[document_type] = deepcopy(read["pageSetupBinding"])
         for page in read.get("objectPages", []):
             self.objects[(document_type, page["pageId"])] = {**deepcopy(page),
                 "binding": {**binding(read), "sceneRevision": read["sceneRevision"]}}
@@ -347,7 +351,16 @@ class ReadBindings:
 
     def bind_operations(self, document_type: str, arguments: dict) -> dict:
         from .commands import operation_store
-        if operation_store(arguments["operations"]) == "objects":
+        destination = operation_store(arguments["operations"])
+        if destination == "page_setup":
+            if document_type not in self.page_setups:
+                raise DocumentEditError("document_read_required", "Read the page setup options before changing paper.")
+            observed = self.page_setup_requests.setdefault((document_type, arguments["requestId"]),
+                deepcopy(self.page_setups[document_type]))
+            if observed["documentId"] != arguments["documentId"]:
+                raise DocumentEditError("document_binding_changed", "The read belongs to another document.")
+            return {**deepcopy(observed), **deepcopy(arguments)}
+        if destination == "objects":
             return self.bind_objects(document_type, arguments)
         captured, operations = [], []
         for index, operation in enumerate(arguments["operations"]):

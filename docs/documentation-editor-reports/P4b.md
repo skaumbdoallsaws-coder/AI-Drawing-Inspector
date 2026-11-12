@@ -206,3 +206,119 @@ list item above wraps to two lines.
 - `set_page_setup` compiles and measures up to three times (current, design, candidate): about 1 s each on the
   operations manual. P5a if it shows.
 - P5a: the command route and the objects route differ in how they read an unstated field; one reader would do.
+
+## P4b-2
+
+### CHANGED
+
+- `static/index.html` and new `static/documentation_page_setup_core.js`: Page Setup in the first ribbon group, using only advertised presets and computed unit labels. Current choices are marked; commands, object batches, crop mode and rich editing disable the control. Dispatch preserves null, addresses the publication, and reports success. Fit refusals name up to three blockers from the loaded document, focus the first page/object and retain the current mark. The new script uses `?v=20261112-p4b-2`.
+- `documentation_tools.py`, `documentation/commands.py`, `documentation/targets.py`, `parts_manual/documentation.py`, `server.py`: additive reads and one standalone `set_page_setup` operation in the existing tool. The scene reducer and existing fit callback run under the scene lock through the receipt-bearing batch transaction. The read-bound hash includes the scene edit epoch; retries retain their original binding and result. Receipts retain setup, page counts and capture invalidation; refusals add page numbers/titles. Specification changes use the existing sheet completion notification.
+- `tests/test_documentation_page_setup.py`, `tests/test_codex_documentation_tools.py`, new `tests/documentation_page_setup.test.cjs`: schema/pin, real reads/writes, mixed requests, unsupported orientation, stale binding, capture identity, retries, named undo, scene-versus-slot revisions, labels and refusal summaries. Read-only/assisted inventories were reviewed; tool names are unchanged.
+- `tests/smoke_documentation_editor.py`: registered P4b and added `run_p4b`; earlier phase bodies stay unchanged. Checks cover four menus; paper/surface/rail/block/object geometry; capture gates and PDF sizes; three page images at device scales 1 and 2; history/reopen; named refusal; capture reuse; work-instruction order; Sage change/undo via the existing review poll. Sticky checks, `T(...)` waits and saved evidence follow the harness contract. Only the checked 409 page-setup refusal is added to expected browser failures.
+- No compiler, exporter, layout rectangle, baseline, scene schema, tool name or capture implementation changed.
+
+### Page-size audit (decision 3)
+
+- `_documentationPublicationLayout` / `_documentationPageSize`: already read the current payload on use; fallbacks unchanged.
+- `_documentationRenderDocumentObjects`, `_documentationObjectSize`, `_documentationPageElementRect`, drag/resize/nudge/crop callers: already use current page dimensions. Fractions and geometry formulas unchanged; paper selection is disabled during object batches/crop.
+- `_documentationRenderOperationsPublicationPage` (operations/work/specification) and `_documentationRenderPublicationPage` (parts): surface dimensions and generated frames/regions already use the server layout. Cover chrome reads the current size. No fallback changed.
+- `_documentationSizePageCanvas`: already computes fit zoom from the layout; now sets the surface aspect property too. `_documentationUpdatePayload` invokes it after drawing, including history and Sage reloads.
+- Thumbnail clones and rail aspect/scale already use `_documentationPageSize`. The live-image thumbnail cache is now cleared on a size change.
+- `partsManualDocumentationGeneration` cached page count and revealed IDs could survive repagination. A paper-size change now resets them to the returned pages; active-page fallback follows that list.
+- Ribbon choices synchronize from current options, including refusals/history. Newly available controls and paper changes rebuild the ribbon. Global figure refresh recognizes the publication target even when the active page changed.
+- Audited `static/documentation_*.js`: no publication dimensions are cached there. Object geometry receives page size from callers; rich/search/review adapters have no design-page dimensions. Review-dialog CSS and Unicode range numbers are unrelated.
+
+### TESTS
+
+Static checks only, as requested: Python AST parsing passed for all 8 changed Python files; JavaScript syntax passed for the new core, its Node test and all 4 inline scripts in index.html; `git diff --check` passed. Changed files have LF endings; the server BOM is retained; added server/index lines are ASCII.
+
+### NOT RUN
+
+Claude must run:
+
+```text
+python -m pytest tests/test_documentation_page_setup.py tests/test_documentation_transactions.py tests/test_documentation_change_undo.py tests/test_documentation_objects.py tests/test_codex_documentation_tools.py tests/test_codex_assisted_tools.py tests/test_codex_readonly_pilot.py
+node --test tests/documentation_page_setup.test.cjs tests/documentation_objects.test.cjs tests/documentation_rich_text.test.cjs tests/documentation_tables.test.cjs tests/documentation_search.test.cjs tests/documentation_conflicts.test.cjs
+python tools/documentation_baseline.py --check
+python tools/documentation_baseline.py --local --check
+python tests/smoke_documentation_editor.py --phase P4b
+python tests/smoke_documentation_editor.py --phase P4a
+python tests/smoke_documentation_editor.py --phase P3b
+python tests/smoke_documentation_editor.py --phase P3a
+python tests/smoke_documentation_editor.py --phase P2b
+python tests/smoke_documentation_editor.py --phase P2a
+python tests/smoke_documentation_editor.py --phase P1c
+python tests/smoke_documentation_editor.py --phase P1b
+python tests/smoke_documentation_editor.py --phase P1a
+python -m pytest tests -k documentation
+python -m pytest tests
+```
+
+Use `DOC_SMOKE_SLOW=1` on the idle gate machine for the 25-minute budget. No pytest, Node test execution, browser run, export rendering, baseline run or live Sage inference ran here. Runtime results and duration are unverified. No baseline promotion is expected.
+
+### DEVIATIONS
+
+- Reads also expose `pageSetupRevision`, documented as the operation's expectedRevision. Specification reads otherwise carry the slot-store revision while page setup belongs to the scene; existing revisions are preserved.
+- Export already auto-captures pending figures. The smoke checks the pre-capture refusal through the export endpoint, then clicks Capture All and exports through the ribbon; export behavior is unchanged.
+- The specification smoke takes a design capture before A4 so returning to identity Letter can prove reuse of a real stored capture without a capture POST. The parts preservation check takes one design figure capture (not Capture All) so its ready-capture assertion is non-vacuous in the empty isolated artifact store. Operations likewise takes one design capture to prove stale rather than merely missing after A4.
+- The provider-free tool helper has no chat-completion event. The smoke opens the real Review pane and waits for its existing revision poll, with no test reload or app-function redraw.
+- DPI comparisons use P4a-2's eight-level RGB tolerance on homogeneous interior patches and save both images. Antialiased edges are excluded; this is not whole-image equality or the deferred export matrix.
+
+### OPEN QUESTIONS
+
+Supervisor runtime validation remains required, especially the 25-minute budget, Capture All timing, DPI samples and specification capture reuse. The recorded generator omissions and operations DOCX header band remain for P4b-3.
+
+## P4b-2 supervisor gate (Claude, 2026-11-12)
+
+### Review
+
+The client change is small because the page already read the page size from `publicationLayout.page` at use:
+the menu, the dispatch, the refusal and three resets when the size changes (thumbnail cache, revealed pages,
+ribbon). Sage's operation goes through the scene's own command path with the fit check of P4b-1 under the scene
+lock. No compiler, exporter, rectangle or baseline changed (both baseline checks exit 0 without a promotion).
+
+### What I changed
+
+- `static/index.html` `_documentationPageSetupItems`: the paper in force was both marked and disabled, so it
+  read as an unavailable choice. It is now the active entry and enabled (choosing it does nothing).
+
+### What I looked at in the real browser (smoke screenshots)
+
+- The menu on each of the four documents: heading "Paper", "Design page (960 x 540 pt)", "Letter landscape
+  (11 x 8.5 in)", "A4 landscape (297 x 210 mm)" (portrait for the specification sheet).
+- The refusal: the status line "A4 landscape was not applied: 1 item does not fit (Page 4: Paper fit).", page 4
+  active, the text box selected with its handles, the menu still on the design page.
+- Page 4 of the operations manual on A4, page against PDF.
+
+### Found in this gate, for P4b-3 (all exist on the design page today)
+
+The smoke's picture comparison samples flat patches (bands, backgrounds); it does not compare where text
+stands. Reading the two pictures of one page side by side shows three differences between the page and the PDF
+of the operations manual:
+
+- lists: the PDF gives each item its compiled row height (23 pt for one line); the page lays items out with CSS
+  at 16.2 pt from item to item;
+- the safety symbol: the PDF draws a notice as a blue circle "i" and hazards as a triangle; the page draws the
+  red triangle for every word, NOTICE included;
+- the header: the page shows the identity line above the title; the PDF header has the title only.
+
+P4b-3 makes the words of every page equal to the words of its PDF page and fixes these three with the text the
+PDFs drop (see the P4b-1 gate).
+
+### Gates
+
+- New and changed tests (page setup, tool inventories): 268 passed. Node `documentation_page_setup.test.cjs` 2/2.
+- Focused suite: 1866 passed.
+- Both baseline checks exit 0, no promotion.
+- Smokes (DOC_SMOKE_SLOW=4): P4b 76/76 (twice: before and after my change; 618 s and 676 s at factor 2 and 4),
+  P4a 475/475, P3b 169/169, P3a 194/194, P2b 36/36, P2a 23/23, P1a 27/27, P1b 46/46, P1c 35/35.
+- Documentation suites: 1923 passed and the 1 known failure. Node: 477/477 and 5/5.
+- Wide suites: 170 failed, 9 errors, 3852 passed, 68 skipped = the same 179 known IDs, nothing new. (The first
+  run of all four parts hit the 560 s limit while the machine was busy with other work; the rerun with a longer
+  limit completed.)
+
+### Notes for later rounds
+
+- The gate machine: when other applications are busy the suites run at half speed or less (the documentation
+  suites took 64 minutes instead of 28). The wide parts need a limit above 560 s then (`wide-part-long.sh`).
+- P5a: `set_page_setup` from Sage compiles and measures as the page's command does (up to three times).

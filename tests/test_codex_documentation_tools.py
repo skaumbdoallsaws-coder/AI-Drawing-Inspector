@@ -138,7 +138,7 @@ def test_the_tool_set_is_exact_typed_and_closed():
     assert finder["read_only"] is True
     assert finder["input_schema"]["properties"]["limit"]["maximum"] == 200
     variants = batch["input_schema"]["properties"]["operations"]["items"]["anyOf"]
-    assert {item["properties"]["operation"]["enum"][0] for item in variants} == {"replace_text", "set_slot_value", "replace_rich_text", "replace_range", "format_range", "create_table", "modify_table", "set_object_frame", "set_image_crop", "set_object_order", "arrange_objects"}
+    assert {item["properties"]["operation"]["enum"][0] for item in variants} == {"replace_text", "set_slot_value", "replace_rich_text", "replace_range", "format_range", "create_table", "modify_table", "set_object_frame", "set_image_crop", "set_object_order", "arrange_objects", "set_page_setup"}
     rich = next(v for v in variants if v["properties"]["operation"]["enum"] == ["replace_rich_text"])
     table_variants = [v for v in variants if v["properties"]["operation"]["enum"] == ["modify_table"]]
     assert {v["properties"]["action"]["enum"][0] for v in table_variants} == {

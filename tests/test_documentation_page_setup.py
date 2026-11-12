@@ -857,3 +857,173 @@ def test_old_findings_of_the_design_page_do_not_block_another_paper_or_the_way_b
     assert response.status_code == 200, response.text
     assert "pageSetup" not in response.json()["document"]
     assert len(response.json()["document"]["pages"]) == len(before["document"]["pages"])
+
+
+# P4b-2: the real Sage gateway, the same checked transaction and its receipt.
+def _sage_reader():
+    import server
+    from tests.test_codex_documentation_tools import gateway
+    return gateway(server._DocumentationAgentHost(), "MMLE-50D", timeout=3600)
+
+
+def _sage_read(reader, kind):
+    from tests.test_codex_documentation_tools import call
+    result = call(reader, "read_document_pages", {"documentType": kind, "pageCount": 1})
+    assert result["ok"], result
+    return result["data"]
+
+
+def _sage_setup(reader, data, value, request_id="paper-tool"):
+    from tests.test_codex_documentation_tools import call
+    return call(reader, "apply_document_edits", {"documentId": data["documentId"],
+        "expectedRevision": data["pageSetupRevision"], "requestId": request_id,
+        "operations": [{"operation": "set_page_setup", "pageSetup": value}]})
+
+
+def test_page_setup_tool_schema_is_closed_and_names_are_unchanged():
+    from ai_inspector.codex_runtime.documentation_tools import tool_specs, NAMES
+    specs = tool_specs()
+    assert tuple(s["name"] for s in specs) == NAMES
+    batch = next(s for s in specs if s["name"] == "apply_document_edits")
+    variants = batch["input_schema"]["properties"]["operations"]["items"]["anyOf"]
+    variant = next(v for v in variants if v["properties"]["operation"]["enum"] == ["set_page_setup"])
+    assert set(variant["properties"]) == {"operation", "pageSetup"}
+    assert variant["required"] == ["operation", "pageSetup"]
+    assert variant["additionalProperties"] is False
+    null, value = variant["properties"]["pageSetup"]["anyOf"]
+    assert null == {"type": "null"}
+    assert set(value["properties"]) == {"paper", "orientation"}
+    assert value["additionalProperties"] is False
+    assert set(value["properties"]["paper"]["enum"]) == {"Letter", "A4"}
+    assert set(value["properties"]["orientation"]["enum"]) == {"portrait", "landscape"}
+    for phrase in ("pageSetupOptions", "listed presets", "nothing was changed", "capture"):
+        assert phrase in batch["description"]
+
+
+@pytest.mark.parametrize("kind,route", MMLE_ROUTES)
+def test_sage_page_reads_advertise_scene_setup_without_changing_it(mmle_client, kind, route):
+    before = _real(mmle_client, route)
+    data = _sage_read(_sage_reader(), kind)
+    assert data["pageSetup"] is None
+    assert data["pageSetupOptions"] == before["pageSetupOptions"]
+    assert data["pageSetupRevision"] == before["scene"]["editRevision"]
+    assert _real(mmle_client, route)["scene"] == before["scene"]
+
+
+@pytest.mark.parametrize("kind,route,paper,stale", [
+    (OPS, "operations-manual", "A4", True),
+    (PARTS, "parts-manual", "Letter", False),
+    (SPEC, "specification-sheet", "Letter", False),
+    (WI, "work-instructions", "Letter", True),
+])
+def test_sage_page_setup_receipt_retry_capture_result_and_named_undo(mmle_client, kind, route, paper, stale):
+    from tests.test_codex_documentation_tools import call
+    before = _real(mmle_client, route)
+    reader = _sage_reader()
+    data = _sage_read(reader, kind)
+    value = {"paper": paper, "orientation": layout.DESIGN[kind][2]}
+    result = _sage_setup(reader, data, value)
+    assert result["ok"], result
+    changed = _real(mmle_client, route)
+    outcome = result["data"]
+    assert outcome["pageSetup"] == setup(kind, paper)
+    assert outcome["pageCountBefore"] == len(before["document"]["pages"])
+    assert outcome["pageCountAfter"] == len(changed["document"]["pages"])
+    assert outcome["capturesStale"] is stale
+    assert changed["scene"]["commands"][-1]["change"]["actor"] == "sage"
+    assert changed["scene"]["historyCursor"] == before["scene"]["historyCursor"] + 1
+    reread = _sage_read(reader, kind)
+    assert reread["pageSetup"] == outcome["pageSetup"]
+    assert reread["pageSetupOptions"] == changed["pageSetupOptions"]
+    assert _sage_setup(reader, data, value) == result
+    assert _real(mmle_client, route)["scene"] == changed["scene"]
+    receipt = outcome["receipt"]
+    undone = call(reader, "undo_document_change", {"documentId": data["documentId"],
+        "expectedRevision": receipt["revision"], "requestId": "paper-undo", "changeId": receipt["changeId"]})
+    assert undone["ok"], undone
+    restored = _real(mmle_client, route)
+    assert "pageSetup" not in restored["scene"] and "pageSetup" not in restored["document"]
+    assert_restored(before, restored)
+
+
+def test_sage_page_setup_mixed_missing_unsupported_and_stale_refuse_without_writes(mmle_client):
+    from tests.test_codex_documentation_tools import call
+    from ai_inspector.documentation.commands import operation_store
+    reader = _sage_reader()
+    data = _sage_read(reader, OPS)
+    before = _real(mmle_client, "operations-manual")
+    for ops in ([{"operation": "set_page_setup"}],
+                [{"operation": "set_page_setup", "pageSetup": None, "targetId": "bad"}],
+                [{"operation": "set_page_setup", "pageSetup": None},
+                 {"operation": "replace_text", "targetId": "not-read", "text": "x", "expectedContentHash": "0"*64}]):
+        refused(lambda: operation_store(ops), "invalid_document_operation")
+    mixed = call(reader, "apply_document_edits", {"documentId": data["documentId"],
+        "expectedRevision": data["pageSetupRevision"], "requestId": "mixed-paper", "operations": [
+            {"operation": "set_page_setup", "pageSetup": {"paper": "A4", "orientation": "landscape"}},
+            {"operation": "replace_text", "targetId": "not-read", "text": "x", "expectedContentHash": "0"*64}]})
+    assert mixed["error"]["code"] == "invalid_document_operation", mixed
+    invalid = _sage_setup(reader, data, {"paper": "A4", "orientation": "portrait"}, "wrong-orientation")
+    assert invalid["error"]["code"] == "unsupported_page_setup", invalid
+    assert _real(mmle_client, "operations-manual")["scene"] == before["scene"]
+    accepted = command(mmle_client, "operations-manual", before, setup(OPS))
+    assert accepted.status_code == 200, accepted.text
+    later = _real(mmle_client, "operations-manual")
+    stale = _sage_setup(reader, data, {"paper": "Letter", "orientation": "landscape"}, "stale-paper")
+    assert stale["error"]["code"] == "content_hash_mismatch", stale
+    assert _real(mmle_client, "operations-manual")["scene"] == later["scene"]
+
+
+def test_sage_paper_fit_refusal_has_page_numbers_titles_and_preserves_scene(mmle_client):
+    before = _real(mmle_client, "operations-manual")
+    page = next(p for p in before["document"]["pages"] if p["pageType"] == "operations_content")
+    key, text = "document-object-tool-paper-fit", "A measured line with room"
+    width = fitz.get_text_length(text, fontname="helv", fontsize=12) + 6.1
+    response = mmle_client.post("/api/operations-manual/MMLE-50D/documentation-scene/commands", json={
+        "baseRevision": before["revision"], "sourceRevision": before["scene"]["sourceRevision"],
+        "manualPlanRevision": before["scene"]["manualPlanRevision"], "operation": "add_object",
+        "pageId": page["pageId"], "targetType": "document_object", "targetId": key,
+        "documentObject": {"objectId": key, "type": "text", "name": "Paper fit", "source": "user", "content": text,
+            "frame": {"x": .1, "y": .2, "width": width/960, "height": 20.5/540}, "styleOverrides": {"fontSize": 12}}})
+    assert response.status_code == 200, response.text
+    before = _real(mmle_client, "operations-manual")
+    reader = _sage_reader()
+    result = _sage_setup(reader, _sage_read(reader, OPS), {"paper": "A4", "orientation": "landscape"})
+    assert result["error"]["code"] == "layout_overflow", result
+    item = next(t for t in result["error"]["details"]["targets"] if t["targetId"] == key)
+    assert item["reason"] == "text_does_not_fit"
+    assert isinstance(item["pageNumber"], int) and item["pageNumber"] > 0
+    assert item["pageTitle"] == page["title"]
+    assert _real(mmle_client, "operations-manual")["scene"] == before["scene"]
+
+
+def test_sage_specification_page_setup_uses_scene_revision_not_slot_revision(mmle_client):
+    before = _real(mmle_client, "specification-sheet")
+    key = "document-object-paper-binding"
+    response = mmle_client.post("/api/specification-sheet/MMLE-50D/documentation-scene/commands", json={
+        "baseRevision": before["revision"], "sourceRevision": before["scene"]["sourceRevision"],
+        "manualPlanRevision": before["scene"]["manualPlanRevision"], "operation": "add_object",
+        "pageId": before["document"]["pages"][0]["pageId"], "targetType": "document_object", "targetId": key,
+        "documentObject": {"objectId": key, "type": "text", "name": "Binding", "content": "Paper",
+            "frame": {"x": .1, "y": .2, "width": .3, "height": .1}, "styleOverrides": {"fontSize": 10}}})
+    assert response.status_code == 200, response.text
+    reader = _sage_reader()
+    data = _sage_read(reader, SPEC)
+    assert data["pageSetupRevision"] == response.json()["scene"]["editRevision"]
+    assert data["revision"] != data["pageSetupRevision"]
+    result = _sage_setup(reader, data, {"paper": "Letter", "orientation": "portrait"})
+    assert result["ok"], result
+
+
+def test_page_setup_bindings_require_options_and_keep_retry_preimage():
+    from ai_inspector.documentation.targets import ReadBindings
+    bindings = ReadBindings("paper-turn")
+    args = {"documentId": "d", "expectedRevision": 3, "requestId": "p", "operations": [
+        {"operation": "set_page_setup", "pageSetup": None}]}
+    refused(lambda: bindings.bind_operations(OPS, args), "document_read_required")
+    first = {"documentId": "d", "expectedRevision": 3, "sourceRevision": "s", "manualPlanRevision": "m",
+        "sceneRevision": "a", "pageSetupHash": "old"}
+    bindings.record(OPS, {"pageSetupBinding": first})
+    assert bindings.bind_operations(OPS, args) == {**first, **args}
+    bindings.record(OPS, {"pageSetupBinding": {**first, "sceneRevision": "b", "pageSetupHash": "new"}})
+    assert bindings.bind_operations(OPS, args) == {**first, **args}
+    assert bindings.bind_operations(OPS, {**args, "requestId": "next"})["pageSetupHash"] == "new"

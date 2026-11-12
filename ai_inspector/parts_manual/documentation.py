@@ -2015,7 +2015,8 @@ class DocumentationSceneRepository:
     def apply_batch(self, assembly_number, source_revision, manual_plan_revision, *,
                     base_revision, expected_revision, request_id, commands, page_targets,
                     expected_hashes, current_hashes, hashes_revision, actor="sage", payload=None,
-                    allow_confirmation=False, identity_document=None, range_batch=False, table_results=None, object_results=None):
+                    allow_confirmation=False, identity_document=None, range_batch=False, table_results=None, object_results=None,
+                    check_candidate=None):
         """One history entry and one replace. The host compiles/hash-checks under
         transaction_lock and supplies hashes_revision to reject an unlocked race.
         """
@@ -2071,7 +2072,8 @@ class DocumentationSceneRepository:
                     command, normalized_targets = normalize_command(candidate, command, page_targets)
                     guard_command(self._conflict_state(candidate, assembly_number), command)
                     capture_baselines(candidate, identity_document, command_targets(command))
-                    item = apply_documentation_command_candidate(candidate, {**command, "actor": actor}, normalized_targets)
+                    item = apply_documentation_command_candidate(candidate, {**command, "actor": actor}, normalized_targets,
+                                                                  document_type=self.document_type)
                 except DocumentationSceneError as error:
                     raise DocumentEditError("invalid_document_operation", str(error), operationIndex=index, targetId=target) from error
                 # A text replacement that leaves the effective projection equal
@@ -2084,9 +2086,12 @@ class DocumentationSceneRepository:
                     changed.extend(row["objectId"] for row in object_results[index]["objects"] if row["objectId"] not in changed)
                 else:
                     changed.append(target)
+            checked = check_candidate(scene, candidate) if check_candidate is not None else None
             receipt = make_receipt(scene, request_id=request_id, payload_hash=payload_hash,
                 document=document_id(self.document_type, assembly_number), expected_revision=expected_revision,
                 changed=changed, undoable=True)
+            if checked is not None:
+                receipt["pageSetupResult"] = copy.deepcopy(checked)
             if table_results is not None or object_results is not None:
                 receipt["operationResults"] = copy.deepcopy(table_results if table_results is not None else object_results)
             removed = [target for target, command in zip(changed, persisted) if command.get("richTextRemoved")]

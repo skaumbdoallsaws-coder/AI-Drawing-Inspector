@@ -13,6 +13,7 @@
     <script src="/static/documentation_commands.js?v=20261109-p1b-3"></script>
     <script src="/static/documentation_conflicts.js?v=20261110-p2a-1"></script>
     <script src="/static/documentation_objects_core.js?v=20261111-p4a-2"></script>
+    <script src="/static/documentation_page_setup_core.js?v=20261112-p4b-2"></script>
     <script src="/static/documentation_rich_text_core.js?v=20261111-p3b-2"></script>
     <script src="/static/documentation_symbols.js?v=20261111-p3a-4"></script>
     <script src="/static/documentation_search.js?v=20261111-p3a-4"></script>
@@ -36541,6 +36542,9 @@
                 state.partsManualDocumentationInitializing
                 || state.partsManualDocumentationSageWork?.active
             ));
+            setDisabled('documentationPageSetupRibbon', _documentationPageSetupBlocked());
+            const setupItems = document.querySelector('#documentationPageSetupMenu .documentation-menu-items');
+            if (setupItems) setupItems.replaceChildren(..._documentationPageSetupItems().map(_documentationMenuItem));
             setDisabled('documentationUndoRibbon', Boolean(window.DocumentationRichText?.active) || documentationObjectInFlight || !!documentationObjectCrop || !payload?.canUndo);
             setDisabled('documentationRedoRibbon', Boolean(window.DocumentationRichText?.active) || documentationObjectInFlight || !!documentationObjectCrop || !payload?.canRedo);
             setDisabled('documentationSlotUndoRibbon', !payload?.slotHistory?.canUndo);
@@ -38352,6 +38356,7 @@
             workspace.classList.toggle('busy', Boolean(busy));
             const label = workspace.querySelector('.documentation-busy span');
             if (label) label.textContent = message;
+            _documentationSyncWorkflowRibbon();
         }
 
         function _documentationRecordGenerationEvent(type, detail = {}) {
@@ -39200,7 +39205,14 @@
         }
 
         function _documentationUpdatePayload(result, options = {}) {
+            const oldPage = _documentationPayload()?.document?.publicationLayout?.page;
+            const newPage = result.document?.publicationLayout?.page;
+            const pageChanged = oldPage && newPage && (oldPage.width !== newPage.width || oldPage.height !== newPage.height);
             state.partsManualDocumentation = result;
+            if (pageChanged) {
+                _documentationInvalidatePageThumbnail();
+                if (!options.startBlank) _documentationPreparePageGeneration(result, { revealAll: true });
+            }
             if (Array.isArray(result.richTextFields)) window.DocumentationRichText?.active?.reconcile(result);
             if (options.revealAll) {
                 _documentationPreparePageGeneration(result, { revealAll: true });
@@ -39213,7 +39225,16 @@
             }
             _documentationRenderPageRail();
             _documentationRenderPublicationPage(_documentationActivePage());
+            _documentationSizePageCanvas(
+                document.querySelector('#documentationWorkspace .documentation-canvas-stage'),
+                document.querySelector('#documentationWorkspace .documentation-viewport-guide'));
             _documentationUpdateToolbar();
+            const ribbon = document.getElementById('contextRibbon');
+            if (ribbon?.classList.contains('documentation-workflow-ribbon')
+                && (pageChanged || (!!result.pageSetupOptions?.presets?.length
+                    !== !!document.getElementById('documentationPageSetupRibbon')))) {
+                _renderDocumentationWorkflowRibbon(ribbon);
+            }
             _documentationSyncWorkflowRibbon();
         }
 
@@ -39323,7 +39344,7 @@
                 command?.pageId
                 && page?.pageId
                 && String(command.pageId) !== String(page.pageId)
-                && String(command.targetType || '') !== 'document_theme'
+                && !['document_theme', 'document_page_setup'].includes(String(command.targetType || ''))
             ) return 'inactive_page';
             const mode = _documentationCommandRefreshMode(command);
             if (mode === 'annotations_only') {
@@ -39385,7 +39406,8 @@
             const page = bound?.page;
             const stillCurrent = () => DocumentationCommands.isCurrent(bound, _documentationPayload(), _documentationApiBase());
             const selection = options.selection || state.partsManualDocumentationSelection;
-            const globalOperation = ['set_theme', 'apply_template'].includes(operation);
+            const globalOperation = ['set_theme', 'apply_template', 'set_page_setup'].includes(operation);
+            if (operation === 'set_page_setup' && _documentationPageSetupBlocked()) return false;
             if (!payload || !page || (!selection && operation !== 'arrange' && !globalOperation)) {
                 return false;
             }
@@ -39399,9 +39421,11 @@
                     pageId: page.pageId,
                     targetType: operation === 'arrange'
                         ? 'selection'
+                        : operation === 'set_page_setup' ? 'document_page_setup'
                         : globalOperation ? 'document_theme' : selection.targetType,
                     targetId: operation === 'arrange'
                         ? ''
+                        : operation === 'set_page_setup' ? 'page-setup'
                         : globalOperation ? 'company-theme' : selection.targetId,
                     actor: options.actor === 'sage' ? 'sage' : 'user',
                 };
@@ -39425,6 +39449,7 @@
                 if (options.text !== undefined) body.text = options.text;
                 if (options.style) body.style = options.style;
                 if (options.theme) body.theme = options.theme;
+                if ('pageSetup' in options) body.pageSetup = options.pageSetup;
                 if (options.pageMasters) body.pageMasters = options.pageMasters;
                 let result = await _partsManualApi(
                     `${bound.apiBase}/documentation-scene/commands`,
@@ -39465,6 +39490,8 @@
                             ? `${selection.name} text updated.`
                         : operation === 'update_style'
                             ? `${selection.name} formatting updated.`
+                        : operation === 'set_page_setup'
+                            ? 'Page setup: ' + DocumentationPageSetupCore.name(options.pageSetup) + '.'
                         : operation === 'set_theme'
                             ? 'Company theme applied to the manual.'
                         : operation === 'apply_template'
@@ -39510,7 +39537,9 @@
                 );
                 return true;
             } catch (error) {
-                await _documentationReportSaveError(bound, error);
+                if (operation === 'set_page_setup' && error.code === 'layout_overflow' && stillCurrent()) {
+                    await _documentationPageSetupRefusal(options.pageSetup, error);
+                } else await _documentationReportSaveError(bound, error);
                 return false;
             } finally {
                 if (_documentationApiBase() === bound?.apiBase) {
@@ -44403,6 +44432,7 @@
                 // Scaling is a viewport concern and must never alter document coordinates.
                 surface.style.width = `${pageSize.width}px`;
                 surface.style.height = `${pageSize.height}px`;
+                surface.style.setProperty('--documentation-page-aspect', `${pageSize.width} / ${pageSize.height}`);
                 surface.style.transform = `scale(${zoom})`;
             }
             _documentationSyncZoomControls();
@@ -47184,6 +47214,56 @@
             return wrap;
         }
 
+        function _documentationPageSetupBlocked() {
+            return !!(document.querySelector('#documentationWorkspace.busy') || documentationObjectInFlight
+                || documentationObjectCrop || window.DocumentationRichText?.active);
+        }
+
+        function _documentationPageSetupItems() {
+            const options = _documentationPayload()?.pageSetupOptions;
+            if (!options?.presets?.length) return [];
+            const core = DocumentationPageSetupCore;
+            const choice = (id, label, value, selected) => ({id: 'documentationPageSetup-' + id,
+                label, active: selected, disabled: _documentationPageSetupBlocked(),  // the paper in force reads as chosen, not as unavailable
+                handler: () => { if (!selected) _documentationDispatchCommand('set_page_setup', null, {pageSetup: value}); }});
+            return [{type: 'heading', label: 'Paper'},
+                choice('design', core.designLabel(options.design), null, options.current === null),
+                ...options.presets.map(p => choice(p.id, core.label(p),
+                    {paper: p.paper, orientation: p.orientation}, p.selected))];
+        }
+
+        function _documentationPageSetupMenu() {
+            if (!_documentationPayload()?.pageSetupOptions?.presets?.length) return null;
+            const menu = _documentationRibbonMenu('documentation', 'Page Setup', 'Page Setup',
+                _documentationPageSetupItems(), {triggerId: 'documentationPageSetupRibbon', size: 'medium'});
+            menu.id = 'documentationPageSetupMenu';
+            menu.querySelector('button').disabled = _documentationPageSetupBlocked();
+            return menu;
+        }
+
+        async function _documentationPageSetupRefusal(value, error) {
+            const model = _documentationPayload()?.document || {};
+            const details = error.payload?.details || {};
+            const describe = item => {
+                const page = (model.pages || []).find(p => p.pageId === item.pageId);
+                if (!page) return {};
+                const target = _documentationTargetsForPage(page).find(t => t.targetId === item.targetId
+                    || (model.aliasMap?.[page.pageId]?.[t.targetId]?.targetId || model.aliasMap?.[page.pageId]?.[t.targetId]) === item.targetId
+                    || page.aliasMap?.[t.targetId]?.targetId === item.targetId);
+                return {pageNumber: page.pageNumber, name: page.documentationObjects?.[item.targetId]?.name || target?.name};
+            };
+            const message = DocumentationPageSetupCore.refusal(value, error.message, details, describe);
+            const first = details.targets?.[0];
+            const page = first && (model.pages || []).find(p => p.pageId === first.pageId);
+            if (page) {
+                await _documentationActivatePage(page.pageId, null, {status: false, busy: false});
+                const object = page.documentationObjects?.[first.targetId];
+                if (object) _documentationSelectTarget(_documentationObjectTarget(object), {silent: true});
+            }
+            _documentationSetStatus(message, 'error');
+            _documentationSyncWorkflowRibbon();
+        }
+
         function _documentationAlignMenu(options = {}) {
             const authored = _documentationObjectSelections();
             return _documentationRibbonMenu(
@@ -47575,8 +47655,8 @@
                 { compact: true, size: 'compact' }
             );
             appendGroup('manual', specification ? 'Sheet' : 'Manual', specification
-                ? [baseline(), _documentationRibbonStack([refresh(), libraryMachine()], { secondary: true })]
-                : [baseline(), refresh()]);
+                ? [baseline(), _documentationRibbonStack([refresh(), libraryMachine()], { secondary: true }), _documentationPageSetupMenu()]
+                : [baseline(), refresh(), _documentationPageSetupMenu()]);
             appendGroup('edit', 'Edit', [
                 // Two rows per stack: a fourth compact command in one stack overflows the ribbon's height.
                 _documentationRibbonStack([undo(), redo()]),

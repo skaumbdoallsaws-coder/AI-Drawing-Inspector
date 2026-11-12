@@ -128,6 +128,10 @@ def retain_receipt(state: dict, receipt: dict) -> None:
 def operation_store(operations: list[dict]) -> str:
     if not isinstance(operations, list) or not 1 <= len(operations) <= 224 or any(not isinstance(o, dict) for o in operations):
         raise DocumentEditError("invalid_document_operation", "Submit at most 200 range operations or 12 whole-field operations.")
+    if any(o.get("operation") == "set_page_setup" for o in operations):
+        if len(operations) != 1 or set(operations[0]) != {"operation", "pageSetup"}:
+            raise DocumentEditError("invalid_document_operation", "Page setup must be the only operation, with a pageSetup value or null.")
+        return "page_setup"
     from .objects import OPERATIONS, object_batch
     if any(o.get("operation") in OPERATIONS for o in operations):
         return object_batch(operations)

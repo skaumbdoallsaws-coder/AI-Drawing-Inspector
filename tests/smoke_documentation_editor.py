@@ -92,7 +92,7 @@ def known_http_failure(failure):
 def classify_failures(report):
     """Keep all raw evidence, separating only the supervisor's known fixture gaps."""
     known_http, unexpected_http, known = [], [], []
-    expected = list(report.get("expectedHttpFailures", [])) if report.get("phase") in {"P2b", "P3b"} else []
+    expected = list(report.get("expectedHttpFailures", [])) if report.get("phase") in {"P2b", "P3b", "P4b"} else []
     for item in report["httpFailures"]:
         reason = known_http_failure(item)
         proof = next((row for row in expected if report.get("phase") == "P2b" and row.get("error") == "unsupported_export_glyph"
@@ -104,6 +104,11 @@ def classify_failures(report):
                           and row.get("checked") is True and row.get("status") == item.get("status") == 422
                           and row.get("method") == item.get("method") == "POST" and row.get("url") == item.get("url")
                           and urlsplit(item["url"]).path == "/api/documentation/operations_and_maintenance_manual/MMLE-50D/tables"), None)
+        if proof is None and report.get("phase") == "P4b":
+            proof = next((row for row in expected if row.get("error") == "layout_overflow"
+                and row.get("checked") is True and row.get("status") == item.get("status") == 409
+                and row.get("method") == item.get("method") == "POST" and row.get("url") == item.get("url")
+                and urlsplit(item["url"]).path == "/api/operations-manual/MMLE-50D/documentation-scene/commands"), None)
         if proof is not None:
             expected.remove(proof)  # Exactly one observed, checked proof refusal.
             reason = "Expected " + proof["error"] + " proof refusal"
@@ -222,7 +227,7 @@ def write_json(path, value):
 class IsolatedDocumentationServer:
     def __init__(self, output, phase=None):
         self.output = output
-        self.rich_text = phase in {"P2a", "P2b", "P3a", "P3b", "P4a"}
+        self.rich_text = phase in {"P2a", "P2b", "P3a", "P3b", "P4a", "P4b"}
         self.temporary = self.process = self.log = None
         self.original = {}
 
@@ -3778,6 +3783,356 @@ def run_p4a_controls(page, request, server, output, report, record, begin_edit, 
     evidence.update(objects=final,requests=posts,samples=samples)
     write_json(output/"p4a2-controls.json",evidence)
 
+
+def run_p4b(page, request, server, output, report, record, begin_edit, tool, fresh_page):
+    """Paper menu, bound Sage change, real canvas and native exports (no renderer substitutes)."""
+    from copy import deepcopy
+    import io
+    import fitz
+    from PIL import Image
+    from tests.test_documentation_page_setup import figure_revisions
+
+    ops, spec, wi = "operations_and_maintenance_manual", "product_specification_sheet", "work_instructions"
+    h = rich_browser_helpers(page, request, server, output, report, begin_edit, fresh_page, "P4b")
+    started = time.monotonic()
+    failed, evidence, snapshots = set(), {}, {}
+    report_check = record
+    def record(name, ok, detail=None):
+        name = "p4b_" + name
+        if name not in failed:
+            report_check(name, ok, detail)
+        if not ok:
+            failed.add(name)
+    def observe(name, expression, arg=None, timeout=T(20000)):
+        try:
+            page.wait_for_function(expression, arg=arg, timeout=timeout)
+            return True
+        except Exception as error:
+            record(name, False, str(error))
+            return False
+    def press(selector):
+        node = page.locator(selector).first
+        if not node.count() or not node.is_visible() or node.is_disabled():
+            raise RuntimeError("Control unavailable: " + selector)
+        node.scroll_into_view_if_needed(timeout=T(10000))
+        box = node.bounding_box()
+        page.mouse.move(box["x"] + box["width"]/2, box["y"] + box["height"]/2, steps=8)
+        page.mouse.click(box["x"] + box["width"]/2, box["y"] + box["height"]/2)
+    def idle(name):
+        return observe(name, "() => !document.querySelector('#documentationWorkspace.busy')", timeout=T(120000))
+    def menu(name):
+        press("#documentationPageSetupRibbon")
+        return observe(name, "() => document.querySelector('#documentationPageSetupRibbon')?.getAttribute('aria-expanded') === 'true'")
+    def menu_state():
+        return page.locator("#documentationPageSetupMenu .documentation-menu-item").evaluate_all(
+            "nodes => nodes.map(n=>({id:n.id,label:n.textContent,selected:n.classList.contains('active'),disabled:n.disabled}))")
+    def labels(options):
+        # Independent unit conversion; no call to the production label function.
+        d = options["design"]
+        result = [f"Design page ({d['width']:g} x {d['height']:g} pt)"]
+        for p in options["presets"]:
+            factor, unit = (25.4/72, "mm") if p["paper"] == "A4" else (1/72, "in")
+            dimensions = [f"{round(p['page'][k]*factor, 1):g}" for k in ("width", "height")]
+            result.append(f"{p['paper']} {p['orientation']} ({dimensions[0]} x {dimensions[1]} {unit})")
+        return result
+    def payload():
+        return page.evaluate("() => window.__compareDbg.state.partsManualDocumentation")
+    def choose(kind, paper, name, *, accept=True):
+        before = h.scene(kind)
+        if not menu(name+"_menu"):
+            return None
+        entry = "design" if paper is None else next(p["id"] for p in before["pageSetupOptions"]["presets"] if p["paper"] == paper)
+        with page.expect_response(lambda r:r.request.method == "POST" and r.url == h.base(kind)+"/documentation-scene/commands", timeout=T(120000)) as response:
+            press("#documentationPageSetup-"+entry)
+        reply = response.value
+        reply.finished()
+        body = reply.json()
+        idle(name+"_settled")
+        record(name+"_response", reply.ok if accept else reply.status == 409 and body.get("error") == "layout_overflow", body if not reply.ok else {"revision":body["revision"]})
+        if not accept:
+            report.setdefault("expectedHttpFailures", []).append({"url":reply.url,"method":"POST","status":reply.status,
+                "error":body.get("error"),"checked":reply.status==409 and body.get("error")=="layout_overflow"})
+        else:
+            observe(name+"_redraw", "revision => window.__compareDbg.state.partsManualDocumentation?.revision === revision", body.get("revision"))
+        return body
+    def geometry(name, selected, *, all_blocks=False):
+        current = payload()
+        expected = current["document"]["publicationLayout"]["page"]
+        measured = page.evaluate("""() => {
+            const root=document.querySelector('#documentationPublicationSurface'), r=root.getBoundingClientRect();
+            const state=window.__compareDbg.state;
+            return {width:parseFloat(root.style.width),height:parseFloat(root.style.height),aspect:r.width/r.height,
+                aspectProperty:root.style.getPropertyValue('--documentation-page-aspect'),
+                rail:[...document.querySelectorAll('#documentationPageList .documentation-page-thumbnail')].map(n=>{
+                    const b=n.getBoundingClientRect();return {aspect:b.width/b.height,property:n.style.getPropertyValue('--documentation-page-aspect')};}),
+                pageCount:state.partsManualDocumentation.document.pages.length,
+                countText:document.querySelector('.documentation-status-page').textContent,
+                selected:document.querySelector('#documentationPageSetupMenu .documentation-menu-item.active')?.id};
+        }""")
+        ratio = expected["width"]/expected["height"]
+        record(name+"_surface", abs(measured["aspect"]/ratio-1)<=.005
+               and abs(measured["width"]-expected["width"])<.01 and abs(measured["height"]-expected["height"])<.01, measured)
+        record(name+"_rail", bool(measured["rail"]) and all(abs(r["aspect"]/ratio-1)<=.005 for r in measured["rail"]), measured["rail"])
+        record(name+"_count_mark", measured["countText"].endswith(" of "+str(measured["pageCount"]))
+               and measured["selected"]=="documentationPageSetup-"+selected, measured)
+        if all_blocks:
+            # Rail previews are the real page renderer's clones, one for every compiled page.
+            blocks = page.locator('#documentationPageList .documentation-page-item').evaluate_all("""items=>items.map(item=>{
+                const root=item.querySelector('.documentation-thumbnail-page');
+                if(!root)return {pageId:item.dataset.pageId,missing:true};
+                const r=root.getBoundingClientRect(), scale=r.width/parseFloat(root.style.width);
+                return {pageId:item.dataset.pageId,blocks:[...root.querySelectorAll('.documentation-operations-block')].map(n=>{
+                    const b=n.getBoundingClientRect();return {id:n.dataset.documentationEditTarget,
+                        x:(b.left-r.left)/scale,y:(b.top-r.top)/scale,width:b.width/scale,height:b.height/scale};})};
+            })""")
+            expected_count=sum(len(p.get("layoutBlocks",[])) for p in current["document"]["pages"])
+            actual_count=sum(len(p.get("blocks",[])) for p in blocks)
+            bad=[dict(pageId=p["pageId"],**b) for p in blocks for b in p.get("blocks",[])
+                 if b["x"] < -1 or b["y"] < -1 or b["x"]+b["width"]>expected["width"]+1 or b["y"]+b["height"]>expected["height"]+1]
+            record(name+"_generated_bounds", len(blocks)==measured["pageCount"] and actual_count==expected_count and not bad,
+                   {"expected":expected_count,"measured":actual_count,"bad":bad,"pages":blocks})
+        evidence[name] = measured
+    def history(direction, name, keyboard=False):
+        with page.expect_response(lambda r:r.request.method=="POST" and r.url.endswith("/documentation-scene/"+direction), timeout=T(120000)) as response:
+            if keyboard:
+                # Leave menu/input focus before invoking the workspace's own key handler.
+                page.locator('#documentationWorkspace').click(position={"x":3,"y":3})
+                page.keyboard.press("Control+z" if direction=="undo" else "Control+y")
+            else:
+                press("#documentationUndoRibbon" if direction=="undo" else "#documentationRedoRibbon")
+        response.value.finished()
+        record(name+"_response",response.value.ok)
+        idle(name+"_settled")
+        return response.value.json()
+    def capture(name):
+        press("#documentationCaptureAllRibbon")
+        ok=observe(name,"""() => !document.querySelector('#documentationWorkspace.busy') &&
+            window.__compareDbg.state.partsManualDocumentation.document.pages.filter(p=>p.renderRequest)
+            .every(p=>p.renderRequest.image?.status==='ready')""",timeout=T(600000))
+        record(name,ok)
+        return ok
+    def export(kind,name,size):
+        response,result=h.press_export(kind)
+        record(name+"_export",response.ok,result if not response.ok else None)
+        if not response.ok:return None
+        data=h.download(result.get("pdf") or result["artifact"],name+".pdf")
+        with fitz.open(stream=data,filetype="pdf") as pdf:
+            sizes=[(p.rect.width,p.rect.height) for p in pdf]
+        record(name+"_pdf_sizes",bool(sizes) and all(abs(w-size[0])<.01 and abs(v-size[1])<.01 for w,v in sizes),sizes)
+        return data
+    def navigate(page_id,name):
+        press('.documentation-page-item[data-page-id="'+page_id+'"]')
+        return observe(name,"id => window.__compareDbg.state.partsManualDocumentationPageId===id && !document.querySelector('#documentationWorkspace.busy')",page_id,timeout=T(30000))
+    def pictures(pdf_bytes,document):
+        # As P4a-2: samples in publication points, screenshot coordinates from the actual surface box,
+        # <=8 RGB levels. Homogeneous 3x3 patches exclude anti-aliased glyph/rule edges, not mismatched colours.
+        selectors = [lambda p:not p.get("renderRequest") and any(b.get("blockType")=="paragraph" for b in p.get("layoutBlocks",[])),
+                     lambda p:any(b.get("blockType") in {"list","bullet_list","ordered_list"} for b in p.get("layoutBlocks",[])),
+                     lambda p:bool(p.get("renderRequest")) and p.get("pageType") != "operations_cover"]
+        chosen=[next((p for p in document["pages"] if predicate(p)),None) for predicate in selectors]
+        record("comparison_page_kinds",all(chosen),[p["pageId"] if p else None for p in chosen])
+        cdp=page.context.new_cdp_session(page)
+        viewport=page.viewport_size
+        try:
+            for scale in (1,2):
+                cdp.send("Emulation.setDeviceMetricsOverride", {"width":viewport["width"],"height":viewport["height"],"deviceScaleFactor":scale,"mobile":False})
+                observe("dpi_"+str(scale),"scale=>window.devicePixelRatio===scale",scale)
+                for role,p in zip(("text","list","figure"),chosen):
+                    if p is None:continue
+                    name="a4-"+role+"-dpi"+str(scale)
+                    if not navigate(p["pageId"],name+"_active"):continue
+                    root_node=page.locator('#documentationPublicationSurface')
+                    png=root_node.screenshot(timeout=T(20000))
+                    (output/(name+"-canvas.png")).write_bytes(png)
+                    image=Image.open(io.BytesIO(png)).convert("RGB")
+                    with fitz.open(stream=pdf_bytes,filetype="pdf") as pdf:
+                        pdf_page=pdf[next(i for i,v in enumerate(document["pages"]) if v["pageId"]==p["pageId"])]
+                        pix=pdf_page.get_pixmap(matrix=fitz.Matrix(2,2),alpha=False)
+                        pix.save(str(output/(name+"-pdf.png")))
+                        pw,ph=pdf_page.rect.width,pdf_page.rect.height
+                        samples=[]
+                        for row in range(1,25):
+                            for col in range(1,33):
+                                x,y=pw*col/33,ph*row/25
+                                px,py=round(x*2),round(y*2)
+                                sx,sy=round(x/pw*image.width),round(y/ph*image.height)
+                                a=[pix.pixel(px+dx,py+dy)[:3] for dx in (-1,0,1) for dy in (-1,0,1)]
+                                b=[image.getpixel((sx+dx,sy+dy)) for dx in (-1,0,1) for dy in (-1,0,1)]
+                                if any(max(v[k] for v in patch)-min(v[k] for v in patch)>3 for patch in (a,b) for k in range(3)):continue
+                                samples.append({"point":[x,y],"pdf":a[4],"canvas":b[4]})
+                    bad=[s for s in samples if max(abs(a-b) for a,b in zip(s["pdf"],s["canvas"]))>8]
+                    record(name+"_pixels",len(samples)>=30 and not bad,{"count":len(samples),"bad":bad,"samples":samples})
+        finally:
+            cdp.send("Emulation.clearDeviceMetricsOverride")
+            cdp.detach()
+    def step(name, action):
+        if time.monotonic()-started>25*60*max(1,SLOW):
+            record("budget",False,{"seconds":time.monotonic()-started})
+            return None
+        try:return action()
+        except Exception as error:
+            record(name,False,{"error":str(error)})
+            return None
+
+    # (a) Fresh tabs, picker and Refresh are the shared real-server opening pattern.
+    for kind in (DOC_TYPE,ops,wi,spec):
+        def opened():
+            nonlocal page
+            before=h.scene(kind)
+            snapshots[kind]=deepcopy(before)
+            page=h.open_document(kind,before["document"]["pages"][0]["pageId"],pointer_refresh=True)
+            menu(kind+"_menu_open")
+            actual=menu_state()
+            record(kind+"_menu",[v["label"] for v in actual]==labels(before["pageSetupOptions"])
+                   and [v["id"] for v in actual if v["selected"]]==["documentationPageSetup-design"],actual)
+            page.screenshot(path=str(output/(kind+"-paper-menu.png")),full_page=True)
+            press("#documentationPageSetupRibbon")
+            observe(kind+"_menu_closed","() => document.querySelector('#documentationPageSetupRibbon').getAttribute('aria-expanded')==='false'")
+        step(kind+"_open",opened)
+
+    def operations():
+        nonlocal page
+        key="document-object-p4b-fractions"
+        page_id=h.create(ops,key,"Paper position",frame={"x":.13,"y":.67,"width":.35,"height":.1},style={"fontSize":10})
+        page=h.open_document(ops,page_id,pointer_refresh=True)
+        original=deepcopy(h.scene(ops)["scene"]["pages"][page_id]["documentObjects"][key]["frame"])
+        figure=next(p for p in payload()["document"]["pages"] if p.get("renderRequest") and p["pageType"]!="operations_cover")
+        navigate(figure["pageId"],"ops_design_figure")
+        press("#documentationCaptureRibbon")
+        ready=observe("ops_design_capture", "id => !document.querySelector('#documentationWorkspace.busy') && window.__compareDbg.state.partsManualDocumentation.document.pages.find(p=>p.pageId===id)?.renderRequest?.image?.status==='ready'",figure["pageId"],timeout=T(180000))
+        record("ops_design_capture",ready)
+        design_figure=figure_revisions(payload()["document"])[figure["pageId"]]
+        navigate(page_id,"ops_object_page")
+        changed=choose(ops,"A4","ops_a4")
+        if not changed or changed.get("error"):return
+        geometry("ops_a4","a4-landscape",all_blocks=True)
+        stale_figure=next((p for p in changed["document"]["pages"] if p["pageId"]==figure["pageId"]),None)
+        record("ops_capture_stale",figure_revisions(changed["document"]).get(figure["pageId"])!=design_figure
+               and (stale_figure is None or stale_figure["renderRequest"].get("image",{}).get("status")!="ready"))
+        node=h.box(key)
+        fractions=node.evaluate("""el=>{const p=window.__compareDbg.state.partsManualDocumentation.document.publicationLayout.page;
+            return {x:parseFloat(el.style.left)/p.width,y:parseFloat(el.style.top)/p.height,
+                width:parseFloat(el.style.width)/p.width,height:parseFloat(el.style.height)/p.height};}""")
+        record("object_fractions",all(abs(fractions[k]-original[k])<1e-6 for k in fractions),fractions)
+        # The UI Export auto-captures. Check the server's stale refusal before the explicit Capture All.
+        stale=request.post(h.base(ops)+"/pdf",timeout=T(120000))
+        record("ops_stale_export",not stale.ok and "capture" in stale.text().lower(),{"status":stale.status,"body":stale.text()[:1000]})
+        capture("ops_capture_all")
+        pdf=export(ops,"p4b-ops-a4",(841.89,595.28))
+        if pdf:pictures(pdf,payload()["document"])
+        history("undo","ops_undo",keyboard=True)
+        geometry("ops_undo","design")
+        history("redo","ops_redo",keyboard=True)
+        geometry("ops_redo","a4-landscape")
+        stored=deepcopy(h.scene(ops)["scene"])
+        page=h.open_document(ops,page_id,pointer_refresh=True)
+        record("ops_reload_keeps_scene",h.scene(ops)["scene"]==stored)
+        geometry("ops_reload","a4-landscape")
+        choose(ops,None,"ops_design")
+        geometry("ops_design","design")
+    step("operations_sequence",operations)
+
+    def refusal():
+        nonlocal page
+        before=h.scene(ops)
+        descriptor=next(p for p in before["document"]["pages"] if p["pageType"]=="operations_content")
+        key,text="document-object-p4b-paper-fit","A measured line with room"
+        width=fitz.get_text_length(text,fontname="helv",fontsize=12)+6.1
+        response=request.post(h.base(ops)+"/documentation-scene/commands",data={
+            "baseRevision":before["revision"],"sourceRevision":before["scene"]["sourceRevision"],
+            "manualPlanRevision":before["scene"]["manualPlanRevision"],"operation":"add_object",
+            "pageId":descriptor["pageId"],"targetType":"document_object","targetId":key,
+            "documentObject":{"objectId":key,"type":"text","name":"Paper fit","source":"user","content":text,
+                "frame":{"x":.1,"y":.2,"width":width/960,"height":20.5/540},"styleOverrides":{"fontSize":12}}},timeout=T(120000))
+        if not response.ok:raise RuntimeError(response.text())
+        page=h.open_document(ops,before["document"]["pages"][0]["pageId"],pointer_refresh=True)
+        before=h.scene(ops)
+        choose(ops,"A4","refusal",accept=False)
+        result=page.evaluate("""()=>({status:document.querySelector('.documentation-status-message')?.textContent,
+            page:window.__compareDbg.state.partsManualDocumentationPageId,
+            selected:window.__compareDbg.state.partsManualDocumentationSelection?.targetId,
+            mark:document.querySelector('#documentationPageSetupMenu .active')?.id})""")
+        record("refusal_target",result["page"]==descriptor["pageId"] and result["selected"]==key
+               and "Paper fit" in (result["status"] or "") and result["mark"]=="documentationPageSetup-design",result)
+        record("refusal_no_write",h.scene(ops)["revision"]==before["revision"])
+        page.screenshot(path=str(output/"p4b-refusal.png"),full_page=True)
+    step("refusal_sequence",refusal)
+
+    def specification():
+        nonlocal page
+        before=h.scene(spec)
+        page=h.open_document(spec,before["document"]["pages"][0]["pageId"],pointer_refresh=True)
+        # Keep a real design-size capture, so returning to identity Letter can reuse it.
+        capture("spec_design_capture")
+        choose(spec,"A4","spec_a4")
+        geometry("spec_a4","a4-portrait")
+        capture("spec_a4_capture")
+        export(spec,"p4b-spec-a4",(595.28,841.89))
+        choose(spec,"Letter","spec_letter")
+        geometry("spec_letter","letter-portrait")
+        captures=[]
+        def watch(req):
+            if req.method=="POST" and req.url.endswith("/render"):captures.append(req.url)
+        page.on("request",watch)
+        export(spec,"p4b-spec-letter",(612,792))
+        page.remove_listener("request",watch)
+        record("spec_letter_no_recapture",not captures,captures)
+    step("specification_sequence",specification)
+
+    def parts():
+        nonlocal page
+        before=h.scene(DOC_TYPE)
+        figure=next(p for p in before["document"]["pages"] if p.get("renderRequest"))
+        page=h.open_document(DOC_TYPE,figure["pageId"],pointer_refresh=True)
+        # One real capture makes the Letter preservation check non-vacuous; no parts Capture All.
+        press("#documentationCaptureRibbon")
+        ready=observe("parts_design_capture", "id => !document.querySelector('#documentationWorkspace.busy') && window.__compareDbg.state.partsManualDocumentation.document.pages.find(p=>p.pageId===id)?.renderRequest?.image?.status==='ready'",figure["pageId"],timeout=T(180000))
+        record("parts_design_capture",ready)
+        before=h.scene(DOC_TYPE)
+        changed=choose(DOC_TYPE,"Letter","parts_letter")
+        record("parts_letter_capture_identity",figure_revisions(before["document"])==figure_revisions(changed["document"]),
+               {"before":figure_revisions(before["document"]),"after":figure_revisions(changed["document"])})
+        old=[p["renderRequest"].get("image",{}).get("status") for p in before["document"]["pages"] if p.get("renderRequest")]
+        new=[p["renderRequest"].get("image",{}).get("status") for p in changed["document"]["pages"] if p.get("renderRequest")]
+        record("parts_letter_captures_kept",'ready' in old and old==new,{"before":old,"after":new})
+        changed=choose(DOC_TYPE,"A4","parts_a4")
+        record("parts_a4_stale",figure_revisions(before["document"])!=figure_revisions(changed["document"])
+               and all(p["renderRequest"].get("image",{}).get("status")!='ready' for p in changed["document"]["pages"] if p.get("renderRequest")))
+    step("parts_sequence",parts)
+
+    def work_and_sage():
+        nonlocal page
+        before=h.scene(wi)
+        page=h.open_document(wi,before["document"]["pages"][0]["pageId"],pointer_refresh=True)
+        order=lambda doc:[(p["pageId"],p["title"]) for p in doc["pages"]]
+        changed=choose(wi,"A4","wi_a4")
+        record("wi_twenty_pages",len(changed["document"]["pages"])==20 and order(changed["document"])==order(before["document"]))
+        undone=history("undo","wi_undo")
+        record("wi_undo_order",order(undone["document"])==order(before["document"]) and 'pageSetup' not in undone["scene"])
+        read=tool("read_document_pages",{"documentType":wi,"pageCount":1})
+        record("sage_read_options",read.get("ok") and read["data"]["pageSetupOptions"]==h.scene(wi)["pageSetupOptions"],read)
+        data=read["data"]
+        # The review pane's production revision poll observes a tool change without a test refresh request.
+        with page.expect_response(lambda r:r.request.method=="GET" and "/conflicts?" in r.url,timeout=T(30000)) as review:
+            press("#documentationConflictCount")
+        review.value.finished()
+        observe("sage_review_open","() => !document.getElementById('documentationConflictPane').hidden && !document.getElementById('documentationConflictPane').textContent.includes('Loading review...')")
+        result=tool("apply_document_edits",{"documentId":data["documentId"],"expectedRevision":data["pageSetupRevision"],
+            "requestId":"p4b-sage-letter","operations":[{"operation":"set_page_setup","pageSetup":{"paper":"Letter","orientation":"landscape"}}]})
+        record("sage_apply",result.get("ok"),result)
+        visible=observe("sage_auto_redraw","() => window.__compareDbg.state.partsManualDocumentation?.pageSetupOptions?.current?.paper === 'Letter'",timeout=T(30000))
+        record("sage_auto_redraw",visible)
+        receipt=result["data"]["receipt"]
+        result=tool("undo_document_change",{"documentId":data["documentId"],"expectedRevision":receipt["revision"],"requestId":"p4b-sage-undo","changeId":receipt["changeId"]})
+        record("sage_undo",result.get("ok"),result)
+        visible=observe("sage_undo_redraw","() => window.__compareDbg.state.partsManualDocumentation?.pageSetupOptions?.current === null",timeout=T(30000))
+        record("sage_undo_redraw",visible)
+        record("sage_restored_order",order(h.scene(wi)["document"])==order(before["document"]))
+        page.screenshot(path=str(output/"p4b-sage.png"),full_page=True)
+    step("work_sage_sequence",work_and_sage)
+    record("budget",time.monotonic()-started<=25*60*max(1,SLOW),{"seconds":time.monotonic()-started,"slow":SLOW})
+    write_json(output/"p4b-page-setup.json",evidence)
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--phase", required=True, choices=PHASES)
@@ -3856,8 +4211,8 @@ def main():
         raise RuntimeError("Inline edit did not start after three double presses")
 
     try:
-        if args.phase not in {"P1a", "P1b", "P1c", "P2a", "P2b", "P3a", "P3b", "P4a"}:
-            raise RuntimeError("Only P1a through P4a part 1 gates are implemented.")
+        if args.phase not in {"P1a", "P1b", "P1c", "P2a", "P2b", "P3a", "P3b", "P4a", "P4b"}:
+            raise RuntimeError("Only P1a through P4b gates are implemented.")
         from playwright.sync_api import sync_playwright
         server.start()
         report["isolation"] = server.isolation
@@ -3949,7 +4304,9 @@ def main():
                 raise RuntimeError(f"Tool HTTP {response.status}: {response.text()[:800]}")
             return response.json()
 
-        if args.phase == "P4a":
+        if args.phase == "P4b":
+            run_p4b(page, request, server, output, report, record, begin_edit, tool, fresh_page)
+        elif args.phase == "P4a":
             run_p4a(page, request, server, output, report, record, begin_edit, tool, fresh_page)
             run_p4a_controls(page, request, server, output, report, record, begin_edit, tool, fresh_page)
         elif args.phase == "P3b":

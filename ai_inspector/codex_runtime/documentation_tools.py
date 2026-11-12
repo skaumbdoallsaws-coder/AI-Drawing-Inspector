@@ -802,8 +802,8 @@ def _document_text_tool_specs():
                                            ("height", .01, 2), ("rotation", -180, 180))}
     definitions = [
         ("set_object_frame", {**object_base, **frame_fields, "aspectLock": {"type": "boolean"}},
-         ["pageId", "objectId", "expectedObjectHash"], {"anyOf": [{"required": [key]} for key in frame_fields]},
-         "Change supplied frame fractions only. Image angles use multiples of 90. On an aspect-locked object a lone width or height preserves its ratio; release aspectLock to change proportions."),
+         ["pageId", "objectId", "expectedObjectHash"], {"anyOf": [{"required": [key]} for key in [*frame_fields, "aspectLock"]]},
+         "Change supplied frame fractions only. Image angles use multiples of 90. Stating aspectLock takes the frame as given and locks its new proportions when true; aspectLock alone is valid. Without aspectLock, a locked object carries a lone width or height and both must preserve the ratio."),
         ("set_image_crop", {**object_base, "crop": crop_schema},
          ["pageId", "objectId", "expectedObjectHash", "crop"], {},
          "Image crop fractions must fit inside the source. Null removes it. A crop changes cover to contain; aspectLock does not constrain the source crop."),

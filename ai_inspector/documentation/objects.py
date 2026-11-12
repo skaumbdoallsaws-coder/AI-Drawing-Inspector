@@ -179,20 +179,20 @@ def apply_operation(page, operation, size):
         value = require(oid)
         names = {"x", "y", "width", "height", "rotation"}
         patch = {k: operation[k] for k in names if k in operation}
-        if not patch:
-            fail("invalid_object_frame", "Supply at least one frame value.", oid)
+        if not patch and "aspectLock" not in operation:
+            fail("invalid_object_frame", "Supply a frame value or aspectLock.", oid)
         locked = operation.get("aspectLock", value.get("aspectLock", False))
         if type(locked) is not bool:
             fail("invalid_object_frame", "aspectLock must be a boolean.", oid)
         frame = frame_value({**value["frame"], **patch})
-        if value.get("aspectLock") and locked and ("width" in patch) != ("height" in patch):
+        if value.get("aspectLock") and "aspectLock" not in operation and ("width" in patch) != ("height" in patch):
             ratio = value["frame"]["width"] / value["frame"]["height"]
             if "width" in patch:
                 frame["height"] = frame["width"] / ratio
             else:
                 frame["width"] = frame["height"] * ratio
         frame = frame_value(frame)
-        check_aspect(value, frame, release=not locked)
+        check_aspect(value, frame, release="aspectLock" in operation)
         image_angle(value, frame)
         command["frame"] = frame
         if "aspectLock" in operation:
@@ -390,6 +390,9 @@ def validate_command(command):
 
 
 def live_command(scene, command):
+    if command.get("operation") == "set_object_frame" and "aspectLock" in command and command.get("frame") is None:
+        current = scene.get("pages", {}).get(command["pageId"], {}).get("documentObjects", {}).get(command["targetId"], {})
+        command = {**command, "frame": deepcopy(current.get("frame"))}
     validate_command(command)
     page = scene.get("pages", {}).get(command["pageId"], {})
     objects = page.get("documentObjects", {})
@@ -424,7 +427,7 @@ def live_command(scene, command):
     value = require(command["targetId"])
     if kind == "set_object_frame":
         frame = frame_value(command["frame"])
-        release = command.get("aspectLock") is False
+        release = "aspectLock" in command
         check_aspect(value, frame, release)
         image_angle(value, frame)
         if frame == value["frame"] and command.get("aspectLock", bool(value.get("aspectLock"))) == bool(value.get("aspectLock")):

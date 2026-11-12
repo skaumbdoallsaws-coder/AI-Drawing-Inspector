@@ -32,6 +32,18 @@ from tools.documentation_baseline import local_inventory, safe_source, tracked_p
 ASSEMBLY = "MMLE-50D"
 DOC_TYPE = "illustrated_parts_manual"
 PHASES = ("P1a", "P1b", "P1c", "P2a", "P2b", "P3a", "P3b", "P4a", "P4b", "P5a", "all")
+# Supervisor (P4a-2): the gate machine is shared. While the desktop app's 3D view is open it takes the GPU and one
+# figure capture takes a minute instead of seconds; other work stretched one server answer from 4 s to 50 s. Smokes
+# then ended on a wait, not on a check. DOC_SMOKE_SLOW=3 multiplies every wait given in milliseconds (T) and
+# Playwright's default action wait. Default 1: every wait is as before.
+SLOW = max(1.0, float(os.environ.get("DOC_SMOKE_SLOW") or 1))
+
+
+def T(milliseconds):
+    return int(milliseconds * SLOW)
+
+
+CAPTURE_ALL_WAIT_MS = T(240000)
 RICH_PROOF_TEXT = "Alpha beta gamma"
 RICH_PROOF_PASTE = "\nline two\n\n  \U0001f642 e\u0301\tend  "
 ROOT_NAMES = {"PARTS_MANUAL_ROOT": "p", "OPERATIONS_MANUAL_ROOT": "o", "SPECIFICATION_SHEET_ROOT": "s",
@@ -373,7 +385,7 @@ def run_p1b(page, request, server, output, report, record, begin_edit, tool, fre
         return server.url + "/api/" + routes[kind] + "/" + ASSEMBLY
 
     def state(kind):
-        response = request.get(base(kind) + "/documentation-scene", timeout=120000)
+        response = request.get(base(kind) + "/documentation-scene", timeout=T(120000))
         if not response.ok:
             raise RuntimeError(response.text()[:1000])
         return response.json()
@@ -385,18 +397,18 @@ def run_p1b(page, request, server, output, report, record, begin_edit, tool, fre
         nonlocal page
         page = fresh_page()
         page.on("response", observe)
-        page.goto(server.url + "/?assemblyProfile=MMLE-50D", wait_until="domcontentloaded", timeout=90000)
+        page.goto(server.url + "/?assemblyProfile=MMLE-50D", wait_until="domcontentloaded", timeout=T(90000))
         page.wait_for_function("""() => window.__compareDbg?.state.partNumber === 'MMLE-50D'
-            && window.__compareDbg.state.assyLiveScene""", timeout=90000)
+            && window.__compareDbg.state.assyLiveScene""", timeout=T(90000))
         page.evaluate("() => window.__compareDbg.openDocumentationWorkflow()")
-        page.locator("#documentationWorkspace").wait_for(state="visible", timeout=120000)
-        page.wait_for_function("() => !document.querySelector('#documentationWorkspace.busy')", timeout=120000)
+        page.locator("#documentationWorkspace").wait_for(state="visible", timeout=T(120000))
+        page.wait_for_function("() => !document.querySelector('#documentationWorkspace.busy')", timeout=T(120000))
         page.locator("#documentationTypeRibbonTrigger").click()
         page.locator("#documentationTypeRibbonOption-" + kind).click()
-        page.wait_for_function("kind => window.__compareDbg.state.documentationDocumentType === kind && !document.querySelector('#documentationWorkspace.busy')", arg=kind, timeout=120000)
-        with page.expect_response(lambda r: r.request.method == "GET" and r.url == base(kind) + "/documentation-scene", timeout=120000):
+        page.wait_for_function("kind => window.__compareDbg.state.documentationDocumentType === kind && !document.querySelector('#documentationWorkspace.busy')", arg=kind, timeout=T(120000))
+        with page.expect_response(lambda r: r.request.method == "GET" and r.url == base(kind) + "/documentation-scene", timeout=T(120000)):
             page.locator("#documentationRefreshRibbon").click()
-        page.wait_for_function("() => !document.querySelector('#documentationWorkspace.busy') && window.__compareDbg.documentationGenerationSnapshot().visiblePageCount > 0", timeout=120000)
+        page.wait_for_function("() => !document.querySelector('#documentationWorkspace.busy') && window.__compareDbg.documentationGenerationSnapshot().visiblePageCount > 0", timeout=T(120000))
         # Refresh reveals the pages before its own activation of page 1 finishes rendering, so a click right after it
         # can be overtaken by that late render (the app's pre-existing refresh race). Click until the chosen page is
         # really active, and keep the attempt count as evidence.
@@ -405,7 +417,7 @@ def run_p1b(page, request, server, output, report, record, begin_edit, tool, fre
             page.locator(f'.documentation-page-item[data-page-id="{page_id}"]').click()
             try:
                 page.wait_for_function("""pageId => window.__compareDbg.state.partsManualDocumentationPageId === pageId
-                    && !document.querySelector('#documentationWorkspace.busy')""", arg=page_id, timeout=5000)
+                    && !document.querySelector('#documentationWorkspace.busy')""", arg=page_id, timeout=T(5000))
                 page.wait_for_timeout(1000)
                 if page.evaluate("() => window.__compareDbg.state.partsManualDocumentationPageId") == page_id:
                     break
@@ -424,11 +436,11 @@ def run_p1b(page, request, server, output, report, record, begin_edit, tool, fre
         target = cell(alias)
         begin_edit(target)
         target.fill(value)
-        with page.expect_response(lambda r: r.request.method == "POST" and "documentation-scene/commands" in r.url, timeout=120000) as saved:
+        with page.expect_response(lambda r: r.request.method == "POST" and "documentation-scene/commands" in r.url, timeout=T(120000)) as saved:
             target.press("Enter")
         if not saved.value.ok:
             raise RuntimeError(saved.value.text()[:1000])
-        page.wait_for_function("() => !document.querySelector('#documentationWorkspace.busy')", timeout=120000)
+        page.wait_for_function("() => !document.querySelector('#documentationWorkspace.busy')", timeout=T(120000))
         return saved.value.json()
 
     def capture_all(kind):
@@ -440,7 +452,7 @@ def run_p1b(page, request, server, output, report, record, begin_edit, tool, fre
             const figures = (payload?.document?.pages || []).filter(p => p.renderRequest);
             return figures.length && figures.every(p => p.renderRequest.image?.status === 'ready')
                 && !document.querySelector('#documentationWorkspace.busy');
-        }""", timeout=240000)
+        }""", timeout=CAPTURE_ALL_WAIT_MS)
         document = state(kind)["document"]
         figures = [p for p in document["pages"] if p.get("renderRequest")]
         record(kind + "_real_captures", len(renders) - start == len(figures)
@@ -448,16 +460,16 @@ def run_p1b(page, request, server, output, report, record, begin_edit, tool, fre
         return document
 
     def export_ui(kind):
-        with page.expect_response(lambda r: r.request.method == "POST" and urlsplit(r.url).path == urlsplit(base(kind)).path + "/pdf", timeout=180000) as exported:
+        with page.expect_response(lambda r: r.request.method == "POST" and urlsplit(r.url).path == urlsplit(base(kind)).path + "/pdf", timeout=T(180000)) as exported:
             page.locator("#documentationPublishRibbon").click(no_wait_after=True)
         if not exported.value.ok:
             raise RuntimeError(exported.value.text()[:1000])
-        page.wait_for_function("() => !document.querySelector('#documentationWorkspace.busy')", timeout=120000)
+        page.wait_for_function("() => !document.querySelector('#documentationWorkspace.busy')", timeout=T(120000))
         return exported.value.json()
 
     def save_page(receipt, name, match):
-        pdf_bytes = request.get(server.url + receipt["pdf"]["url"], timeout=120000).body()
-        word = "\n".join(docx_paragraphs(request.get(server.url + receipt["docx"]["url"], timeout=120000).body()))
+        pdf_bytes = request.get(server.url + receipt["pdf"]["url"], timeout=T(120000)).body()
+        word = "\n".join(docx_paragraphs(request.get(server.url + receipt["docx"]["url"], timeout=T(120000)).body()))
         (output / (name + ".pdf")).write_bytes(pdf_bytes)
         with fitz.open(stream=pdf_bytes, filetype="pdf") as pdf:
             index = next(i for i, p in enumerate(pdf) if match(p.get_text()))
@@ -493,7 +505,7 @@ def run_p1b(page, request, server, output, report, record, begin_edit, tool, fre
     record("p1b_review_pdf_docx_marked", marker in text and marker in word and "1,000 lb" in text)
     expected = [{"targetId": target["targetId"], "pageId": target["pageId"], "alias": target["alias"]}
                 for target in data["confirmationTargets"]]
-    blocked = request.post(base(ops) + "/pdf?mode=customer", timeout=120000)
+    blocked = request.post(base(ops) + "/pdf?mode=customer", timeout=T(120000))
     record("p1b_customer_export_blocked_exact_targets", blocked.status == 422 and
         blocked.json().get("error") == "unconfirmed_cited_values" and blocked.json().get("details", {}).get("targets") == expected,
         blocked.json())
@@ -516,12 +528,12 @@ def run_p1b(page, request, server, output, report, record, begin_edit, tool, fre
     page.get_by_role("button", name="Confirm as entered by me", exact=True).first.click()
     dialog = page.locator("dialog[open]")
     record("p1b_confirmation_shows_value_and_source", "1,000 lb" in dialog.inner_text() and "Original source:" in dialog.inner_text())
-    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/confirm-values"), timeout=120000) as confirmed:
+    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/confirm-values"), timeout=T(120000)) as confirmed:
         dialog.get_by_role("button", name="Confirm as entered by me", exact=True).click()
     if not confirmed.value.ok:
         raise RuntimeError(confirmed.value.text())
     confirmation_receipt = confirmed.value.json()["receipt"]
-    customer = request.post(base(ops) + "/pdf?mode=customer", timeout=120000)
+    customer = request.post(base(ops) + "/pdf?mode=customer", timeout=T(120000))
     record("p1b_customer_export_succeeds", customer.ok, customer.json())
     text, word = save_page(customer.json(), "p1b-customer-capacity", lambda text: "Rated capacity" in text)
     confirmed_row = capacity(state(ops)["document"])["rows"][0]
@@ -560,13 +572,13 @@ def run_p1b(page, request, server, output, report, record, begin_edit, tool, fre
         and bool(word))  # Cover status is a known P4 DOCX gap.
     page.locator(f'.documentation-page-item[data-page-id="{cover}"]').click()
     page.locator("#documentationViewMenuRibbon").click()
-    with page.expect_response(lambda r: r.request.method == "POST" and "documentation-scene/commands" in r.url, timeout=120000) as view:
+    with page.expect_response(lambda r: r.request.method == "POST" and "documentation-scene/commands" in r.url, timeout=T(120000)) as view:
         page.locator("#documentationViewRightRibbon").click()
     record("p1b_real_figure_change_saved", view.value.ok)
     figure_changed = state(wi)["document"]
     pending = [p["pageId"] for p in figure_changed["pages"] if p.get("renderRequest") and
                p["renderRequest"].get("image", {}).get("status") != "ready"]
-    refused = request.post(base(wi) + "/pdf", timeout=120000)
+    refused = request.post(base(wi) + "/pdf", timeout=T(120000))
     record("p1b_figure_change_requires_only_cover", pending == [cover] and refused.status == 422 and
         refused.json().get("error") == "work_instruction_capture_required" and
         [p["pageId"] for p in refused.json().get("pendingPages", [])] == [cover], refused.json())
@@ -595,7 +607,7 @@ def run_p1c(page, request, server, output, report, record, begin_edit, tool, fre
         return server.url + "/api/parts-manual/" + ASSEMBLY
 
     def get_scene():
-        response = request.get(base() + "/documentation-scene", timeout=120000)
+        response = request.get(base() + "/documentation-scene", timeout=T(120000))
         if not response.ok:
             raise RuntimeError(response.text()[:1000])
         return response.json()
@@ -612,16 +624,16 @@ def run_p1c(page, request, server, output, report, record, begin_edit, tool, fre
         report.setdefault("visualArtifacts", {})[name] = {"path": (output / filename).relative_to(ROOT).as_posix()}
 
     def idle():
-        page.wait_for_function("() => !document.querySelector('#documentationWorkspace.busy')", timeout=120000)
+        page.wait_for_function("() => !document.querySelector('#documentationWorkspace.busy')", timeout=T(120000))
 
     def open_workspace(stale=False):
         nonlocal page
         page = fresh_page()
-        page.goto(server.url + "/?assemblyProfile=MMLE-50D", wait_until="domcontentloaded", timeout=90000)
+        page.goto(server.url + "/?assemblyProfile=MMLE-50D", wait_until="domcontentloaded", timeout=T(90000))
         page.wait_for_function("""() => window.__compareDbg?.state.partNumber === 'MMLE-50D'
-            && window.__compareDbg.state.assyLiveScene""", timeout=90000)
+            && window.__compareDbg.state.assyLiveScene""", timeout=T(90000))
         page.evaluate("() => window.__compareDbg.openDocumentationWorkflow()")
-        page.locator("#documentationWorkspace").wait_for(state="visible", timeout=120000)
+        page.locator("#documentationWorkspace").wait_for(state="visible", timeout=T(120000))
         idle()
         if stale:
             page.locator("#documentationSourceChanged").wait_for(state="visible")
@@ -630,7 +642,7 @@ def run_p1c(page, request, server, output, report, record, begin_edit, tool, fre
         if not snapshot["visiblePageCount"]:
             page.locator("#documentationRefreshRibbon").click()
             page.wait_for_function("""() => window.__compareDbg.documentationGenerationSnapshot().visiblePageCount > 0
-                && !document.querySelector('#documentationWorkspace.busy')""", timeout=120000)
+                && !document.querySelector('#documentationWorkspace.busy')""", timeout=T(120000))
         report["workspaceOpens"].append({"phase": "P1c",
             "after": page.evaluate("() => window.__compareDbg.documentationGenerationSnapshot()")})
 
@@ -653,7 +665,7 @@ def run_p1c(page, request, server, output, report, record, begin_edit, tool, fre
         begin_edit(target)
         target.fill(value)
         with page.expect_response(lambda r: r.request.method == "POST" and "/documentation-scene/commands" in r.url,
-                                  timeout=120000) as saved:
+                                  timeout=T(120000)) as saved:
             target.press("Enter")
         record("p1c_edit_" + alias, saved.value.ok, saved.value.json().get("command"))
         idle()
@@ -694,10 +706,10 @@ def run_p1c(page, request, server, output, report, record, begin_edit, tool, fre
     record("p1c_refresh_preview", all(value in dialog.inner_text()
            for value in ("From binding:", "To binding:", "carries to the new source.")), dialog.inner_text())
     with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/refresh"),
-                              timeout=120000) as refreshed:
+                              timeout=T(120000)) as refreshed:
         dialog.get_by_role("button", name="Refresh now", exact=True).click()
     record("p1c_refresh_executed", refreshed.value.ok, refreshed.value.json().get("refreshReceipt"))
-    page.locator("#documentationRefreshReceipt").wait_for(state="visible", timeout=120000)
+    page.locator("#documentationRefreshReceipt").wait_for(state="visible", timeout=T(120000))
     screenshot("refresh-receipt")
     current = get_scene()
     conflict = next(c for c in review()["conflicts"] if c["targetId"] == target_id)
@@ -734,20 +746,20 @@ def run_p1c(page, request, server, output, report, record, begin_edit, tool, fre
         const figures = (window.__compareDbg.state.partsManualDocumentation?.document?.pages || []).filter(p => p.renderRequest);
         return figures.length && figures.every(p => p.renderRequest.image?.status === 'ready')
             && !document.querySelector('#documentationWorkspace.busy');
-    }""", timeout=240000)
+    }""", timeout=CAPTURE_ALL_WAIT_MS)
     record("p1c_real_figures_captured", True)
 
     def export(mode):
         document = get_scene()["document"]
         return request.post(base() + "/pdf?mode=" + mode, data={k: document[k]
-            for k in ("sourceRevision", "manualPlanRevision", "documentRevision")}, timeout=120000)
+            for k in ("sourceRevision", "manualPlanRevision", "documentRevision")}, timeout=T(120000))
 
     exported = export("review")
     record("p1c_review_export_created", exported.ok, exported.json())
     if not exported.ok:
         raise RuntimeError("Review export failed: " + exported.text()[:1000])
     artifact = exported.json()["artifact"]
-    pdf_response = request.get(server.url + artifact["url"], timeout=120000)
+    pdf_response = request.get(server.url + artifact["url"], timeout=T(120000))
     pdf_bytes = pdf_response.body()
     (output / "p1c-review.pdf").write_bytes(pdf_bytes)
     with fitz.open(stream=pdf_bytes, filetype="pdf") as pdf:
@@ -792,7 +804,7 @@ def run_p1c(page, request, server, output, report, record, begin_edit, tool, fre
     card = page.locator(f'[data-conflict-id="{cid}"]')
     card.get_by_role("textbox", name="Merged text", exact=True).fill(merged)
     with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/conflicts/resolve"),
-                              timeout=120000) as resolved:
+                              timeout=T(120000)) as resolved:
         card.get_by_role("button", name="Merge", exact=True).click()
     record("p1c_browser_merge_saved", resolved.value.ok, resolved.value.json())
     page.wait_for_function("() => document.querySelector('#documentationConflictCount')?.textContent === '0 conflicts'")
@@ -800,7 +812,7 @@ def run_p1c(page, request, server, output, report, record, begin_edit, tool, fre
     record("p1c_merge_stays_manual", browser_result["values"] and browser_result["values"][0]["text"] == merged)
     screenshot("resolved")
     with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/undo"),
-                              timeout=120000) as undone:
+                              timeout=T(120000)) as undone:
         page.locator("#documentationUndoRibbon").click()
     record("p1c_browser_undo_succeeded", undone.value.ok)
     page.locator(f'[data-conflict-id="{cid}"]').wait_for()
@@ -808,7 +820,7 @@ def run_p1c(page, request, server, output, report, record, begin_edit, tool, fre
     record("p1c_undo_reopens_same_conflict", reopened_conflict["conflictHash"] == conflict_hash
            and all(reopened_conflict[side] == conflict[side] for side in ("B", "C", "N")))
     with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/redo"),
-                              timeout=120000) as redone:
+                              timeout=T(120000)) as redone:
         page.locator("#documentationRedoRibbon").click()
     record("p1c_browser_redo_succeeded", redone.value.ok)
     page.wait_for_function("() => document.querySelector('#documentationConflictCount')?.textContent === '0 conflicts'")
@@ -874,18 +886,18 @@ def rich_compose(page, check_pending):
     cdp = page.context.new_cdp_session(page)
     try:
         cdp.send("Input.imeSetComposition", {"text": "\u6f22", "selectionStart": 1, "selectionEnd": 1})
-        page.wait_for_function("() => DocumentationRichText.active?.composing", timeout=5000)
+        page.wait_for_function("() => DocumentationRichText.active?.composing", timeout=T(5000))
         # Request save without moving native IME focus (a focus change may itself
         # legitimately finish composition before the click event reaches Done).
         page.evaluate('() => DocumentationRichText.active.commit()')
         page.wait_for_timeout(250)
         check_pending()
-        with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/commands"), timeout=120000) as composed:
+        with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/commands"), timeout=T(120000)) as composed:
             cdp.send("Input.insertText", {"text": "\u6f22\u5b57"})
         composed.value.finished()
         if not composed.value.ok:
             raise RuntimeError(composed.value.text()[:1000])
-        page.wait_for_function("() => DocumentationRichText.mountedCount === 0", timeout=120000)
+        page.wait_for_function("() => DocumentationRichText.mountedCount === 0", timeout=T(120000))
     finally:
         cdp.detach()
 
@@ -903,7 +915,7 @@ def rich_browser_helpers(page, request, server, output, report, begin_edit, fres
         return server.url + "/api/" + routes[kind] + "/" + ASSEMBLY
 
     def scene(kind=spec):
-        response = request.get(base(kind) + "/documentation-scene", timeout=120000)
+        response = request.get(base(kind) + "/documentation-scene", timeout=T(120000))
         if not response.ok:
             raise RuntimeError(response.text()[:1000])
         return response.json()
@@ -920,7 +932,7 @@ def rich_browser_helpers(page, request, server, output, report, begin_edit, fres
             "operation": "add_object", "pageId": page_id, "targetType": "document_object", "targetId": key,
             "documentObject": {"objectId": key, "type": "text", "name": "Rich text proof", "source": "user",
                 "content": value, "frame": frame or {"x": 0.12, "y": 0.28, "width": 0.66, "height": 0.24},
-                "styleOverrides": {"fontSize": 16, "fill": "#FFFFFF", "color": "#18212A", **(style or {})}}}, timeout=120000)
+                "styleOverrides": {"fontSize": 16, "fill": "#FFFFFF", "color": "#18212A", **(style or {})}}}, timeout=T(120000))
         if not response.ok:
             raise RuntimeError(response.text()[:1000])
         response.body()  # Consume writes before any reload or navigation.
@@ -931,20 +943,20 @@ def rich_browser_helpers(page, request, server, output, report, begin_edit, fres
             posts.append({"url": req.url, "body": req.post_data_json})
 
     def idle():
-        page.wait_for_function("() => !document.querySelector('#documentationWorkspace.busy')", timeout=120000)
+        page.wait_for_function("() => !document.querySelector('#documentationWorkspace.busy')", timeout=T(120000))
 
     def commands():
         return sum(1 for row in posts if row["url"].endswith("/documentation-scene/commands"))
 
     def saved_command():
         return page.expect_response(lambda r: r.request.method == "POST"
-                                    and r.url.endswith("/documentation-scene/commands"), timeout=120000)
+                                    and r.url.endswith("/documentation-scene/commands"), timeout=T(120000))
 
     def switch(kind):
         page.locator("#documentationTypeRibbonTrigger").click()
         page.locator("#documentationTypeRibbonOption-" + kind).click()
         page.wait_for_function("kind => window.__compareDbg.state.documentationDocumentType === kind && !document.querySelector('#documentationWorkspace.busy')",
-                               arg=kind, timeout=120000)
+                               arg=kind, timeout=T(120000))
 
     def navigate(page_id):
         for _ in range(3):
@@ -958,23 +970,23 @@ def rich_browser_helpers(page, request, server, output, report, begin_edit, fres
     def refresh(pointer=False):
         # Use the real ribbon callback without moving focus; this is the same reload
         # the Sage completion/poll paths perform while a user is still typing.
-        with page.expect_response(lambda r: r.request.method == "GET" and r.url.endswith("/documentation-scene"), timeout=120000) as response:
+        with page.expect_response(lambda r: r.request.method == "GET" and r.url.endswith("/documentation-scene"), timeout=T(120000)) as response:
             if pointer:
                 page.locator("#documentationRefreshRibbon").click()
             else:
                 page.locator("#documentationRefreshRibbon").evaluate("button => button.click()")
         response.value.finished()
         idle()
-        page.wait_for_function("() => window.__compareDbg.documentationGenerationSnapshot().visiblePageCount > 0", timeout=120000)
+        page.wait_for_function("() => window.__compareDbg.documentationGenerationSnapshot().visiblePageCount > 0", timeout=T(120000))
 
     def open_document(kind, page_id, *, pointer_refresh=False):
         nonlocal page
         page = fresh_page()
         page.on("request", observe)
-        page.goto(server.url + "/?assemblyProfile=MMLE-50D", wait_until="domcontentloaded", timeout=90000)
-        page.wait_for_function("() => window.__compareDbg?.state.partNumber === 'MMLE-50D' && window.__compareDbg.state.assyLiveScene", timeout=90000)
+        page.goto(server.url + "/?assemblyProfile=MMLE-50D", wait_until="domcontentloaded", timeout=T(90000))
+        page.wait_for_function("() => window.__compareDbg?.state.partNumber === 'MMLE-50D' && window.__compareDbg.state.assyLiveScene", timeout=T(90000))
         page.evaluate("() => window.__compareDbg.openDocumentationWorkflow()")
-        page.locator("#documentationWorkspace").wait_for(state="visible", timeout=120000)
+        page.locator("#documentationWorkspace").wait_for(state="visible", timeout=T(120000))
         idle()
         if page.evaluate("() => window.__compareDbg.state.documentationDocumentType") != kind:
             switch(kind)
@@ -989,11 +1001,11 @@ def rich_browser_helpers(page, request, server, output, report, begin_edit, fres
 
     def mount(key=object_id, *, generated=False):
         begin_edit(box(key, generated=generated))
-        page.wait_for_function("() => window.DocumentationRichText?.mountedCount === 1", timeout=30000)
+        page.wait_for_function("() => window.DocumentationRichText?.mountedCount === 1", timeout=T(30000))
         return page.locator('.documentation-rich-editor [contenteditable="true"]')
 
     def finish(blur=False):
-        with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/commands"), timeout=120000) as saved:
+        with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/commands"), timeout=T(120000)) as saved:
             if blur:
                 page.locator('.documentation-rich-editor [contenteditable="true"]').evaluate("node => node.blur()")
             else:
@@ -1001,12 +1013,12 @@ def rich_browser_helpers(page, request, server, output, report, begin_edit, fres
         saved.value.finished()
         if not saved.value.ok:
             raise RuntimeError(saved.value.text()[:1000])
-        page.wait_for_function("() => window.DocumentationRichText.mountedCount === 0", timeout=120000)
+        page.wait_for_function("() => window.DocumentationRichText.mountedCount === 0", timeout=T(120000))
         idle()
         return saved.value.json()
 
     def press_export(kind, format="pdf"):
-        with page.expect_response(lambda r: r.request.method == "POST" and r.url == base(kind) + "/pdf", timeout=600000) as response:
+        with page.expect_response(lambda r: r.request.method == "POST" and r.url == base(kind) + "/pdf", timeout=T(600000)) as response:
             page.locator("#documentationExportDocxRibbon" if format == "docx" else "#documentationPublishRibbon").click()
         response.value.finished()  # Never reload with a large POST body in flight.
         idle()
@@ -1014,7 +1026,7 @@ def rich_browser_helpers(page, request, server, output, report, begin_edit, fres
 
     def download(artifact, filename):
         assert artifact.get("url", "").startswith("/api/"), artifact
-        response = request.get(server.url + artifact["url"], timeout=120000)
+        response = request.get(server.url + artifact["url"], timeout=T(120000))
         assert response.ok, response.text()[:500]
         payload = response.body()
         (output / filename).write_bytes(payload)
@@ -1141,7 +1153,7 @@ def run_p2a(page, request, server, output, report, record, begin_edit, tool, fre
     finish()
     committed = field(scene())["richText"]
     for direction, expected in (("undo", unchanged), ("redo", committed)):
-        with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/" + direction), timeout=120000) as moved:
+        with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/" + direction), timeout=T(120000)) as moved:
             page.locator("#documentation" + direction.title() + "Ribbon").click()
         moved.value.finished()
         if not moved.value.ok:
@@ -1171,12 +1183,12 @@ def run_p2a(page, request, server, output, report, record, begin_edit, tool, fre
     record("p2a_08_concurrent_sage_draft_kept", len(posts) == count and field(scene())["richText"] == newer
            and page.evaluate("() => DocumentationRichText.active.element === window.__p2aMountedElement")
            and page.evaluate("() => DocumentationRichTextCore.plainText(DocumentationRichText.active.editor.getJSON())") == draft)
-    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/commands"), timeout=120000) as overwritten:
+    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/commands"), timeout=T(120000)) as overwritten:
         page.locator('[data-rich-action="overwrite"]').click()
     overwritten.value.finished()
     if not overwritten.value.ok:
         raise RuntimeError(overwritten.value.text()[:1000])
-    page.wait_for_function("() => DocumentationRichText.mountedCount === 0", timeout=120000)
+    page.wait_for_function("() => DocumentationRichText.mountedCount === 0", timeout=T(120000))
     record("p2a_08_explicit_overwrite", field(scene())["text"] == draft)
 
     before_keys = scene()
@@ -1213,7 +1225,7 @@ def run_p2a(page, request, server, output, report, record, begin_edit, tool, fre
     with saved_command() as pressed:
         page.mouse.click(*away)
     pressed.value.finished()
-    page.wait_for_function("() => DocumentationRichText.mountedCount === 0", timeout=120000)
+    page.wait_for_function("() => DocumentationRichText.mountedCount === 0", timeout=T(120000))
     idle()
     selected = page.evaluate("() => window.__compareDbg.state.partsManualDocumentationSelection?.targetId || null")
     pressed_field = field(scene())
@@ -1247,7 +1259,7 @@ def run_p2a(page, request, server, output, report, record, begin_edit, tool, fre
         page.locator(f'.documentation-page-item[data-page-id="{next_page}"]').click()
     kept.value.finished()
     page.wait_for_function("id => window.__compareDbg.state.partsManualDocumentationPageId === id",
-                           arg=next_page, timeout=120000)
+                           arg=next_page, timeout=T(120000))
     idle()
     record("p2a_11_page_switch_saves_and_disposes", kept.value.ok
            and page.evaluate("() => DocumentationRichText.mountedCount") == 0 and commands() == count + 1
@@ -1294,7 +1306,7 @@ box => {
   const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
   while (walker.nextNode()) {
     const text = walker.currentNode, parent = text.parentElement;
-    if (parent.closest('.documentation-resize-handle')) continue;
+    if (parent.closest('.documentation-resize-handle, .documentation-object-handle')) continue;
     const css = getComputedStyle(parent), size = parseFloat(css.fontSize);
     const metrics = DocumentationRichTextCore.font(css.fontFamily.replaceAll('"', ''));
     const script = parent.closest('sub, sup');
@@ -1321,7 +1333,10 @@ box => {
     }
   }
   const editing = box.querySelector('.documentation-rich-editor .tiptap');
-  const blocks = [...(editing || box).children].filter(child => !child.classList.contains('documentation-resize-handle'));
+  // Supervisor (P4a-2): a selected object carries eight handles as children; they are not content. Counted, the
+  // content height became the frame height (two P3b checks failed on a selected table object).
+  const blocks = [...(editing || box).children].filter(child => !child.matches(
+    '.documentation-resize-handle, .documentation-object-handle'));
   const bottom = Math.max(...blocks.map(child => child.getBoundingClientRect().bottom));
   const highlights = [...box.querySelectorAll('mark')].flatMap(mark => [...mark.getClientRects()].map(r =>
     ({...local(r), color: DocumentationRichTextCore.color(getComputedStyle(mark).backgroundColor)})));
@@ -1937,7 +1952,7 @@ def run_p3a_editor(page, h, page_id, prior_keys, output, report, record, tool):
         response = h.request.post(h.base() + "/documentation-scene/commands", data={
             "baseRevision": before["revision"], "sourceRevision": before["scene"]["sourceRevision"],
             "manualPlanRevision": before["scene"]["manualPlanRevision"], "operation": "remove_object",
-            "pageId": page_id, "targetType": "document_object", "targetId": key}, timeout=120000)
+            "pageId": page_id, "targetType": "document_object", "targetId": key}, timeout=T(120000))
         assert response.ok, response.text()[:1000]
         response.body()
     key = "document-object-p3a-edit"
@@ -2113,7 +2128,7 @@ def run_p3a_editor(page, h, page_id, prior_keys, output, report, record, tool):
     h.screenshot("part2-editor-measured")
     editor.press("Escape")
     for direction, wanted in (("undo", initial), ("redo", expected)):
-        with page.expect_response(lambda response: response.request.method == "POST" and response.url.endswith("/documentation-scene/" + direction), timeout=120000) as moved:
+        with page.expect_response(lambda response: response.request.method == "POST" and response.url.endswith("/documentation-scene/" + direction), timeout=T(120000)) as moved:
             page.locator("#documentation" + direction.title() + "Ribbon").click()
         moved.value.finished(); assert moved.value.ok, moved.value.text()[:1000]
         h.idle()
@@ -2207,7 +2222,7 @@ def run_p3a_narrative(h, output, report, record, tool):
             const figures = (window.__compareDbg.state.partsManualDocumentation?.document?.pages || []).filter(p => p.renderRequest);
             return figures.length && figures.every(p => p.renderRequest.image?.status === 'ready')
                 && !document.querySelector('#documentationWorkspace.busy');
-        }""", timeout=240000)
+        }""", timeout=CAPTURE_ALL_WAIT_MS)
 
     def field(kind, alias):
         return h.field(h.scene(kind), alias)
@@ -2337,7 +2352,7 @@ def run_p3a_narrative(h, output, report, record, tool):
     # Three independent document steps, in edit order and reverse edit order.
     for direction, aliases, expected in (("undo", list(reversed(after)), before), ("redo", list(after), after)):
         for alias in aliases:
-            with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/" + direction), timeout=120000) as response:
+            with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/" + direction), timeout=T(120000)) as response:
                 page.locator("#documentation" + direction.title() + "Ribbon").click()
             response.value.finished(); assert response.value.ok, response.value.text()[:1000]
             h.idle()
@@ -2419,7 +2434,7 @@ def run_p3a_search(h, output, report, record, tool):
     panel.get_by_label("Find text", exact=True).fill("e")
     panel.get_by_role("button", name="Find", exact=True).click()
     page.wait_for_function("""() => /^Showing the first 1000 of [0-9]+ matches[.]/.test(
-        document.querySelector('.documentation-find-panel [role=status]')?.textContent || '')""", timeout=180000)
+        document.querySelector('.documentation-find-panel [role=status]')?.textContent || '')""", timeout=T(180000))
     panel.get_by_role("button", name="Replace all", exact=True).click()
     bounded = panel.get_by_role("status").inner_text()
     record("p3a4_bounded_list", panel.locator('.documentation-find-results li').count() == 1000
@@ -2438,7 +2453,7 @@ def run_p3a_search(h, output, report, record, tool):
     record("p3a4_next_selects_targets", len(selected) == 2, sorted(selected))
     panel.get_by_label("Replace with", exact=True).fill("Pin")
     panel.get_by_role("button", name="Replace", exact=True).click()
-    page.wait_for_function("() => document.querySelector('.documentation-find-panel [role=status]')?.textContent === 'Applied 1 of 1 group.'", timeout=120000)
+    page.wait_for_function("() => document.querySelector('.documentation-find-panel [role=status]')?.textContent === 'Applied 1 of 1 group.'", timeout=T(120000))
     before = h.scene(kind)
     before_rich, before_plain = deepcopy(h.field(before, alias)), deepcopy(h.field(before, key))
     record("p3a4_replace_one", sum(f["text"].lower().count("rangepin") for f in [before_rich, before_plain]) == 3)
@@ -2446,7 +2461,7 @@ def run_p3a_search(h, output, report, record, tool):
     record("p3a4_preview", '3 matches; 3 replaceable; 0 read-only. 1 group, one undo step' in panel.get_by_role("status").inner_text())
     h.screenshot("part4-preview")
     panel.get_by_role("button", name="Apply replacement groups", exact=True).click()
-    page.wait_for_function("() => document.querySelector('.documentation-find-panel [role=status]')?.textContent === 'Applied 1 of 1 group.'", timeout=120000)
+    page.wait_for_function("() => document.querySelector('.documentation-find-panel [role=status]')?.textContent === 'Applied 1 of 1 group.'", timeout=T(120000))
     after = h.scene(kind)
     rich_after = h.field(after, alias)
     record("p3a4_replace_group", rich_after["text"] == "Pin Pin" and h.field(after, key)["text"] == "Pin Pin")
@@ -2454,7 +2469,7 @@ def run_p3a_search(h, output, report, record, tool):
     record("p3a4_neighbor_marks", node_ids(rich_after["richText"]) == node_ids(value)
            and leaves[0]["marks"] == [{"type": "bold"}] and leaves[-1]["marks"] == [{"type": "italic"}])
     panel.get_by_role("button", name="Close find", exact=True).click()
-    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith('/documentation-scene/undo'), timeout=120000) as response:
+    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith('/documentation-scene/undo'), timeout=T(120000)) as response:
         page.locator("#documentationUndoRibbon").click()
     response.value.finished(); h.idle()
     restored = h.scene(kind)
@@ -2463,7 +2478,7 @@ def run_p3a_search(h, output, report, record, tool):
     # Supervisor: Ctrl+F opens the panel inside the workspace, and it leaves with the document.
     page.locator("#documentationPublicationSurface").click(position={"x": 4, "y": 4})
     page.keyboard.press("Control+f")
-    panel.wait_for(state="visible", timeout=30000)
+    panel.wait_for(state="visible", timeout=T(30000))
     record("p3a4_ctrl_f_opens_in_workspace", page.locator("#documentationWorkspace .documentation-find-panel").count() == 1)
     h.switch("work_instructions")
     h.idle()
@@ -2492,7 +2507,7 @@ def run_p3a_search(h, output, report, record, tool):
         const pages = window.__compareDbg.state.partsManualDocumentation?.document?.pages || [];
         return pages.filter(p => p.renderRequest).every(p => p.renderRequest.image?.status === 'ready')
             && !document.querySelector('#documentationWorkspace.busy');
-    }""", timeout=240000)
+    }""", timeout=CAPTURE_ALL_WAIT_MS)
     artifacts = {}
     for format in ("pdf", "docx"):
         response, result = h.press_export(kind, format)
@@ -2730,7 +2745,7 @@ def run_p3b(page, request, server, output, report, record, begin_edit, tool, fre
         const figures = (window.__compareDbg.state.partsManualDocumentation?.document?.pages || []).filter(p => p.renderRequest);
         return figures.length && figures.every(p => p.renderRequest.image?.status === 'ready')
             && !document.querySelector('#documentationWorkspace.busy');
-    }""", timeout=240000)
+    }""", timeout=CAPTURE_ALL_WAIT_MS)
     artifacts = {}
     for format in ("pdf", "docx"):
         response, result = h.press_export(kind, format)
@@ -2747,13 +2762,13 @@ def run_p3b(page, request, server, output, report, record, begin_edit, tool, fre
            and h.scene(kind)["revision"] == revision and stored() == value)
     editor.press("Escape")
     page.wait_for_function("() => DocumentationRichText.mountedCount === 0")
-    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/undo"), timeout=120000) as response:
+    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/undo"), timeout=T(120000)) as response:
         page.locator("#documentationUndoRibbon").click()
     response.value.finished()
     assert response.value.ok, response.value.text()[:1000]
     h.idle()
     record("p3b_one_undo_exact_preimage", canonical_bytes(stored()) == canonical_bytes(before_last))
-    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/redo"), timeout=120000) as response:
+    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/redo"), timeout=T(120000)) as response:
         page.locator("#documentationRedoRibbon").click()
     response.value.finished()
     assert response.value.ok, response.value.text()[:1000]
@@ -2775,7 +2790,7 @@ def run_p3b(page, request, server, output, report, record, begin_edit, tool, fre
     evidence["plain"] = {"canvas": plain_canvas,
         "pdf": compare_pdf(plain_artifacts["pdf"], plain_snapshot, page_id, key, output / "p3b-plain-pdf.png"),
         "docx": compare_docx(plain_artifacts["docx"], key, plain_plan.layout.content)}
-    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/undo"), timeout=120000) as response:
+    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/undo"), timeout=T(120000)) as response:
         page.locator("#documentationUndoRibbon").click()
     response.value.finished(); assert response.value.ok, response.value.text()[:1000]
     h.idle()
@@ -2801,7 +2816,7 @@ def run_p3b_editor(page, request, server, output, report, record, begin_edit, to
     removed = request.post(h.base(kind) + "/documentation-scene/commands", data={
         "baseRevision": before["revision"], "sourceRevision": before["scene"]["sourceRevision"],
         "manualPlanRevision": before["scene"]["manualPlanRevision"], "operation": "remove_object",
-        "pageId": page_id, "targetType": "document_object", "targetId": prior_key}, timeout=120000)
+        "pageId": page_id, "targetType": "document_object", "targetId": prior_key}, timeout=T(120000))
     assert removed.ok, removed.text()
     removed.body()
     h.create(kind, key, "Workspace table", frame={"x": .08, "y": .15, "width": .84, "height": .72},
@@ -2857,14 +2872,14 @@ def run_p3b_editor(page, request, server, output, report, record, begin_edit, to
         open_menu()
         if configure:
             configure()
-        with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/tables"), timeout=120000) as response:
+        with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/tables"), timeout=T(120000)) as response:
             panel.get_by_role("button", name=label, exact=True).click()
         response.value.finished()
         result = response.value.json()
         assert response.value.ok, result
         page.wait_for_function("""() => DocumentationRichText.active && !DocumentationRichText.active.saving
             && document.querySelector('.documentation-rich-editor [contenteditable="true"]')
-            && !document.querySelector('.documentation-table-menu:not([hidden])')""", timeout=120000)
+            && !document.querySelector('.documentation-table-menu:not([hidden])')""", timeout=T(120000))
         # Focus is asynchronous in Tiptap; wait for the actual caret before sending the next physical key.
         page.wait_for_function("() => document.activeElement?.classList.contains('tiptap')")
         value = stored()
@@ -2963,7 +2978,7 @@ def run_p3b_editor(page, request, server, output, report, record, begin_edit, to
     _, value, _ = action("Header cell", "header")
     record("p3b2_header_toggle", table(value)["content"][0]["content"][0]["type"] == "tableCell")
     open_menu()
-    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/tables"), timeout=120000) as response:
+    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/tables"), timeout=T(120000)) as response:
         fill = panel.get_by_label("Fill hex", exact=True)
         fill.click(); fill.press("Control+a"); page.keyboard.insert_text("#cceeff"); fill.press("Tab")
     response.value.finished(); assert response.value.ok, response.value.text()
@@ -2985,7 +3000,7 @@ def run_p3b_editor(page, request, server, output, report, record, begin_edit, to
     # A 1% column is below 12 pt in this frame. The checked refusal is the only expected HTTP failure.
     saved = deepcopy(stored()); revision = h.scene(kind)["revision"]
     open_menu(); input_number("Column width", 1)
-    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/tables"), timeout=120000) as response:
+    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/tables"), timeout=T(120000)) as response:
         panel.get_by_role("button", name="Apply", exact=True).click()
     response.value.finished(); error = response.value.json()
     page.wait_for_function("() => DocumentationRichText.active && !DocumentationRichText.active.saving")
@@ -3059,7 +3074,7 @@ def run_p3b_editor(page, request, server, output, report, record, begin_edit, to
         h.finish()
     else:  # Nothing to save, or text in the wrong place: discard the draft so that the later steps still run.
         editor().press("Escape")
-        page.wait_for_function("() => window.DocumentationRichText.mountedCount === 0", timeout=120000)
+        page.wait_for_function("() => window.DocumentationRichText.mountedCount === 0", timeout=T(120000))
         h.idle()
     value = stored()
     record("p3b2_type_after_final_table", all(settled) and gap == "gapcursor" and value["doc"]["content"][-1]["type"] == "paragraph"
@@ -3070,7 +3085,7 @@ def run_p3b_editor(page, request, server, output, report, record, begin_edit, to
     record("p3b2_delete_table", all(n["type"] != "table" for n in deleted["doc"]["content"]))
     editor().press("Escape")
     def history(which):
-        with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/" + which), timeout=120000) as response:
+        with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/" + which), timeout=T(120000)) as response:
             page.locator("#documentation" + which.title() + "Ribbon").click()
         response.value.finished(); assert response.value.ok, response.value.text()
         h.idle()
@@ -3086,7 +3101,7 @@ def run_p3b_editor(page, request, server, output, report, record, begin_edit, to
         const figures=(window.__compareDbg.state.partsManualDocumentation?.document?.pages||[]).filter(p=>p.renderRequest);
         return figures.length && figures.every(p=>p.renderRequest.image?.status==='ready')
             && !document.querySelector('#documentationWorkspace.busy');
-    }""", timeout=240000)
+    }""", timeout=CAPTURE_ALL_WAIT_MS)
     artifacts = {}
     for format in ("pdf", "docx"):
         response, result = h.press_export(kind, format)
@@ -3137,7 +3152,7 @@ def run_p4a(page, request, server, output, report, record, begin_edit, tool, fre
         page_id = before["document"]["pages"][0]["pageId"]
         size = objects.page_size(before["document"])
         upload = request.post(server.url + "/api/parts-manual/" + ASSEMBLY + "/documentation-assets",
-            multipart={"file": {"name": "quadrants.png", "mimeType": "image/png", "buffer": quadrant_png()}}, timeout=120000)
+            multipart={"file": {"name": "quadrants.png", "mimeType": "image/png", "buffer": quadrant_png()}}, timeout=T(120000))
         assert upload.ok, upload.text()
         asset = upload.json()["asset"]
         keys = ["document-object-p4a-" + suffix for suffix in ("image", "shape", "text")]
@@ -3156,7 +3171,7 @@ def run_p4a(page, request, server, output, report, record, begin_edit, tool, fre
         # bands beside it stay white on the page and in the PDF; the DOCX holds it upright.
         camera_data = camera_jpeg(6)
         camera_upload = request.post(server.url + "/api/parts-manual/" + ASSEMBLY + "/documentation-assets",
-            multipart={"file": {"name": "camera.jpg", "mimeType": "image/jpeg", "buffer": camera_data}}, timeout=120000)
+            multipart={"file": {"name": "camera.jpg", "mimeType": "image/jpeg", "buffer": camera_data}}, timeout=T(120000))
         assert camera_upload.ok, camera_upload.text()
         camera_frame = {"x": .68, "y": .16, "width": .2, "height": .2}
         camera_crop = {"x": .5, "y": 0, "width": .5, "height": .5}
@@ -3174,7 +3189,7 @@ def run_p4a(page, request, server, output, report, record, begin_edit, tool, fre
                 "baseRevision": current["revision"], "sourceRevision": current["scene"]["sourceRevision"],
                 "manualPlanRevision": current["scene"]["manualPlanRevision"], "operation": "add_object",
                 "pageId": page_id, "targetType": "document_object", "targetId": row["objectId"],
-                "documentObject": {**row, "source": "user"}}, timeout=120000)
+                "documentObject": {**row, "source": "user"}}, timeout=T(120000))
             assert response.ok, response.text()
             response.body()
         current = h.scene(kind)
@@ -3183,7 +3198,7 @@ def run_p4a(page, request, server, output, report, record, begin_edit, tool, fre
         setup = request.post(h.base(kind) + "/documentation-scene/commands", data={
             "baseRevision":current["revision"],"sourceRevision":current["scene"]["sourceRevision"],
             "manualPlanRevision":current["scene"]["manualPlanRevision"],"operation":"set_object_order",
-            "pageId":page_id,"targetType":"figure","targetId":page_id,"order":initial_order},timeout=120000)
+            "pageId":page_id,"targetType":"figure","targetId":page_id,"order":initial_order},timeout=T(120000))
         assert setup.ok, setup.text()
         setup.body()
         page = h.open_document(kind, page_id, pointer_refresh=True)
@@ -3329,7 +3344,7 @@ def run_p4a(page, request, server, output, report, record, begin_edit, tool, fre
         page.wait_for_function("""() => {
             const figures = (window.__compareDbg.state.partsManualDocumentation?.document?.pages || []).filter(p => p.renderRequest);
             return figures.every(p => p.renderRequest.image?.status === 'ready') && !document.querySelector('#documentationWorkspace.busy');
-        }""", timeout=600000)
+        }""", timeout=T(600000))
         if page.locator("#documentationPublishRibbon").is_disabled():
             ran["exportBlocker"] = page.locator("#documentationPublishRibbon").get_attribute("title")
             record(prefix+"_export_enabled", False, ran)
@@ -3371,7 +3386,7 @@ def run_p4a(page, request, server, output, report, record, begin_edit, tool, fre
                     and max(abs(a-b) for a,b in zip(Image.open(io.BytesIO(upright[0])).convert("RGB").getpixel((75, 50)),
                                                     COLORS[ORIENTED[6][1]])) <= 6)
         for index, expected in enumerate(reversed(previous_states)):
-            with page.expect_response(lambda r:r.request.method == "POST" and r.url.endswith("/documentation-scene/undo"),timeout=120000) as undone:
+            with page.expect_response(lambda r:r.request.method == "POST" and r.url.endswith("/documentation-scene/undo"),timeout=T(120000)) as undone:
                 page.locator("#documentationUndoRibbon").click()
             undone.value.finished()
             assert undone.value.ok, undone.value.text()
@@ -3379,6 +3394,389 @@ def run_p4a(page, request, server, output, report, record, begin_edit, tool, fre
             record(prefix+"_undo_"+str(index), canonical_bytes(h.scene(kind)["scene"]["pages"][page_id]) == canonical_bytes(expected))
         details["final"] = final
         write_json(output/"p4a-objects.json",evidence)
+
+
+def run_p4a_controls(page, request, server, output, report, record, begin_edit, tool, fresh_page):
+    """P4a part 2: real pointers/keys only; API calls below only read stored state."""
+    from copy import deepcopy
+    import io
+    import math
+    import fitz
+    from PIL import Image
+    from ai_inspector.documentation import objects
+    from tests.test_documentation_export_matrix import quadrant_png
+
+    kind = "operations_and_maintenance_manual"
+    h = rich_browser_helpers(page, request, server, output, report, begin_edit, fresh_page, "P4a-2")
+    evidence, posts = {}, []
+    # Supervisor: several steps record the same name (selection_1, object_pressed). The report keeps one result
+    # per name, so the first failure of a name stays (four failures were hidden by later passes in one run).
+    report_check, failed_names = record, set()
+    def record(name, ok, detail=None):
+        if name in failed_names:
+            return
+        if not ok:
+            failed_names.add(name)
+        report_check(name, ok, detail)
+
+    def free_point(node):
+        # A point of the node that nothing covers: objects overlap and the toolbar floats beside the selection.
+        return node.evaluate("""el => {
+            const r = el.getBoundingClientRect();
+            for (const v of [.5, .25, .75, .1, .9]) for (const u of [.5, .25, .75, .1, .9, .03, .97]) {
+                const x = r.left + r.width * u, y = r.top + r.height * v, hit = document.elementFromPoint(x, y);
+                if (hit && (hit === el || el.contains(hit))) return [x, y];
+            }
+            return null;
+        }""")
+
+    page.on("request", lambda req: posts.append({"url":req.url,"body":req.post_data_json})
+            if req.method=="POST" and (req.url.endswith("/objects") or "/documentation-scene/" in req.url) else None)
+
+    def observe(name, expression, arg=None, timeout=T(15000)):
+        # Supervisor: an object change settles in about 2.2 s here (batch 1.5 s + scene read 0.7 s, measured);
+        # 5 s was not enough for the queued nudges or for opening the 33-page manual.
+        try:
+            page.wait_for_function(expression,arg=arg,timeout=timeout)
+            record("p4a2_"+name,True)
+            return True
+        except Exception as error:
+            record("p4a2_"+name,False,{"error":str(error),"state":page.evaluate("""() => ({
+                selected:window.__compareDbg.state.partsManualDocumentationSelections,
+                busy:window.__compareDbg.state.partsManualDocumentationObjectBusy,
+                crop:window.__compareDbg.state.partsManualDocumentationCropId})""")})
+            return False
+
+    def press(selector):
+        node = page.locator(selector).first
+        spot = free_point(node) if node.count() else None
+        if not spot:
+            record("p4a2_missing_"+selector,False)
+            return False
+        page.mouse.click(*spot)
+        return True
+
+    def stored():
+        return h.scene(kind)
+
+    def refresh(name):
+        try:
+            with page.expect_response(lambda r:r.request.method=="GET" and r.url.endswith("/documentation-scene"),timeout=T(10000)) as response:
+                press("#documentationRefreshRibbon")
+            response.value.finished()
+            revision=response.value.json()["revision"]
+            observe(name,"revision => !document.querySelector('#documentationWorkspace.busy') && window.__compareDbg.state.partsManualDocumentation?.revision === revision && !!window.__compareDbg.state.partsManualDocumentation?.objectBinding",revision)
+        except Exception as error:
+            record("p4a2_"+name,False,{"error":str(error)})
+
+    def current():
+        return stored()["scene"]["pages"].get(page_id,{}).get("documentObjects",{})
+
+    def selected(ids):
+        return observe("selection_"+str(len(ids)),
+            "ids => JSON.stringify((window.__compareDbg.state.partsManualDocumentationSelections || []).map(t=>t.targetId).sort()) === JSON.stringify([...ids].sort())",ids)
+
+    def write_step(name, action, suffix="/objects"):
+        before = stored()
+        try:
+            # Supervisor: 60 s. Two writes of one run on a loaded machine answered after more than 10 s (they
+            # were stored; only this wait gave up).
+            with page.expect_response(lambda r:r.request.method=="POST" and r.url.endswith(suffix),timeout=T(60000)) as response:
+                action()
+            response.value.finished()
+            result = response.value.json()
+            record("p4a2_"+name+"_response",response.value.ok,result)
+            observe(name+"_settled","revision => window.__compareDbg.state.partsManualDocumentation?.revision !== revision"
+                " && !window.__compareDbg.state.partsManualDocumentationObjectBusy && !document.querySelector('#documentationWorkspace.busy')",before["revision"])
+            return response.value.ok
+        except Exception as error:
+            record("p4a2_"+name+"_response",False,{"error":str(error),"before":before["revision"],"after":stored()["revision"]})
+            return False
+
+    press("#documentationTypeRibbonTrigger")
+    observe("type_menu","() => !!document.querySelector('#documentationTypeRibbonOption-operations_and_maintenance_manual')?.getBoundingClientRect().height")
+    press("#documentationTypeRibbonOption-"+kind)
+    observe("operations_open","() => window.__compareDbg.state.documentationDocumentType === 'operations_and_maintenance_manual' && window.__compareDbg.state.partsManualDocumentation?.document?.documentType === 'operations_and_maintenance_manual' && !document.querySelector('#documentationWorkspace.busy')",timeout=T(120000))
+    refresh("refreshed")
+    snapshot = stored()
+    page_id = snapshot["document"]["pages"][0]["pageId"]
+    size = objects.page_size(snapshot["document"])
+    press('.documentation-page-item[data-page-id="'+page_id+'"]')
+    observe("active_page","id => window.__compareDbg.state.partsManualDocumentationPageId === id",page_id)
+
+    def element(key):
+        return page.locator('#documentationPublicationSurface [data-documentation-object-id="'+key+'"]')
+
+    def click_object(key, shift=False):
+        spot = free_point(element(key)) if element(key).count() else None
+        if not spot:
+            record("p4a2_object_visible",False,key)
+            return
+        prior=page.evaluate("() => (window.__compareDbg.state.partsManualDocumentationSelections || []).map(t=>t.targetId)")
+        if shift: page.keyboard.down("Shift")
+        page.mouse.move(*spot)
+        page.mouse.down()
+        if shift:
+            selected([i for i in prior if i!=key] if key in prior else prior+[key])
+        else:
+            observe("object_pressed","() => !!window.__compareDbg.state.partsManualDocumentationPageElementDrag?.objectGesture")
+        page.mouse.up()
+        observe("object_released","() => !window.__compareDbg.state.partsManualDocumentationPageElementDrag")
+        if shift: page.keyboard.up("Shift")
+
+    def point(f, x, y):
+        surface = page.locator("#documentationPublicationSurface").bounding_box()
+        a = math.radians(f.get("rotation",0))
+        dx,dy = x-f["width"]*size[0]/2,y-f["height"]*size[1]/2
+        return (surface["x"]+((f["x"]+f["width"]/2)*size[0]+math.cos(a)*dx-math.sin(a)*dy)*surface["width"]/size[0],
+                surface["y"]+((f["y"]+f["height"]/2)*size[1]+math.sin(a)*dx+math.cos(a)*dy)*surface["height"]/size[1])
+
+    def drag_node(node, dx, dy, name, crop=False):
+        spot = free_point(node) if node.count() else None
+        if not spot:
+            record("p4a2_"+name+"_handle",False)
+            return False
+        x,y = spot
+        def action():
+            page.mouse.move(x,y)
+            page.mouse.down()
+            if not crop:
+                observe(name+"_started","() => !!(window.__compareDbg.state.partsManualDocumentationResizeDrag?.objectGesture || window.__compareDbg.state.partsManualDocumentationPageElementDrag?.objectGesture)")
+            page.mouse.move(x+dx,y+dy,steps=8)
+            if not crop:
+                observe(name+"_preview","() => !!(window.__compareDbg.state.partsManualDocumentationResizeDrag?.moved || window.__compareDbg.state.partsManualDocumentationPageElementDrag?.moved)")
+            page.mouse.up()
+        if crop:
+            before = page.locator(".documentation-crop-rectangle").get_attribute("style")
+            action()
+            return observe(name+"_crop_preview","before => document.querySelector('.documentation-crop-rectangle')?.getAttribute('style') !== before",before)
+        return write_step(name,action)
+
+    def frame(key):
+        return current()[key]["frame"]
+
+    def undo(name, redo=False):
+        return write_step(name,lambda:press("#documentationRedoRibbon" if redo else "#documentationUndoRibbon"),
+                          "/documentation-scene/redo" if redo else "/documentation-scene/undo")
+
+    before_ids = set(current())
+    picture_file = output/"p4a2-q.png"
+    picture_file.write_bytes(quadrant_png())
+    def insert_picture():
+        with page.expect_file_chooser(timeout=T(10000)) as chooser:
+            press("#documentationInsertImageRibbon")
+        chooser.value.set_files(str(picture_file))
+    if not write_step("insert_picture",insert_picture,"/documentation-scene/commands"):
+        return
+    new = set(current())-before_ids
+    if len(new)!=1:
+        record("p4a2_insert_identity",False,list(new))
+        return
+    image_id = next(iter(new))
+    selected([image_id])
+    image = current()[image_id]
+    record("p4a2_insert_ratio",image.get("aspectLock") is True
+           and abs(image["frame"]["width"]*size[0]/(image["frame"]["height"]*size[1])-2)<.001,image)
+    record("p4a2_eight_handles",element(image_id).locator(".documentation-object-handle").count()==8)
+    page.screenshot(path=str(output/"p4a2-handles.png"),full_page=True)
+
+    f = frame(image_id); corner = point(f,0,0)
+    drag_node(element(image_id).locator('[data-handle="se"]'),35,20,"locked_resize")
+    after = frame(image_id)
+    record("p4a2_locked_resize",abs(after["width"]/after["height"]/(f["width"]/f["height"])-1)<=.001
+        and math.dist(corner,point(after,0,0))<=.5,{"before":f,"after":after,"oppositeDelta":math.dist(corner,point(after,0,0))})
+    write_step("unlock",lambda:press("#documentationObjectAspectRibbon"))
+    f = frame(image_id)
+    drag_node(element(image_id).locator('[data-handle="e"]'),30,0,"edge_resize")
+    after = frame(image_id)
+    record("p4a2_unlocked_edge",after["width"]!=f["width"] and after["height"]==f["height"] and after["x"]==f["x"],{"before":f,"after":after})
+    write_step("rotate",lambda:press("#documentationFloatingRotateRight"),"/documentation-scene/commands")
+    f = frame(image_id);corner = point(f,0,0)
+    drag_node(element(image_id).locator('[data-handle="se"]'),-20,30,"turned_resize")
+    after = frame(image_id)
+    record("p4a2_rotated_anchor",math.dist(corner,point(after,0,0))<=.5,{"before":f,"after":after,"delta":math.dist(corner,point(after,0,0))})
+
+    def crop_begin():
+        press("#documentationObjectCropRibbon")
+        return observe("crop_open","id => window.__compareDbg.state.partsManualDocumentationCropId === id && !!document.querySelector('.documentation-crop-rectangle')",image_id)
+
+    def crop_geometry():
+        return page.locator(".documentation-crop-rectangle").evaluate("""node => {
+            const f=el=>({x:parseFloat(el.style.left),y:parseFloat(el.style.top),width:parseFloat(el.style.width),height:parseFloat(el.style.height)});
+            return {rect:f(node),whole:f(document.querySelector('.documentation-crop-picture'))};
+        }""")
+
+    pre_crop = deepcopy(current()[image_id])
+    if crop_begin():
+        geom = crop_geometry()
+        source,draw = objects.placement(
+            pre_crop,(pre_crop["frame"]["width"]*size[0],pre_crop["frame"]["height"]*size[1]),(200,100))
+        record("p4a2_crop_initial_box",max(abs(geom["rect"][k]-n) for k,n in zip(("x","y","width","height"),draw))<=.5,geom)
+        page.screenshot(path=str(output/"p4a2-crop.png"),full_page=True)
+        whole=geom["whole"];f=frame(image_id)
+        start=point(f,whole["x"],whole["y"]+whole["height"])
+        end=point(f,whole["x"]+whole["width"]/2,whole["y"]+whole["height"]/2)
+        drag_node(page.locator('.documentation-crop-rectangle [data-handle="sw"]'),end[0]-start[0],end[1]-start[1],"crop_quadrant",crop=True)
+        chosen=crop_geometry()["rect"]
+        center_before=point(f,chosen["x"]+chosen["width"]/2,chosen["y"]+chosen["height"]/2)
+        write_step("crop_apply",lambda:page.keyboard.press("Enter"))
+        actual=current()[image_id]
+        record("p4a2_crop_quadrant",max(abs(actual.get("crop",{}).get(k,-1)-v) for k,v in {"x":.5,"y":0,"width":.5,"height":.5}.items())<=.02,actual)
+        record("p4a2_crop_kept_position",math.dist(center_before,point(actual["frame"],actual["frame"]["width"]*size[0]/2,actual["frame"]["height"]*size[1]/2))<=1,{"centerBefore":center_before,"frame":actual["frame"]})
+        screenshot=Image.open(io.BytesIO(page.screenshot())).convert("RGB")
+        center=point(actual["frame"],actual["frame"]["width"]*size[0]/2,actual["frame"]["height"]*size[1]/2)
+        color=screenshot.getpixel(tuple(round(n) for n in center))
+        record("p4a2_crop_green",max(abs(a-b) for a,b in zip(color,(0,255,0)))<=5,color)
+        outside=[]
+        for u,v,old_color in ((.25,.25,(255,0,0)),(.25,.75,(0,0,255)),(.75,.75,(255,255,0))):
+            sample=point(f,whole["x"]+whole["width"]*u,whole["y"]+whole["height"]*v)
+            pixel=screenshot.getpixel(tuple(round(n) for n in sample))
+            outside.append({"point":sample,"pixel":pixel,"discardedPictureColor":old_color})
+        record("p4a2_crop_outside_picture_gone",all(max(abs(a-b) for a,b in zip(row["pixel"],row["discardedPictureColor"]))>30 for row in outside),outside)
+        undo("crop_undo")
+        record("p4a2_crop_one_undo",current()[image_id]==pre_crop)
+        undo("crop_redo",redo=True)
+
+    if crop_begin():
+        original=deepcopy(current()[image_id]);count=len(posts)
+        drag_node(page.locator('.documentation-crop-rectangle [data-handle="e"]'),0,-12,"cancel_crop",crop=True)
+        page.keyboard.press("Escape")
+        observe("crop_cancelled","() => !window.__compareDbg.state.partsManualDocumentationCropId")
+        record("p4a2_crop_cancel_no_write",len(posts)==count and current()[image_id]==original)
+    if crop_begin():
+        geom=crop_geometry();f=frame(image_id)
+        whole_center=point(f,geom["whole"]["x"]+geom["whole"]["width"]/2,geom["whole"]["y"]+geom["whole"]["height"]/2)
+        write_step("crop_reset",lambda:press("#documentationObjectCropResetRibbon"))
+        actual=current()[image_id]
+        record("p4a2_reset_whole",not actual.get("crop") and math.dist(whole_center,
+            point(actual["frame"],actual["frame"]["width"]*size[0]/2,actual["frame"]["height"]*size[1]/2))<=1,actual)
+
+    ids=[image_id]
+    for index in range(2):
+        prior=set(current())
+        if not write_step("insert_text_"+str(index),lambda:press("#documentationInsertTextRibbon"),"/documentation-scene/commands"):
+            return
+        keys=set(current())-prior
+        if len(keys)!=1:
+            record("p4a2_text_identity",False,list(keys));return
+        key=next(iter(keys));ids.append(key);selected([key])
+        drag_node(element(key),-120+index*70,120+index*70,"place_text_"+str(index))
+    click_object(ids[0]);selected([ids[0]])
+    click_object(ids[1],shift=True);selected(ids[:2])
+    record("p4a2_two_outlines_no_handles",page.locator("#documentationPublicationSurface .documentation-object.documentation-selected").count()==2
+        and page.locator(".documentation-object.single-selected").count()==0
+        and page.locator(".documentation-thumbnail-page .documentation-selected, .documentation-thumbnail-page .documentation-object-handle").count()==0)
+    before=deepcopy(current())
+    expected=objects.arrangement_frames([before[k] for k in ids[:2]],"align_left",size)
+    press("#documentationAlignMenuRibbon")
+    observe("align_menu","() => !!document.querySelector('#documentationAlignLeftRibbon')?.getBoundingClientRect().height")
+    write_step("align_left",lambda:press("#documentationAlignLeftRibbon"))
+    record("p4a2_align_frames",all(frame(r["targetId"])==r["frame"] for r in expected),{"expected":expected,"actual":{k:frame(k) for k in ids[:2]}})
+    undo("align_undo")
+    record("p4a2_align_one_undo",all(current()[k]==before[k] for k in ids[:2]))
+    click_object(ids[2],shift=True);selected(ids)
+    before=deepcopy(current());expected=objects.arrangement_frames([before[k] for k in ids],"distribute_vertical",size)
+    press("#documentationAlignMenuRibbon")
+    observe("distribute_menu","() => !!document.querySelector('#documentationDistributeVerticalRibbon')?.getBoundingClientRect().height")
+    write_step("distribute",lambda:press("#documentationDistributeVerticalRibbon"))
+    record("p4a2_distribute_frames",all(frame(r["targetId"])==r["frame"] for r in expected),expected)
+    page.screenshot(path=str(output/"p4a2-selection.png"),full_page=True)
+    before=deepcopy(current())
+    drag_node(element(ids[1]),25,15,"move_selection")
+    deltas=[[(frame(k)[axis]-before[k]["frame"][axis])*size[j] for j,axis in enumerate(("x","y"))] for k in ids]
+    record("p4a2_move_same_delta",max(math.dist(d,deltas[0]) for d in deltas)<=.002 and math.hypot(*deltas[0])>1,deltas)
+    undo("move_undo")
+    record("p4a2_move_one_undo",all(current()[k]==before[k] for k in ids))
+    selected(ids);before=deepcopy(current());start=len(posts)
+    for index in range(3):
+        page.keyboard.press("ArrowRight")
+        observe("nudge_preview_"+str(index),"""arg => arg.ids.every((id,i)=>{const el=document.querySelector('#documentationPublicationSurface [data-documentation-object-id="'+id+'"]');return el && Math.abs(parseFloat(el.style.left)-arg.x[i]-arg.dx)<.003;})""",
+            {"ids":ids,"x":[before[k]["frame"]["x"]*size[0] for k in ids],"dx":index+1})
+    page.keyboard.press("Shift+ArrowDown")
+    observe("nudges_stored","arg => { const s=window.__compareDbg.state;const p=s.partsManualDocumentation?.scene?.pages?.[arg.page];"
+        "return !s.partsManualDocumentationObjectBusy && arg.ids.every((id,i)=> Math.abs(p.documentObjects[id].frame.x-arg.x[i]-3/arg.w)<.000003 && Math.abs(p.documentObjects[id].frame.y-arg.y[i]-10/arg.h)<.000003);}",
+        {"page":page_id,"ids":ids,"x":[before[k]["frame"]["x"] for k in ids],"y":[before[k]["frame"]["y"] for k in ids],"w":size[0],"h":size[1]},timeout=T(60000))
+    steps=[p for p in posts[start:] if p["url"].endswith("/objects")]
+    record("p4a2_nudge_steps",1<=len(steps)<=4,steps)
+
+    click_object(image_id);selected([image_id])
+    for key,to in (("Control+[","backward"),("Control+]","forward"),("Control+Shift+[","back"),("Control+Shift+]","front")):
+        prior=list(stored()["scene"]["pages"][page_id]["objectOrder"])
+        index=prior.index(image_id)
+        destination={"back":0,"front":len(prior)-1,"backward":max(0,index-1),"forward":min(len(prior)-1,index+1)}[to]
+        expected=list(prior);expected.insert(destination,expected.pop(index))
+        if expected!=prior: write_step("order_"+to,lambda key=key:page.keyboard.press(key))
+        else:
+            count=len(posts);page.keyboard.press(key)
+            record("p4a2_order_"+to+"_noop",len(posts)==count)
+        actual=stored()["scene"]["pages"][page_id]["objectOrder"]
+        dom=page.locator("#documentationPublicationSurface .documentation-object-layer > [data-documentation-object-id]").evaluate_all("nodes=>nodes.map(n=>n.dataset.documentationObjectId)")
+        record("p4a2_order_"+to,actual==expected==dom,{"expected":expected,"actual":actual,"dom":dom})
+    press("#documentationObjectOrderRibbon")
+    observe("order_menu","() => !!document.querySelector('#documentationObjectFrontRibbon')?.getBoundingClientRect().height")
+    ends=[page.locator("#documentationObjectFrontRibbon"),page.locator("#documentationObjectForwardRibbon")]
+    record("p4a2_order_end_disabled",all(item.count()==1 and item.is_disabled() for item in ends))
+    click_object(ids[1]);selected([ids[1]])
+    focused=page.evaluate("() => document.activeElement?.dataset.documentationObjectId")
+    page.keyboard.press("Tab")
+    observe("tab_selects_object","previous => {const el=document.activeElement;return !!el?.dataset.documentationObjectId && el.dataset.documentationObjectId!==previous && window.__compareDbg.state.partsManualDocumentationSelection?.targetId===el.dataset.documentationObjectId;}",focused)
+    click_object(ids[2]);selected([ids[2]])
+    page.keyboard.press("Enter")
+    if observe("enter_editor","() => !!document.querySelector('#documentationPublicationSurface [contenteditable=true]')"):
+        page.keyboard.press("Escape")
+        observe("escape_editor","() => !window.DocumentationRichText?.active && !document.querySelector('#documentationPublicationSurface [contenteditable=true]')")
+    before=deepcopy(stored()["scene"]["pages"][page_id])
+    write_step("keyboard_delete",lambda:page.keyboard.press("Delete"),"/documentation-scene/commands")
+    record("p4a2_delete_single",ids[2] not in current())
+    undo("delete_undo")
+    record("p4a2_delete_order_undo",stored()["scene"]["pages"][page_id]==before)
+
+    # A contained picture with bands makes the outside-image pixels part of the final proof too.
+    click_object(image_id);selected([image_id])
+    drag_node(element(image_id).locator('[data-handle="e"]'),0,45,"contain_bands")
+    final=deepcopy(stored()["scene"]["pages"][page_id])
+    refresh("reload_settled")
+    record("p4a2_reopen_unchanged",stored()["scene"]["pages"][page_id]==final)
+    # Supervisor: Refresh clears the selection; the ribbon's Object group goes with it.
+    record("p4a2_refresh_clears_object_group",page.evaluate("() => !(window.__compareDbg.state.partsManualDocumentationSelections || []).length"
+        " && !document.querySelector('#documentationObjectAspectRibbon, #documentationObjectOrderRibbon, #documentationObjectCropRibbon')"))
+    image=final["documentObjects"][image_id];f=image["frame"]
+    source,draw=objects.placement(image,(f["width"]*size[0],f["height"]*size[1]),(200,100))
+    local=[(draw[0]+draw[2]*u,draw[1]+draw[3]*v) for u,v in ((.25,.25),(.75,.25),(.25,.75),(.75,.75))]
+    if draw[0]>8: local += [(draw[0]/2,f["height"]*size[1]/2),(f["width"]*size[0]-draw[0]/2,f["height"]*size[1]/2)]
+    if draw[1]>8: local += [(f["width"]*size[0]/2,draw[1]/2),(f["width"]*size[0]/2,f["height"]*size[1]-draw[1]/2)]
+    page.screenshot(path=str(output/"p4a2-final.png"),full_page=True)
+    screen=Image.open(io.BytesIO(page.screenshot())).convert("RGB")
+    surface=page.locator("#documentationPublicationSurface").bounding_box()
+    samples=[]
+    for x,y in local:
+        sx,sy=point(f,x,y)
+        samples.append({"point":[(sx-surface["x"])*size[0]/surface["width"],(sy-surface["y"])*size[1]/surface["height"]],
+                        "canvas":screen.getpixel((round(sx),round(sy)))})
+    record("p4a2_band_samples",len(samples)>4,{"draw":draw,"samples":samples})
+    press("#documentationCaptureAllRibbon")
+    observe("captures","() => !document.querySelector('#documentationWorkspace.busy') && (window.__compareDbg.state.partsManualDocumentation.document.pages || []).filter(p=>p.renderRequest).every(p=>p.renderRequest.image?.status==='ready')",timeout=T(600000))
+    if page.locator("#documentationPublishRibbon").is_disabled():
+        record("p4a2_publish_enabled",False,page.locator("#documentationPublishRibbon").get_attribute("title"))
+    else:
+        with page.expect_response(lambda r:r.request.method=="POST" and r.url==h.base(kind)+"/pdf",timeout=T(600000)) as response_info:
+            press("#documentationPublishRibbon")
+        response=response_info.value
+        response.finished()
+        exported=response.json()
+        observe("export_settled","() => !document.querySelector('#documentationWorkspace.busy')")
+        record("p4a2_pdf_export",response.ok,exported)
+        if response.ok:
+            payload=h.download(exported["pdf"],"p4a2.pdf")
+            with fitz.open(stream=payload,filetype="pdf") as pdf:
+                index=next(i for i,p in enumerate(stored()["document"]["pages"]) if p["pageId"]==page_id)
+                pix=pdf[index].get_pixmap(matrix=fitz.Matrix(2,2),alpha=False)
+                pix.save(str(output/"p4a2-pdf.png"))
+                for sample in samples:
+                    sample["pdf"]=pix.pixel(round(sample["point"][0]*2),round(sample["point"][1]*2))[:3]
+                record("p4a2_pdf_canvas_pixels",all(max(abs(a-b) for a,b in zip(s["canvas"],s["pdf"]))<=8 for s in samples),samples)
+    evidence.update(objects=final,requests=posts,samples=samples)
+    write_json(output/"p4a2-controls.json",evidence)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -3415,7 +3813,7 @@ def main():
             if page is None or page.is_closed():
                 evidence["unavailable"] = "Browser page was not available at failure time"
                 return
-            page.screenshot(path=str(output / filename), full_page=True, timeout=15000)
+            page.screenshot(path=str(output / filename), full_page=True, timeout=T(15000))
             evidence["file"] = filename
         except Exception as error:
             evidence["error"] = f"{type(error).__name__}: {error}"
@@ -3434,8 +3832,8 @@ def main():
         # A double press that lands while a just-activated page is still redrawing selects nothing; like a person,
         # wait for the workspace to be idle and press again (at most three times). Attempts are kept as evidence.
         for attempt in range(1, 4):
-            page.wait_for_function("() => !document.querySelector('#documentationWorkspace.busy')", timeout=120000)
-            cell.wait_for(state="visible", timeout=30000)
+            page.wait_for_function("() => !document.querySelector('#documentationWorkspace.busy')", timeout=T(120000))
+            cell.wait_for(state="visible", timeout=T(30000))
             box = cell.bounding_box()
             x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
             cdp = page.context.new_cdp_session(page)
@@ -3450,7 +3848,7 @@ def main():
                 cdp.detach()
             try:
                 page.wait_for_function("readonly => readonly ? !!document.querySelector('.documentation-rich-readonly') : !!document.querySelector('[contenteditable=\"true\"]')",
-                                       arg=read_only, timeout=5000)
+                                       arg=read_only, timeout=T(5000))
                 report["editAttempts"].append(attempt)
                 return
             except Exception:
@@ -3475,6 +3873,9 @@ def main():
             browser = playwright.chromium.launch(headless=True)
             report["browserMode"] = "headless-shell (" + type(error).__name__ + ")"
         context = browser.new_context(viewport={"width": 1720, "height": 1080}, service_workers="block")
+        if SLOW > 1:
+            context.set_default_timeout(30000 * SLOW)
+            report["slowFactor"] = SLOW
         if not hasattr(context, "route_web_socket"):
             raise RuntimeError("Installed Playwright lacks route_web_socket; outbound isolation cannot be proved")
 
@@ -3536,20 +3937,21 @@ def main():
         scene_url = server.url + "/api/parts-manual/MMLE-50D/documentation-scene"
 
         def get_scene():
-            response = request.get(scene_url, timeout=120000)
+            response = request.get(scene_url, timeout=T(120000))
             if not response.ok:
                 raise RuntimeError(f"Scene HTTP {response.status}: {response.text()[:800]}")
             return response.json()
 
         def tool(name, arguments):
             response = request.post(server.url + "/__p1a/tool", data={"name": name, "arguments": arguments},
-                                    timeout=120000)
+                                    timeout=T(120000))
             if not response.ok:
                 raise RuntimeError(f"Tool HTTP {response.status}: {response.text()[:800]}")
             return response.json()
 
         if args.phase == "P4a":
             run_p4a(page, request, server, output, report, record, begin_edit, tool, fresh_page)
+            run_p4a_controls(page, request, server, output, report, record, begin_edit, tool, fresh_page)
         elif args.phase == "P3b":
             run_p3b(page, request, server, output, report, record, begin_edit, tool, fresh_page)
         elif args.phase == "P3a":
@@ -3587,13 +3989,13 @@ def main():
 
             def open_workspace():
                 stored_before = {name: sha(server.manual / name) for name in legacy_before}
-                page.goto(server.url + "/?assemblyProfile=MMLE-50D", wait_until="domcontentloaded", timeout=90000)
+                page.goto(server.url + "/?assemblyProfile=MMLE-50D", wait_until="domcontentloaded", timeout=T(90000))
                 page.wait_for_function("""() => window.__compareDbg?.state.partNumber === 'MMLE-50D'
-                    && window.__compareDbg.state.assyLiveScene""", timeout=90000)
+                    && window.__compareDbg.state.assyLiveScene""", timeout=T(90000))
                 page.evaluate("() => window.__compareDbg.openDocumentationWorkflow()")
-                page.locator("#documentationWorkspace").wait_for(state="visible", timeout=120000)
+                page.locator("#documentationWorkspace").wait_for(state="visible", timeout=T(120000))
                 page.wait_for_function("""() => window.__compareDbg.state.partsManualDocumentation
-                    && !document.querySelector('#documentationWorkspace.busy')""", timeout=120000)
+                    && !document.querySelector('#documentationWorkspace.busy')""", timeout=T(120000))
                 snapshot = page.evaluate("() => window.__compareDbg.documentationGenerationSnapshot()")
                 used_refresh = snapshot["visiblePageCount"] == 0
                 if used_refresh:
@@ -3601,7 +4003,7 @@ def main():
                     # _documentationRefreshScene({revealAll:true}). No generation,
                     # publication, test-only state changes or localStorage seeding.
                     with page.expect_response(lambda response: response.request.method == "GET"
-                                              and response.url == scene_url, timeout=120000) as refreshed:
+                                              and response.url == scene_url, timeout=T(120000)) as refreshed:
                         page.locator("#documentationRefreshRibbon").click()
                     if not refreshed.value.ok:
                         raise RuntimeError(f"Refresh scene HTTP {refreshed.value.status}")
@@ -3609,7 +4011,7 @@ def main():
                     const snapshot = window.__compareDbg.documentationGenerationSnapshot();
                     return snapshot.workspaceOpen && !snapshot.blank && snapshot.visiblePageCount > 0
                         && !document.querySelector('#documentationWorkspace.busy');
-                }""", timeout=120000)
+                }""", timeout=T(120000))
                 revealed = page.evaluate("() => window.__compareDbg.documentationGenerationSnapshot()")
                 report["workspaceOpens"].append({"before": snapshot, "after": revealed, "usedRefresh": used_refresh})
                 number = len(report["workspaceOpens"])
@@ -3621,14 +4023,14 @@ def main():
 
             open_workspace()
             cell = page.locator(f'#documentationPublicationSurface [data-documentation-edit-target="{alias}"]:visible').first
-            cell.wait_for(state="visible", timeout=30000)
+            cell.wait_for(state="visible", timeout=T(30000))
             original_text = cell.inner_text()
             human_text = original_text + " P1a browser edit"
             begin_edit(cell)
             cell.fill(human_text)
             with page.expect_response(lambda response: response.request.method == "POST"
                                       and ("documentation-scene/commands" in response.url or "/edits" in response.url),
-                                      timeout=120000) as response_info:
+                                      timeout=T(120000)) as response_info:
                 cell.press("Enter")
             response = response_info.value
             saved = response.json()
@@ -3683,7 +4085,7 @@ def main():
                    and committed_files == {p.name: sha(p) for p in server.manual.iterdir() if p.is_file()})
             open_workspace()
             with page.expect_response(lambda response: response.request.method == "POST" and "/undo" in response.url,
-                                      timeout=120000) as first_undo:
+                                      timeout=T(120000)) as first_undo:
                 page.locator("#documentationUndoRibbon").click()
             # The reopen reloads the page: let the (large) response body finish first, or Chromium aborts it.
             first_undo.value.finished()
@@ -3692,7 +4094,7 @@ def main():
                 f'#documentationPublicationSurface [data-documentation-edit-target="{alias}"]:visible').first.inner_text() == human_text
                 and page.locator(f'#documentationPublicationSurface [data-documentation-edit-target="{other_alias}"]:visible').first.inner_text() == targets[1]["text"])
             with page.expect_response(lambda response: response.request.method == "POST" and "/undo" in response.url,
-                                      timeout=120000) as second_undo:
+                                      timeout=T(120000)) as second_undo:
                 page.locator("#documentationUndoRibbon").click()
             second_undo.value.finished()
             undone = get_scene()
@@ -3716,7 +4118,7 @@ def main():
             page.locator("#documentationTypeRibbonOption-product_specification_sheet").click()
             page.wait_for_function("() => window.__compareDbg.state.documentationDocumentType === 'product_specification_sheet'")
             with page.expect_response(lambda response: response.request.method == "POST"
-                                      and "documentation-scene/commands" in response.url, timeout=120000):
+                                      and "documentation-scene/commands" in response.url, timeout=T(120000)):
                 held[0].continue_()
             page.unroute(route_pattern)
             page.wait_for_timeout(300)

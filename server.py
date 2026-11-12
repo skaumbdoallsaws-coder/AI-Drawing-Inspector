@@ -17452,6 +17452,7 @@ def operations_manual_documentation_scene_command(
         "success": True,
         **result,
         "document": next_document,
+        "objectBinding": _documentation_object_binding(next_document, result),
         "occurrences": catalog["occurrences"],
         "editableTargets": _operations_manual_editable_page_targets(next_document),
     }
@@ -17512,6 +17513,7 @@ def _operations_manual_documentation_history(
         "success": True,
         **result,
         "document": next_document,
+        "objectBinding": _documentation_object_binding(next_document, result),
         "occurrences": catalog["occurrences"],
         "editableTargets": _operations_manual_editable_page_targets(next_document),
     }
@@ -17939,6 +17941,7 @@ def work_instructions_documentation_scene_command(
         "success": True,
         **result,
         "document": next_document,
+        "objectBinding": _documentation_object_binding(next_document, result),
         "occurrences": catalog["occurrences"],
         "editableTargets": _operations_manual_editable_page_targets(next_document),
     }
@@ -18003,6 +18006,7 @@ def _work_instructions_documentation_history(
         "success": True,
         **result,
         "document": next_document,
+        "objectBinding": _documentation_object_binding(next_document, result),
         "occurrences": catalog["occurrences"],
         "editableTargets": _operations_manual_editable_page_targets(next_document),
     }
@@ -18427,6 +18431,7 @@ def specification_sheet_documentation_scene_command(
         "success": True,
         **result,
         "document": next_document,
+        "objectBinding": _documentation_object_binding(next_document, result),
         "occurrences": catalog["occurrences"],
         "editableTargets": _operations_manual_editable_page_targets(next_document),
     }
@@ -18481,6 +18486,7 @@ def _specification_sheet_documentation_history(
         "success": True,
         **result,
         "document": next_document,
+        "objectBinding": _documentation_object_binding(next_document, result),
         "occurrences": catalog["occurrences"],
         "editableTargets": _operations_manual_editable_page_targets(next_document),
     }
@@ -18741,6 +18747,22 @@ def documentation_text_ranges(document_type: str, assembly_number: str, body: Di
         return _documentation_value_error(error)
 
 
+@app.post("/api/documentation/{document_type}/{assembly_number}/objects")
+def documentation_object_operations(document_type: str, assembly_number: str, body: Dict[str, Any]):
+    """Workspace object gestures share Sage's bound, atomic operation path."""
+    try:
+        from ai_inspector.documentation.objects import object_batch
+        required = {"documentId", "expectedRevision", "requestId", "sourceRevision",
+                    "manualPlanRevision", "sceneRevision", "operations"}
+        if document_type not in _DocumentationAgentHost._TEXT_ROUTES or set(body) != required:
+            raise DocumentEditError("invalid_document_operation", "Send the document binding and 1-12 object operations.")
+        object_batch(body["operations"])
+        return {"success": True, **_DocumentationAgentHost().apply_document_edits(
+            assembly_number, document_type, body, actor="user")}
+    except DocumentEditError as error:
+        return _documentation_value_error(error)
+
+
 @app.post("/api/documentation/{document_type}/{assembly_number}/tables")
 def documentation_text_tables(document_type: str, assembly_number: str, body: Dict[str, Any]):
     """Workspace table actions use the same bound, atomic operations as Sage."""
@@ -18973,20 +18995,37 @@ def _documentation_snapshot_payload(payload, document_type, *, identity_document
             "identity_document": baseline}
 
 
+def _documentation_object_binding(document, loaded):
+    """The hashes an object gesture sends back (the values read_document_objects gives Sage): no snapshot, no
+    image reads. Every answer that carries a built document carries this too, so the page never has to read
+    the scene again just to move an object (supervisor P4a-2)."""
+    from ai_inspector.documentation.objects import ordered_objects, object_hash, order_hash
+    scene = loaded.get("scene") if isinstance(loaded, dict) else None
+    if not isinstance(scene, dict) or "editRevision" not in scene or "revision" not in loaded:
+        return None  # The page then reads the scene once before its next object gesture.
+    return {"documentId": documentation_document_id(document["documentType"], str(scene["assemblyNumber"])),
+        "revision": scene["editRevision"], "sourceRevision": str(document["sourceRevision"]),
+        "manualPlanRevision": str(document["manualPlanRevision"]), "sceneRevision": loaded["revision"],
+        "pages": {page["pageId"]: {"orderHash": order_hash(page),
+            "objects": {key: object_hash(value) for key, value in ordered_objects(page)}}
+            for page in document.get("pages", []) if next(ordered_objects(page), None) is not None}}
+
+
 def _documentation_editor_read(document, loaded, baseline):
     from ai_inspector.documentation.targets import RICH_DOCUMENT_TYPES
+    object_binding = _documentation_object_binding(document, loaded)
     # Parts manuals and specification sheets have no eligible generated blocks; without text objects they
     # skip the snapshot as before P3a-3 (it cost every scene read about 10-15 ms; supervisor P3a-3).
     if document.get("documentType") not in RICH_DOCUMENT_TYPES and not any(
             item.get("type") == "text" for page in document.get("pages", [])
             for item in page.get("documentationObjects", {}).values()):
-        return {"documentationRichText": documentation_rich_text_enabled(), "richTextFields": []}
+        return {"documentationRichText": documentation_rich_text_enabled(), "richTextFields": [], "objectBinding": object_binding}
     snapshot = _documentation_snapshot_payload({**loaded, "document": document}, document["documentType"],
                                                 identity_document=baseline)
     requested = [{"targetId": key} for key, target in snapshot["targets"].items() if target.get("richField") is not None]
     fields = (documentation_read_targets(snapshot["state"], snapshot["targets"], requested, limit=None, internal=True)["targets"]
               if requested else [])
-    return {"documentationRichText": documentation_rich_text_enabled(), "richTextFields": fields}
+    return {"documentationRichText": documentation_rich_text_enabled(), "richTextFields": fields, "objectBinding": object_binding}
 
 
 def _documentation_prepare_scene_command(document, loaded, command):
@@ -20292,6 +20331,7 @@ def parts_manual_documentation_scene_command(
         "success": True,
         **result,
         "document": next_document,
+        "objectBinding": _documentation_object_binding(next_document, result),
         "editableTargets": _parts_manual_editable_page_targets(next_document),
     }
 
@@ -20364,6 +20404,7 @@ def _parts_manual_documentation_history(
         "success": True,
         **result,
         "document": next_document,
+        "objectBinding": _documentation_object_binding(next_document, result),
         "editableTargets": _parts_manual_editable_page_targets(next_document),
     }
 

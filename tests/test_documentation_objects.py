@@ -1,7 +1,40 @@
-"""P4a-1: authored object state, pre-image batches and geometry. Temporary stores only."""
+"""P4a: authored objects, workspace bindings and geometry. Temporary stores only."""
 from copy import deepcopy
 import json
 import math
+
+def object_vectors():
+    """Deterministic Python oracle; regenerate with --generate-vectors."""
+    from ai_inspector.documentation import objects as geometry
+    result = {"placement": [], "box": []}
+    for i in range(180):
+        size = [40 + (i * 37) % 1000, 30 + (i * 53) % 800]
+        pixels = [1 + (i * 131) % 2200, 1 + (i * 79) % 1800]
+        value = {"contentMode": ("contain", "cover", "contain")[i % 3]}
+        if i % 3 == 2:
+            value["crop"] = {"x": (i % 5) / 10, "y": (i % 4) / 10, "width": .5, "height": .6}
+        source, draw = geometry.placement(value, size, pixels)
+        result["placement"].append({"value": value, "size": size, "pixels": pixels,
+                                    "expected": [source, list(draw)]})
+        frame = {"x": (i % 19) / 10 - .5, "y": (i % 13) / 10 - .2,
+                 "width": .01 + (i % 31) / 30, "height": .01 + (i % 23) / 22,
+                 "rotation": (0, 90, 180, 270, 30, -45, 123)[i % 7]}
+        page_size = [960,540] if i % 2 else [612,792]
+        result["box"].append({"frame": frame, "size": page_size, "expected": geometry.box(frame, page_size)})
+    return result
+
+
+if __name__ == "__main__":
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    if sys.argv[1:] != ["--generate-vectors"]:
+        raise SystemExit("Use --generate-vectors; tests are run by pytest.")
+    vector_path = Path(__file__).parent / "fixtures" / "documentation_object_vectors.json"
+    vector_path.write_text(json.dumps(object_vectors(), indent=2) + "\n", encoding="utf-8", newline="\n")
+    print("Wrote 180 placement and 180 box vectors.")
+    raise SystemExit(0)
+
 
 import pytest
 
@@ -488,3 +521,144 @@ def test_later_object_refusal_leaves_the_store_and_preimage_untouched(scene):
              "expectedObjectHash":op["expectedObjectHash"],"crop":None}],state["revision"]))
     assert source == state["scene"]
     assert scene.path.read_bytes() == before
+
+
+# P4a-2 workspace controls.
+def test_object_vectors_are_current():
+    from pathlib import Path
+    stored = json.loads((Path(__file__).parent / "fixtures/documentation_object_vectors.json").read_text(encoding="utf-8"))
+    assert stored == object_vectors()
+
+
+@pytest.mark.parametrize("lock", [True, False])
+@pytest.mark.parametrize("patch,height", [({"width":.3},.1),({"width":.3,"height":.4},.4)])
+def test_explicit_aspect_lock_takes_new_proportions_without_carrying(lock,patch,height):
+    original = value(aspectLock=True)
+    result, command, _ = operation(page(original),"set_object_frame",**patch,aspectLock=lock)
+    changed = result["documentObjects"][original["objectId"]]
+    assert changed["frame"]["width"] == .3 and changed["frame"]["height"] == height
+    assert bool(changed.get("aspectLock")) is lock
+    assert command["aspectLock"] is lock
+    live = objects.live_command({"pages":{PAGE:page(original)}},command)
+    assert live["frame"] == changed["frame"] and live["aspectLock"] is lock
+
+
+def test_lock_only_toggle_live_and_replay(scene):
+    before = deepcopy(scene.load()["scene"]["pages"][PAGE]["documentObjects"][OBJECT]["frame"])
+    scene.command({"operation":"set_object_frame","aspectLock":True})
+    locked = deepcopy(scene.load()["scene"]["pages"][PAGE]["documentObjects"][OBJECT])
+    assert locked["frame"] == before and locked["aspectLock"]
+    refused("invalid_object_frame",lambda:scene.command({"operation":"set_object_frame","aspectLock":True}))
+    scene.command({"operation":"set_object_frame","aspectLock":False})
+    assert "aspectLock" not in scene.load()["scene"]["pages"][PAGE]["documentObjects"][OBJECT]
+    history(scene,"undo")
+    assert scene.load()["scene"]["pages"][PAGE]["documentObjects"][OBJECT] == locked
+    # Replay does not reapply today's lock policy to previously saved complete frames.
+    commands = deepcopy(scene.load()["scene"]["commands"][:scene.load()["scene"]["historyCursor"]])
+    commands.append({"operation":"set_object_frame","pageId":PAGE,"targetType":"document_object",
+                     "targetId":OBJECT,"frame":{**before,"width":.17}})
+    assert replay_documentation_commands(commands)[PAGE]["documentObjects"][OBJECT]["frame"]["width"] == .17
+
+
+@pytest.mark.parametrize("kind,base", [
+    ("illustrated_parts_manual","parts-manual"),
+    ("operations_and_maintenance_manual","operations-manual"),
+    ("work_instructions","work-instructions"),
+    ("product_specification_sheet","specification-sheet"),
+])
+def test_workspace_objects_binding_route_receipt_and_undo(mmle_client,monkeypatch,kind,base):
+    import server
+    monkeypatch.setenv("INSPECTORPRO_DOCUMENTATION_RICH_TEXT","off")
+    host = server._DocumentationAgentHost()
+    url = "/api/"+base+"/MMLE-50D/documentation-scene"
+    first = mmle_client.get(url).json()
+    page_id = first["document"]["pages"][0]["pageId"]
+    ids = ["document-object-p4a2-a","document-object-p4a2-b"]
+    for key in ids:
+        current = mmle_client.get(url).json()
+        response = mmle_client.post(url+"/commands",json={"baseRevision":current["revision"],
+            "sourceRevision":current["scene"]["sourceRevision"],"manualPlanRevision":current["scene"]["manualPlanRevision"],
+            "operation":"add_object","pageId":page_id,"targetType":"document_object","targetId":key,"documentObject":value(key)})
+        assert response.status_code == 200,response.text
+        # Supervisor: a command's answer carries the binding the next read gives (no second read by the page).
+        assert response.json()["objectBinding"] == mmle_client.get(url).json()["objectBinding"]
+        assert key in response.json()["objectBinding"]["pages"][page_id]["objects"]
+    for step in ("undo","redo"):
+        current = mmle_client.get(url).json()
+        moved = mmle_client.post(url+"/"+step,json={"baseRevision":current["revision"],
+            "sourceRevision":current["scene"]["sourceRevision"],"manualPlanRevision":current["scene"]["manualPlanRevision"]})
+        assert moved.status_code == 200,moved.text
+        assert moved.json()["objectBinding"] == mmle_client.get(url).json()["objectBinding"]
+    before = mmle_client.get(url).json()
+    binding = before["objectBinding"]
+    expected_pages = {p["pageId"] for p in before["document"]["pages"] if p.get("documentationObjects")}
+    assert set(binding["pages"]) == expected_pages
+    for page in expected_pages:
+        read = host.read_document_objects("MMLE-50D",kind,[page])
+        assert {k:binding[k] for k in binding if k!="pages"} == {k:read[k] for k in binding if k!="pages"}
+        row = read["pages"][0]
+        assert binding["pages"][page] == {"orderHash":row["orderHash"],
+            "objects":{item["objectId"]:item["objectHash"] for item in row["objects"]}}
+    reread = mmle_client.get(url).json()
+    assert reread["document"]["documentRevision"] == before["document"]["documentRevision"]
+    assert reread["scene"] == before["scene"]
+    op = {"operation":"set_object_frame","pageId":page_id,"objectId":ids[0],
+          "expectedObjectHash":binding["pages"][page_id]["objects"][ids[0]],"x":.3}
+    old_order = before["scene"]["pages"][page_id]["objectOrder"]
+    new_order = [key for key in old_order if key!=ids[0]]+[ids[0]]
+    args = {k:binding[k] for k in ("documentId","sourceRevision","manualPlanRevision","sceneRevision")}
+    args.update(expectedRevision=binding["revision"],requestId="workspace-objects",operations=[op,{
+        "operation":"set_object_order","pageId":page_id,"order":new_order,
+        "expectedOrderHash":binding["pages"][page_id]["orderHash"]}])
+    route = "/api/documentation/"+kind+"/MMLE-50D/objects"
+    response = mmle_client.post(route,json=args)
+    assert response.status_code == 200,response.text
+    receipt = response.json()["receipt"]
+    assert len(receipt["operationResults"]) == 2
+    current = mmle_client.get(url).json()
+    entry = current["scene"]["commands"][-1]
+    assert entry["actor"] == entry["change"]["actor"] == "user"
+    assert all(c["actor"]=="user" for c in entry["commands"])
+    assert mmle_client.post(route,json=args).json()["receipt"] == receipt
+    assert mmle_client.get(url).json()["scene"] == current["scene"]
+    bad = mmle_client.post(route,json={**args,"requestId":"stale-objects","operations":[op]})
+    assert bad.json()["error"] == "content_hash_mismatch"
+    host.undo_document_change("MMLE-50D",kind,{"documentId":receipt["documentId"],"changeId":receipt["changeId"],
+        "expectedRevision":receipt["revision"],"requestId":"undo-workspace-objects"})
+    assert mmle_client.get(url).json()["scene"]["pages"][page_id] == before["scene"]["pages"][page_id]
+
+
+def test_workspace_objects_exact_body_and_only_object_operations(mmle_client,monkeypatch):
+    import server
+    called = []
+    monkeypatch.setattr(server._DocumentationAgentHost,"apply_document_edits",lambda *a,**kw:called.append((a,kw)))
+    valid = {"documentId":"document","expectedRevision":0,"requestId":"request","sourceRevision":"source",
+             "manualPlanRevision":"plan","sceneRevision":"scene","operations":[
+                 {"operation":"set_object_frame","pageId":PAGE,"objectId":OBJECT,"expectedObjectHash":"hash","x":.2}]}
+    bad = [{k:v for k,v in valid.items() if k!=missing} for missing in valid]
+    bad += [{**valid,"extra":True},{**valid,"operations":[]},{**valid,"operations":valid["operations"]*13},
+            {**valid,"operations":None},{**valid,"operations":["bad"]},
+            {**valid,"operations":[valid["operations"][0],{**valid["operations"][0],"pageId":"elsewhere"}]}]
+    for kind in ("replace_text","set_slot_value","replace_range","create_table","modify_table","add_object","remove_object"):
+        bad.append({**valid,"operations":[{**valid["operations"][0],"operation":kind}]})
+    for body in bad:
+        response = mmle_client.post("/api/documentation/"+KIND+"/MMLE-50D/objects",json=body)
+        assert response.status_code != 200 and response.json()["error"]=="invalid_document_operation",response.text
+    assert not called
+
+
+def test_object_binding_early_read_needs_no_snapshot_or_picture(monkeypatch):
+    import server
+    from ai_inspector.documentation.commands import document_id
+    document = {"documentType":"illustrated_parts_manual","sourceRevision":"source","manualPlanRevision":"plan",
+        "documentRevision":"untouched","pages":[{"pageId":PAGE,"documentationObjects":{OBJECT:value(OBJECT,"image")}},
+                                             {"pageId":"empty"}]}
+    loaded = {"revision":"opaque","scene":{"assemblyNumber":"PROOF","editRevision":12}}
+    monkeypatch.setattr(server,"_documentation_snapshot_payload",lambda *a,**kw:pytest.fail("snapshot"))
+    monkeypatch.setattr(objects,"picture_info",lambda *a,**kw:pytest.fail("picture read"))
+    before = deepcopy(document)
+    result = server._documentation_editor_read(document,loaded,{})
+    assert result["objectBinding"]["documentId"] == document_id("illustrated_parts_manual","PROOF")
+    assert result["objectBinding"]["revision"] == 12
+    assert set(result["objectBinding"]["pages"]) == {PAGE}
+    assert document == before

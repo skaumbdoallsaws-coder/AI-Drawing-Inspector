@@ -847,3 +847,17 @@ def test_conflict_tool_schemas_and_guidance():
     assert set(item["properties"]["choice"]["enum"]) == {"keep_manual", "use_generated", "merge_text", "detach", "restore"}
     assert "Read conflicts and resolve only the requested targets." in SERVER_INSTRUCTIONS
     assert not {"actor", "accepted", "confirmation"} & set(item["properties"])
+
+
+def test_object_frame_schema_accepts_explicit_lock_alone():
+    from ai_inspector.codex_runtime.documentation_tools import _document_text_tool_specs
+    specs = _document_text_tool_specs()
+    schema = next(s for s in specs if s["name"] == "apply_document_edits")["input_schema"]
+    variants = schema["properties"]["operations"]["items"]["anyOf"]
+    frame = next(v for v in variants if v["properties"]["operation"]["enum"] == ["set_object_frame"])
+    base = {"operation":"set_object_frame","pageId":"p","objectId":"o","expectedObjectHash":"a"*64}
+    validator = Draft202012Validator(frame)
+    assert not list(validator.iter_errors({**base,"aspectLock":True}))
+    assert not list(validator.iter_errors({**base,"aspectLock":False,"width":.3}))
+    assert list(validator.iter_errors(base))
+    assert "new proportions" in frame["description"]

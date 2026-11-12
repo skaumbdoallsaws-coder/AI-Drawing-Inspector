@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="/static/packaging_ribbon_icons.css">
     <script src="/static/documentation_commands.js?v=20261109-p1b-3"></script>
     <script src="/static/documentation_conflicts.js?v=20261110-p2a-1"></script>
+    <script src="/static/documentation_objects_core.js?v=20261111-p4a-2"></script>
     <script src="/static/documentation_rich_text_core.js?v=20261111-p3b-2"></script>
     <script src="/static/documentation_symbols.js?v=20261111-p3a-4"></script>
     <script src="/static/documentation_search.js?v=20261111-p3a-4"></script>
@@ -1906,6 +1907,35 @@
             outline: 1.5px solid #168bd2;
             outline-offset: 2px;
         }
+        .documentation-object > .documentation-object-handle { display: none; }
+        .documentation-object.single-selected > .documentation-object-handle { display: block; }
+        .documentation-object.documentation-rich-mounted > .documentation-object-handle,
+        .documentation-object[contenteditable="true"] > .documentation-object-handle { display: none; }
+        .documentation-object-handle {
+            position: absolute; width: 12px; height: 12px; padding: 2px; border: 0;
+            background: transparent; z-index: 35; box-sizing: border-box; touch-action: none;
+        }
+        .documentation-object-handle::after {
+            content: ''; display: block; width: 8px; height: 8px; box-sizing: border-box;
+            background: #168bd2; border: 1px solid white; outline: 1px solid #075a91;
+        }
+        .documentation-object-handle[data-handle="nw"], .documentation-object-handle[data-handle="w"],
+        .documentation-object-handle[data-handle="sw"] { left: 0; }
+        .documentation-object-handle[data-handle="ne"], .documentation-object-handle[data-handle="e"],
+        .documentation-object-handle[data-handle="se"] { right: 0; }
+        .documentation-object-handle[data-handle="n"], .documentation-object-handle[data-handle="s"] { left: calc(50% - 6px); }
+        .documentation-object-handle[data-handle="nw"], .documentation-object-handle[data-handle="n"],
+        .documentation-object-handle[data-handle="ne"] { top: 0; }
+        .documentation-object-handle[data-handle="sw"], .documentation-object-handle[data-handle="s"],
+        .documentation-object-handle[data-handle="se"] { bottom: 0; }
+        .documentation-object-handle[data-handle="w"], .documentation-object-handle[data-handle="e"] { top: calc(50% - 6px); }
+        .documentation-object.documentation-crop-mode { z-index: 100; overflow: visible; outline: none; }
+        .documentation-object.image .documentation-crop-picture { position: absolute; object-fit: fill; transform: none; }
+        .documentation-crop-dim { position: absolute; background: rgba(12,28,40,.58); pointer-events: none; }
+        .documentation-crop-rectangle { position: absolute; border: 1px solid white; outline: 1px solid #168bd2;
+            box-sizing: border-box; cursor: move; touch-action: none; }
+        .documentation-crop-rectangle > .documentation-object-handle { display: block; }
+
         .documentation-object .documentation-resize-handle {
             right: -7px;
             bottom: -7px;
@@ -36511,8 +36541,8 @@
                 state.partsManualDocumentationInitializing
                 || state.partsManualDocumentationSageWork?.active
             ));
-            setDisabled('documentationUndoRibbon', Boolean(window.DocumentationRichText?.active) || !payload?.canUndo);
-            setDisabled('documentationRedoRibbon', Boolean(window.DocumentationRichText?.active) || !payload?.canRedo);
+            setDisabled('documentationUndoRibbon', Boolean(window.DocumentationRichText?.active) || documentationObjectInFlight || !!documentationObjectCrop || !payload?.canUndo);
+            setDisabled('documentationRedoRibbon', Boolean(window.DocumentationRichText?.active) || documentationObjectInFlight || !!documentationObjectCrop || !payload?.canRedo);
             setDisabled('documentationSlotUndoRibbon', !payload?.slotHistory?.canUndo);
             setDisabled('documentationSlotRedoRibbon', !payload?.slotHistory?.canRedo);
             setDisabled(
@@ -36525,12 +36555,14 @@
                 && ['figure', 'manual_group', 'occurrence'].includes(selection.targetType);
             setDisabled('documentationRotateLeftRibbon', !cadTarget);
             setDisabled('documentationRotateRightRibbon', !cadTarget);
-            const cadSelectionCount = _documentationCadSelections().length;
+            const authoredSelectionCount = _documentationObjectSelections().length;
+            const cadSelectionCount = authoredSelectionCount || _documentationCadSelections().length;
+            const objectActionsBlocked = authoredSelectionCount && (documentationObjectInFlight || documentationObjectCrop);
             for (const name of ['Left', 'Center', 'Right', 'Top', 'Middle', 'Bottom']) {
-                setDisabled(`documentationAlign${name}Ribbon`, cadSelectionCount < 2);
+                setDisabled(`documentationAlign${name}Ribbon`, objectActionsBlocked || cadSelectionCount < 2);
             }
-            setDisabled('documentationDistributeHorizontalRibbon', cadSelectionCount < 3);
-            setDisabled('documentationDistributeVerticalRibbon', cadSelectionCount < 3);
+            setDisabled('documentationDistributeHorizontalRibbon', objectActionsBlocked || cadSelectionCount < 3);
+            setDisabled('documentationDistributeVerticalRibbon', objectActionsBlocked || cadSelectionCount < 3);
             setDisabled('documentationFitRibbon', !_documentationActivePage()?.renderRequest);
             setDisabled(
                 'documentationCaptureRibbon',
@@ -36802,7 +36834,17 @@
             if (!layer) return;
             const mounted = window.DocumentationRichText?.active;
             // Never detach/reparent the editor: even a synchronous detach loses DOM selection.
-            const retained = mounted?.pageId === page?.pageId ? mounted.element : null;
+            if (documentationObjectCrop && documentationObjectCrop.pageId !== page?.pageId) {
+                documentationObjectCrop=null;state.partsManualDocumentationCropId=null;
+            }
+            const retained = mounted?.pageId === page?.pageId ? mounted.element : documentationObjectCrop?.element || null;
+            // Keyboard users keep their place: the object that had the focus has it again when its page is next
+            // drawn (the rail draws every page on this layer for its thumbnails), unless the focus went elsewhere.
+            const focusHolder = layer.contains(document.activeElement)
+                ? document.activeElement.closest('[data-documentation-object-id]') : null;
+            if (focusHolder && focusHolder !== retained) {
+                documentationObjectFocusKeep = focusHolder.dataset.documentationObjectId;
+            } else if (document.activeElement !== document.body) documentationObjectFocusKeep = null;
             for (const child of [...layer.childNodes]) if (child !== retained) child.remove();
             const objects = page?.documentationObjects || {};
             const publicationPage = _documentationPublicationLayout().page
@@ -36890,20 +36932,29 @@
                     if (element.isContentEditable || element.classList.contains('documentation-rich-mounted')) return;
                     _documentationBeginDocumentObjectDrag(event, target, element);
                 });
-                const handle = document.createElement('button');
-                handle.type = 'button';
-                handle.className = 'documentation-resize-handle';
-                handle.title = `Resize ${value.name || 'object'}`;
-                handle.addEventListener('pointerdown', event => {
-                    _documentationBeginDocumentObjectResize(event, target, element);
+                element.tabIndex = 0;
+                element.setAttribute('aria-label', (value.name || 'Object') + ' ' + value.type);
+                element.addEventListener('focus', () => {
+                    if (!documentationObjectFocusSkip && !documentationObjectCrop && !documentationObjectInFlight
+                        && !window.DocumentationRichText?.active) _documentationSelectTarget(target, {silent:true});
                 });
-                element.appendChild(handle);
+                _documentationObjectHandles(element, target, value);
+                if (_documentationSelectedTargets().length === 1
+                    && _documentationSelectedTargets()[0].targetId === value.objectId && !value.locked) element.classList.add('single-selected');
                 if (_documentationSelectedTargets().some(
                     selected => _documentationSelectionKey(selected) === _documentationSelectionKey(target)
                 )) element.classList.add('documentation-selected');
                 if (beforeRetained) layer.insertBefore(element, retained);
                 else layer.appendChild(element);
             });
+            const refocus = documentationObjectFocusKeep ? layer.querySelector(
+                '[data-documentation-object-id="' + CSS.escape(documentationObjectFocusKeep) + '"]') : null;
+            if (refocus && refocus !== retained) {
+                documentationObjectFocusKeep = null;
+                documentationObjectFocusSkip = true;
+                refocus.focus({ preventScroll: true });
+                documentationObjectFocusSkip = false;
+            }
         }
 
         function _documentationTargetsForPage(page) {
@@ -37209,9 +37260,18 @@
                 return element?.getBoundingClientRect?.() || null;
             }
             if (primary.targetType === 'document_object') {
-                return document.querySelector(
-                    `#documentationPublicationSurface [data-documentation-object-id="${CSS.escape(primary.targetId)}"]`
+                const box = target => document.querySelector(
+                    `#documentationPublicationSurface [data-documentation-object-id="${CSS.escape(target.targetId)}"]`
                 )?.getBoundingClientRect?.() || null;
+                const boxes = selections.filter(target => target.targetType === 'document_object')
+                    .map(box).filter(Boolean);
+                // Several objects: the toolbar stands beside the whole selection. Above the last one picked it
+                // covered the neighbour, which could then not be pressed to move the selection (supervisor P4a-2).
+                if (boxes.length < 2) return box(primary);
+                return {
+                    left: Math.min(...boxes.map(b => b.left)), right: Math.max(...boxes.map(b => b.right)),
+                    top: Math.min(...boxes.map(b => b.top)), bottom: Math.max(...boxes.map(b => b.bottom)),
+                };
             }
             if (primary.targetType === 'balloon') {
                 const callout = (state.partsManualCallouts || []).find(
@@ -37327,6 +37387,8 @@
                 calloutId,
                 currentEnd,
                 currentAnchor,
+                crop: !!documentationObjectCrop,
+                objectBusy: documentationObjectInFlight,
             });
             if (toolbar.dataset.contextKey !== contextKey) {
                 toolbar.replaceChildren();
@@ -37353,7 +37415,12 @@
                 const cadSelections = selections.filter(target =>
                     ['manual_group', 'occurrence'].includes(target.targetType)
                 );
-                if (cadSelections.length > 1) {
+                if (_documentationObjectSelections().length > 1) {
+                    toolbar.appendChild(_documentationAlignMenu({size:'compact', triggerId:'documentationFloatingAlignMenu'}));
+                } else if (documentationObjectCrop) {
+                    toolbar.appendChild(_documentationFloatingCommand('close','Cancel crop',()=>_documentationEndCrop(),
+                        {id:'documentationFloatingCropCancel',label:'Cancel'}));
+                } else if (cadSelections.length > 1) {
                     [
                         ['align-left', 'Align left', 'align_left'],
                         ['align-center', 'Align centers', 'align_center'],
@@ -37531,6 +37598,8 @@
                     ));
                 } else if (primary.targetType === 'document_object') {
                     const value = page.documentationObjects?.[primary.targetId];
+                    if (value?.type === 'image') toolbar.appendChild(_documentationFloatingCommand('crop','Crop picture',
+                        _documentationBeginCrop,{id:'documentationFloatingCrop',label:'Crop'}));
                     if (value?.type === 'text') {
                         toolbar.appendChild(_documentationFloatingCommand(
                             'text-box',
@@ -38204,6 +38273,12 @@
             _documentationRemoveSelectionHelper();
             const page = _documentationActivePage();
             const selections = _documentationSelectedTargets();
+            document.querySelectorAll('#documentationPublicationSurface .documentation-object').forEach(element => {
+                element.classList.toggle('single-selected', selections.length === 1
+                    && selections[0].targetType === 'document_object'
+                    && selections[0].targetId === element.dataset.documentationObjectId
+                    && !page?.documentationObjects?.[selections[0].targetId]?.locked);
+            });
             selections.filter(selection => selection.targetType === 'page_element')
                 .forEach(selection => {
                     const pageText = {
@@ -38222,7 +38297,7 @@
             selections.filter(selection => selection.targetType === 'document_object')
                 .forEach(selection => {
                     document.querySelector(
-                        `[data-documentation-object-id="${CSS.escape(selection.targetId)}"]`
+                        `#documentationPublicationSurface [data-documentation-object-id="${CSS.escape(selection.targetId)}"]`
                     )?.classList.add('documentation-selected');
                 });
             _documentationRefreshCalloutSelectionState();
@@ -38981,10 +39056,16 @@
         }
 
         function _documentationSelectTarget(target, options = {}) {
+            if (documentationObjectCrop && target?.targetId !== documentationObjectCrop.target.targetId) return;
             const next = target ? { ...target } : null;
             if (options.preserveSet) {
+                // The set is kept only around one of its own members. A target outside it (an object inserted
+                // while another was selected) becomes the selection by itself: before, the set stayed on the
+                // old object while the ribbon showed the new one (supervisor P4a-2).
                 const selected = _documentationSelectedTargets();
-                state.partsManualDocumentationSelections = selected.length
+                const member = next && selected.some(value =>
+                    _documentationSelectionKey(value) === _documentationSelectionKey(next));
+                state.partsManualDocumentationSelections = member
                     ? selected.map(value => ({ ...value }))
                     : next ? [next] : [];
             } else if (options.additive && next) {
@@ -39455,6 +39536,7 @@
         }
 
         function _documentationInsertText() {
+            if (documentationObjectInFlight || documentationObjectCrop) return;
             const objectId = _documentationNewObjectId();
             _documentationAddObject({
                 objectId,
@@ -39470,6 +39552,7 @@
         }
 
         function _documentationInsertShape(shapeType) {
+            if (documentationObjectInFlight || documentationObjectCrop) return;
             const labels = {
                 rectangle: 'Rectangle', ellipse: 'Circle', arrow: 'Arrow',
                 revision_cloud: 'Revision Cloud', detail_box: 'Detail Box',
@@ -39508,6 +39591,7 @@
         }
 
         function _documentationChooseImage(mode = 'image', onAsset = null) {
+            if (documentationObjectInFlight || documentationObjectCrop) return;
             const input = document.createElement('input');
             input.type = 'file';
             input.accept = 'image/png,image/jpeg';
@@ -39527,6 +39611,10 @@
                         theme.version = Number(theme.version || 1) + 1;
                         await _documentationDispatchCommand('set_theme', null, { theme });
                     } else {
+                        const picture = new Image();
+                        await new Promise((resolve,reject) => { picture.onload=resolve;picture.onerror=()=>reject(new Error('The picture could not be read.'));picture.src=asset.url; });
+                        const frame=DocumentationObjectsCore.insertedImage(_documentationObjectSize(),[picture.naturalWidth,picture.naturalHeight]);
+                        if(!DocumentationObjectsCore.valid(frame))throw new Error('The picture proportions exceed the object frame limits.');
                         const objectId = _documentationNewObjectId();
                         await _documentationAddObject({
                             objectId,
@@ -39535,7 +39623,7 @@
                             asset,
                             altText: file.name,
                             contentMode: 'contain',
-                            frame: { x: 0.30, y: 0.24, width: 0.40, height: 0.28, rotation: 0 },
+                            frame, aspectLock: true,
                             styleRef: 'body',
                             styleOverrides: {},
                             locked: false,
@@ -39692,6 +39780,7 @@
         }
 
         async function _documentationBeginInlineTextEdit(event, target, element) {
+            if (target?.targetType === 'document_object' && (documentationObjectInFlight || documentationObjectCrop)) return;
             if (!target || !element || element.isContentEditable || window.DocumentationRichText?.active) return;
             if (DocumentationConflicts.blockEdit(_documentationActivePage()?.pageId, target.targetId)) return;
             if (target.targetType === 'document_object' || _documentationRichField(_documentationActivePage()?.pageId, target.targetId)?.richTextEligible) {
@@ -39724,6 +39813,7 @@
                 const value = cancel ? original : (element.textContent || '').trim();
                 if (cancel || value === original) {
                     element.textContent = original;
+                    if (target.targetType === 'document_object') _documentationRenderPublicationPage(_documentationActivePage());
                     return;
                 }
                 await _documentationDispatchCommand('update_text', null, {
@@ -39736,6 +39826,7 @@
             const onKeyDown = keyEvent => {
                 if (keyEvent.key === 'Escape') {
                     keyEvent.preventDefault();
+                    if (target.targetType === 'document_object') keyEvent.stopPropagation();
                     finish(true);
                 } else if (keyEvent.key === 'Enter' && !keyEvent.shiftKey) {
                     keyEvent.preventDefault();
@@ -39746,65 +39837,323 @@
             element.addEventListener('keydown', onKeyDown);
         }
 
+        let documentationObjectInFlight = false;
+        let documentationObjectPreviewFrames = null;
+        let documentationObjectNudges = null;
+        let documentationObjectCrop = null;
+        let documentationObjectFocusSkip = false;
+        let documentationObjectFocusKeep = null;
+
+        function _documentationObjectSize() {
+            const p = _documentationPublicationLayout().page || {width:792,height:612};
+            return [Number(p.width),Number(p.height)];
+        }
+
+        function _documentationObjectSelections() {
+            const page = _documentationActivePage(), selected = _documentationSelectedTargets();
+            return selected.length && selected.every(t => t.targetType === 'document_object'
+                && page?.documentationObjects?.[t.targetId]) ? selected : [];
+        }
+
+        function _documentationObjectElement(id) {
+            return document.querySelector('#documentationPublicationSurface [data-documentation-object-id="' + CSS.escape(id) + '"]');
+        }
+
+        function _documentationObjectPreview(ids, frames) {
+            const size = _documentationObjectSize();
+            ids.forEach((id,i) => {
+                const el = _documentationObjectElement(id), f = frames[i];
+                if (!el || !f) return;
+                el.style.left = f.x*size[0]+'px'; el.style.top = f.y*size[1]+'px';
+                el.style.width = f.width*size[0]+'px'; el.style.height = f.height*size[1]+'px';
+            });
+        }
+
+        function _documentationObjectAvailable(selected, moving=false) {
+            if (window.DocumentationRichText?.active || document.querySelector('#documentationPublicationSurface [contenteditable="true"]')
+                || documentationObjectCrop || documentationObjectInFlight) return false;
+            if (moving && selected.length > 12) {
+                _documentationSetStatus('Move at most 12 objects at once.', 'error'); return false;
+            }
+            if (selected.some(t => _documentationActivePage()?.documentationObjects?.[t.targetId]?.locked)) {
+                _documentationSetStatus('Unlock the object before changing it.', 'error'); return false;
+            }
+            return selected.length > 0;
+        }
+
+        async function _documentationObjectBatch(operations, options = {}) {
+            if (documentationObjectInFlight || !operations.length) return false;
+            const page = _documentationActivePage(), payload = _documentationPayload();
+            let binding = options.binding || payload?.objectBinding, hashes = binding?.pages?.[page?.pageId];
+            if (!hashes && page && payload) {
+                // An answer without object hashes (a route outside the scene commands) left the payload without
+                // them: read them once. They are used only if the scene is still the one this gesture started on.
+                documentationObjectInFlight = true;
+                try {
+                    const base = _documentationApiBase(), fresh = await _partsManualApi(base + '/documentation-scene');
+                    if (base === _documentationApiBase() && _documentationPayload() === payload) {
+                        if (fresh.revision === payload.revision) binding = payload.objectBinding = fresh.objectBinding;
+                        else _documentationUpdatePayload(fresh);
+                    }
+                } catch (_) { /* refused below */ } finally { documentationObjectInFlight = false; }
+                hashes = _documentationPayload() === payload ? binding?.pages?.[page.pageId] : null;
+            }
+            if (!hashes) {
+                if (_documentationActivePage()) _documentationRenderPublicationPage(_documentationActivePage());
+                _documentationSetStatus('The page changed. Repeat the change.', 'error'); return false;
+            }
+            const core = DocumentationObjectsCore, values = page.documentationObjects || {};
+            operations = operations.filter(op => {
+                const v = values[op.objectId];
+                if (op.operation === 'set_object_frame') return v && (
+                    ['x','y','width','height','rotation'].some(k => k in op && Math.abs(op[k]-(v.frame[k] || 0)) > 1e-9)
+                    || 'aspectLock' in op && !!op.aspectLock !== !!v.aspectLock);
+                if (op.operation === 'set_image_crop') return v && (!core.same(op.crop || {x:0,y:0,width:1,height:1},
+                    v.crop || {x:0,y:0,width:1,height:1}) || op.crop && v.contentMode === 'cover');
+                if (op.operation === 'set_object_order') return core.orderMoves(
+                    [...new Set([...(page.documentationObjectOrder || []),...Object.keys(values)])],op.objectId)[op.to];
+                return true;
+            });
+            if (!operations.length) { _documentationRenderPublicationPage(page); return true; }
+            const context = _documentationReviewHost().context(), apiBase = _documentationApiBase();
+            const selected = _documentationSelectedTargets().map(t=>({...t}));
+            const body = {documentId:binding.documentId,expectedRevision:binding.revision,
+                sourceRevision:binding.sourceRevision,manualPlanRevision:binding.manualPlanRevision,
+                sceneRevision:binding.sceneRevision,requestId:crypto.randomUUID(),
+                operations:operations.map(op=>({...op,pageId:page.pageId,...(
+                    op.operation==='set_object_order' ? {expectedOrderHash:hashes.orderHash} :
+                    op.operation==='arrange_objects' ? {expectedObjectHashes:op.objectIds.map(id=>hashes.objects[id])} :
+                    {expectedObjectHash:hashes.objects[op.objectId]})}))};
+            const stillHere=()=>apiBase===_documentationApiBase() && page.pageId===_documentationActivePage()?.pageId;
+            const send=()=>_partsManualApi('/api/documentation/'+context.kind+'/'+encodeURIComponent(context.number)+'/objects',
+                {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+            documentationObjectInFlight=true;
+            documentationObjectPreviewFrames=options.previewFrames || Object.fromEntries(operations
+                .filter(op=>op.operation==='set_object_frame').map(op=>[op.objectId,{...values[op.objectId].frame,
+                    ...Object.fromEntries(['x','y','width','height','rotation'].filter(k=>k in op).map(k=>[k,op[k]]))}]));
+            state.partsManualDocumentationObjectBusy=true;
+            _documentationRefreshSelectionToolbar();
+            const busyRibbon=document.getElementById('contextRibbon');
+            if(busyRibbon?.classList.contains('documentation-workflow-ribbon'))_renderDocumentationWorkflowRibbon(busyRibbon);
+            let saved=false;
+            try {
+                await send().catch(error=>{if(error.code)throw error;return send();});
+                const fresh=await _partsManualApi(apiBase+'/documentation-scene');
+                if(stillHere()) {
+                    _documentationUpdatePayload(fresh);
+                    const remaining=selected.filter(t=>_documentationActivePage()?.documentationObjects?.[t.targetId]);
+                    state.partsManualDocumentationSelections=remaining;
+                    state.partsManualDocumentationSelection=remaining.at(-1) || null;
+                    _documentationSelectTarget(remaining.at(-1) || null,{preserveSet:remaining.length>0,silent:true});
+                    _documentationSetStatus(options.label || 'Objects updated.');
+                }
+                saved=true;
+            } catch(error) {
+                documentationObjectNudges=null;
+                if(stillHere()) {
+                    _documentationRenderPublicationPage(_documentationActivePage());
+                    _documentationSetStatus(error.message,'error');
+                }
+            } finally {
+                documentationObjectInFlight=false;documentationObjectPreviewFrames=null;
+                state.partsManualDocumentationObjectBusy=false;
+                if(stillHere()) {
+                    _documentationRefreshSelectionToolbar();
+                    const ribbon=document.getElementById('contextRibbon');
+                    if(ribbon?.classList.contains('documentation-workflow-ribbon'))_renderDocumentationWorkflowRibbon(ribbon);
+                }
+                if(!stillHere())documentationObjectNudges=null;
+                if(saved && documentationObjectNudges) _documentationFlushObjectNudges();
+            }
+            return saved;
+        }
+
+        function _documentationQueueObjectNudge(horizontal,vertical,large) {
+            const selected=_documentationObjectSelections(), page=_documentationActivePage();
+            if(!selected.length || documentationObjectCrop || window.DocumentationRichText?.active
+                || document.querySelector('#documentationPublicationSurface [contenteditable="true"]')) return false;
+            if(selected.length>12) {_documentationSetStatus('Move at most 12 objects at once.','error');return true;}
+            if(selected.some(t=>page.documentationObjects[t.targetId].locked)) {
+                _documentationSetStatus('Unlock the object before changing it.','error');return true;
+            }
+            const ids=selected.map(t=>t.targetId), key=JSON.stringify([page.pageId,ids]);
+            if(!documentationObjectNudges || documentationObjectNudges.key!==key)
+                documentationObjectNudges={key,ids,pageId:page.pageId,dx:0,dy:0};
+            const q=documentationObjectNudges, size=_documentationObjectSize();
+            q.dx+=horizontal*(large?10:1);q.dy+=vertical*(large?10:1);
+            const frames=ids.map(id=>documentationObjectPreviewFrames?.[id] || page.documentationObjects[id].frame);
+            _documentationObjectPreview(ids,DocumentationObjectsCore.move(frames,size,q.dx,q.dy));
+            if(!documentationObjectInFlight) _documentationFlushObjectNudges();
+            return true;
+        }
+
+        function _documentationFlushObjectNudges() {
+            const q=documentationObjectNudges;
+            if(!q || documentationObjectInFlight)return;
+            documentationObjectNudges=null;
+            const page=_documentationActivePage();
+            if(page?.pageId!==q.pageId || q.ids.some(id=>!page.documentationObjects?.[id]))return;
+            const frames=DocumentationObjectsCore.move(q.ids.map(id=>page.documentationObjects[id].frame),
+                _documentationObjectSize(),q.dx,q.dy).map(DocumentationObjectsCore.rounded);
+            _documentationObjectPreview(q.ids,frames);
+            _documentationObjectBatch(q.ids.map((id,i)=>({operation:'set_object_frame',objectId:id,x:frames[i].x,y:frames[i].y})),
+                {previewFrames:Object.fromEntries(q.ids.map((id,i)=>[id,frames[i]])),label:'Objects nudged.'});
+        }
+
+        function _documentationObjectOrder(to) {
+            const selected=_documentationObjectSelections();
+            if(selected.length!==1 || !_documentationObjectAvailable(selected))return;
+            _documentationObjectBatch([{operation:'set_object_order',objectId:selected[0].targetId,to}]);
+        }
+
+        function _documentationObjectHandles(element,target,value) {
+            DocumentationObjectsCore.HANDLES.forEach(direction=>{
+                const handle=document.createElement('button');
+                handle.type='button';handle.tabIndex=-1;handle.className='documentation-object-handle';
+                handle.dataset.handle=direction;handle.title='Resize '+direction.toUpperCase();
+                handle.setAttribute('aria-label',handle.title);
+                handle.style.cursor=DocumentationObjectsCore.cursor(direction,value.frame.rotation);
+                handle.addEventListener('pointerdown',event=>_documentationBeginDocumentObjectResize(event,target,element));
+                element.appendChild(handle);
+            });
+        }
+
+        function _documentationObjectCropPaint() {
+            const mode=documentationObjectCrop;
+            if(!mode)return;
+            const {layout,rect,element}=mode, whole=layout.whole;
+            const set=(el,r)=>{el.style.left=r.x+'px';el.style.top=r.y+'px';el.style.width=r.width+'px';el.style.height=r.height+'px';};
+            set(mode.picture,whole);set(mode.selection,rect);
+            DocumentationObjectsCore.cropMasks(layout,rect).forEach((r,i)=>set(mode.masks[i],r));
+        }
+
+        function _documentationBeginCrop() {
+            const selected=_documentationObjectSelections();
+            if(selected.length!==1 || !_documentationObjectAvailable(selected))return;
+            const target=selected[0], value=_documentationActivePage().documentationObjects[target.targetId];
+            const element=_documentationObjectElement(target.targetId), original=element?.querySelector('img');
+            if(value.type!=='image' || !original?.naturalWidth)return;
+            const layout=DocumentationObjectsCore.cropLayout(value,_documentationObjectSize(),[original.naturalWidth,original.naturalHeight]);
+            element.classList.remove('cropped');element.classList.add('documentation-crop-mode');
+            element.replaceChildren();
+            const picture=document.createElement('img');picture.src=original.src;picture.draggable=false;
+            picture.className='documentation-crop-picture';element.appendChild(picture);
+            const masks=Array.from({length:4},()=>{const el=document.createElement('div');el.className='documentation-crop-dim';element.appendChild(el);return el;});
+            const selection=document.createElement('div');selection.className='documentation-crop-rectangle';
+            selection.setAttribute('aria-label','Crop rectangle');
+            element.appendChild(selection);
+            DocumentationObjectsCore.HANDLES.forEach(direction=>{
+                const handle=document.createElement('button');handle.type='button';handle.tabIndex=-1;
+                handle.className='documentation-object-handle';handle.dataset.handle=direction;
+                handle.title='Crop '+direction.toUpperCase();handle.setAttribute('aria-label',handle.title);
+                handle.style.cursor=DocumentationObjectsCore.cursor(direction,value.frame.rotation);
+                selection.appendChild(handle);
+            });
+            documentationObjectCrop={layout,rect:{...layout.kept},element,picture,masks,selection,target,
+                pageId:_documentationActivePage().pageId,binding:_documentationPayload().objectBinding};
+            state.partsManualDocumentationCropId=target.targetId;
+            selection.addEventListener('pointerdown',event=>{
+                if(event.button!==0)return;
+                event.preventDefault();event.stopPropagation();
+                const surface=document.getElementById('documentationPublicationSurface');
+                const scale=surface.getBoundingClientRect().width/surface.offsetWidth;
+                const mode=documentationObjectCrop,start={...mode.rect},x=event.clientX,y=event.clientY;
+                const handle=event.target.closest('[data-handle]')?.dataset.handle || 'move';
+                selection.setPointerCapture(event.pointerId);
+                const move=e=>{
+                    if(e.pointerId!==event.pointerId)return;
+                    mode.rect=DocumentationObjectsCore.cropDrag(layout,start,handle,[(e.clientX-x)/scale,(e.clientY-y)/scale]);
+                    _documentationObjectCropPaint();
+                };
+                const end=e=>{
+                    if(e.pointerId!==event.pointerId)return;
+                    selection.removeEventListener('pointermove',move);selection.removeEventListener('pointerup',end);
+                    selection.removeEventListener('pointercancel',end);
+                };
+                selection.addEventListener('pointermove',move);selection.addEventListener('pointerup',end);
+                selection.addEventListener('pointercancel',end);
+            });
+            _documentationRefreshSelectionToolbar();
+            const ribbon=document.getElementById('contextRibbon');
+            if(ribbon?.classList.contains('documentation-workflow-ribbon'))_renderDocumentationWorkflowRibbon(ribbon);
+            _documentationObjectCropPaint();
+        }
+
+        function _documentationEndCrop(action='cancel') {
+            const mode=documentationObjectCrop;
+            if(!mode)return;
+            let operations=[];
+            try {
+                if(action!=='cancel')operations=DocumentationObjectsCore.cropResult(mode.layout,mode.rect,action==='reset');
+            } catch(error) {_documentationSetStatus(error.message,'error');return;}
+            documentationObjectCrop=null;state.partsManualDocumentationCropId=null;
+            _documentationRenderPublicationPage(_documentationActivePage());
+            _documentationSelectTarget(mode.target,{silent:true});
+            if(operations.length)_documentationObjectBatch(operations,{binding:mode.binding,label:'Picture cropped.'});
+        }
+
+        function _documentationObjectControls() {
+            const selected=_documentationObjectSelections(), page=_documentationActivePage();
+            if(!selected.length)return [];
+            if(documentationObjectCrop) return [
+                _documentationRibbonButton('check','Apply','Apply crop','documentationObjectCropApplyRibbon',()=>_documentationEndCrop('apply')),
+                _documentationRibbonButton('reset-layout','Reset','Reset crop','documentationObjectCropResetRibbon',()=>_documentationEndCrop('reset'),
+                    {disabled:DocumentationObjectsCore.same(documentationObjectCrop.layout.kept,documentationObjectCrop.layout.whole)}),
+                _documentationRibbonButton('close','Cancel','Cancel crop','documentationObjectCropCancelRibbon',()=>_documentationEndCrop())];
+            if(selected.length>1)return [_documentationAlignMenu()];
+            const value=page.documentationObjects[selected[0].targetId],disabled=!!value.locked || documentationObjectInFlight
+                || !!window.DocumentationRichText?.active || !!document.querySelector('#documentationPublicationSurface [contenteditable="true"]');
+            const aspect=_documentationRibbonButton('lock','Lock ratio','Lock ratio','documentationObjectAspectRibbon',
+                ()=>{if(_documentationObjectAvailable(selected))_documentationObjectBatch([{operation:'set_object_frame',objectId:value.objectId,aspectLock:!value.aspectLock}]);},{disabled});
+            aspect.setAttribute('aria-pressed',String(!!value.aspectLock));
+            const moves=DocumentationObjectsCore.orderMoves([...new Set([...(page.documentationObjectOrder || []),...Object.keys(page.documentationObjects)])],value.objectId);
+            const menu=_documentationRibbonMenu('layers','Order','Object order',[
+                ['Front','Bring to front','front'],['Forward','Bring forward','forward'],
+                ['Backward','Send backward','backward'],['Back','Send to back','back']].map(([id,label,to])=>({
+                    id:'documentationObject'+id+'Ribbon',label,disabled:disabled||!moves[to],handler:()=>_documentationObjectOrder(to)
+                })),{triggerId:'documentationObjectOrderRibbon'});
+            return [aspect,menu,...(value.type==='image'?[_documentationRibbonButton('crop','Crop','Crop picture',
+                'documentationObjectCropRibbon',_documentationBeginCrop,{disabled})]:[]),
+                _documentationRibbonButton('rotate-right-15','Rotate 90','Rotate the selected object 90 degrees',null,
+                    ()=>_documentationRotateDocumentObject(90),{disabled}),
+                _documentationRibbonButton('facilityDelete','Delete','Delete the selected document object',null,
+                    _documentationRemoveSelectedObject,{disabled})];
+        }
+
         function _documentationBeginDocumentObjectDrag(event, target, element) {
-            if (event.button !== 0 || event.target.closest('.documentation-resize-handle')) return;
-            const page = _documentationActivePage();
-            const value = page?.documentationObjects?.[target?.targetId];
-            const surface = document.getElementById('documentationPublicationSurface');
-            if (!target || !element || !surface || value?.locked) return;
-            event.preventDefault();
-            event.stopPropagation();
-            _documentationSelectTarget(target, { silent: true });
-            if (window.DocumentationRichText?.active) return;
-            const surfaceRect = surface.getBoundingClientRect();
-            state.partsManualDocumentationPageElementDrag = {
-                pointerId: event.pointerId,
-                pageId: page.pageId,
-                target,
-                targetId: target.targetId,
-                element,
-                startX: event.clientX,
-                startY: event.clientY,
-                surfaceWidth: Math.max(surfaceRect.width, 1),
-                surfaceHeight: Math.max(surfaceRect.height, 1),
-                scale: surfaceRect.width / Math.max(surface.offsetWidth, 1),
-                startLeft: Number.parseFloat(element.style.left) || 0,
-                startTop: Number.parseFloat(element.style.top) || 0,
-                delta: [0, 0, 0],
-                moved: false,
-            };
+            if (event.button !== 0 || event.target.closest('.documentation-object-handle')
+                || documentationObjectInFlight || documentationObjectCrop || window.DocumentationRichText?.active) return;
+            event.preventDefault();event.stopPropagation();
+            const selected=_documentationObjectSelections(), member=selected.some(t=>t.targetId===target.targetId);
+            const toggle=event.shiftKey || event.ctrlKey || event.metaKey;
+            const keep=!toggle && member && selected.length>1;
+            _documentationSelectTarget(target,{silent:true,additive:toggle&&selected.length>0,toggle:true,preserveSet:keep});
+            documentationObjectFocusSkip=true;element.focus({preventScroll:true});documentationObjectFocusSkip=false;
+            if(toggle)return;
+            const chosen=_documentationObjectSelections();
+            if(!_documentationObjectAvailable(chosen,true))return;
+            const page=_documentationActivePage(),surface=document.getElementById('documentationPublicationSurface');
+            state.partsManualDocumentationPageElementDrag={
+                objectGesture:true,pointerId:event.pointerId,pageId:page.pageId,target,element,
+                startX:event.clientX,startY:event.clientY,scale:surface.getBoundingClientRect().width/surface.offsetWidth,
+                ids:chosen.map(t=>t.targetId),frames:chosen.map(t=>({...page.documentationObjects[t.targetId].frame})),
+                size:_documentationObjectSize(),binding:_documentationPayload().objectBinding,collapse:keep,moved:false};
             element.setPointerCapture?.(event.pointerId);
         }
 
+
         function _documentationBeginDocumentObjectResize(event, target, element) {
-            if (window.DocumentationRichText?.active) return;
-            if (event.button !== 0) return;
-            const page = _documentationActivePage();
-            const value = page?.documentationObjects?.[target?.targetId];
-            const surface = document.getElementById('documentationPublicationSurface');
-            if (!target || !element || !surface || value?.locked) return;
-            event.preventDefault();
-            event.stopPropagation();
-            _documentationSelectTarget(target, { silent: true });
-            const surfaceRect = surface.getBoundingClientRect();
-            state.partsManualDocumentationResizeDrag = {
-                pointerId: event.pointerId,
-                pageId: page.pageId,
-                target,
-                targetId: target.targetId,
-                element,
-                startX: event.clientX,
-                startY: event.clientY,
-                surfaceWidth: Math.max(surfaceRect.width, 1),
-                surfaceHeight: Math.max(surfaceRect.height, 1),
-                scale: surfaceRect.width / Math.max(surface.offsetWidth, 1),
-                startWidth: Number.parseFloat(element.style.width) || element.offsetWidth,
-                startHeight: Number.parseFloat(element.style.height) || element.offsetHeight,
-                delta: [0, 0, 0],
-                moved: false,
-            };
+            if(event.button!==0 || !_documentationObjectAvailable(_documentationObjectSelections()))return;
+            event.preventDefault();event.stopPropagation();
+            const page=_documentationActivePage(),value=page.documentationObjects[target.targetId];
+            const surface=document.getElementById('documentationPublicationSurface');
+            state.partsManualDocumentationResizeDrag={objectGesture:true,pointerId:event.pointerId,pageId:page.pageId,
+                target,element,startX:event.clientX,startY:event.clientY,frame:{...value.frame},locked:!!value.aspectLock,
+                handle:event.target.closest('[data-handle]').dataset.handle,size:_documentationObjectSize(),binding:_documentationPayload().objectBinding,
+                scale:surface.getBoundingClientRect().width/surface.offsetWidth,moved:false};
             element.setPointerCapture?.(event.pointerId);
         }
+
 
         function _documentationApplySelectedStyle(style) {
             const selection = state.partsManualDocumentationSelection;
@@ -39815,13 +40164,15 @@
         }
 
         function _documentationRemoveSelectedObject() {
-            if (window.DocumentationRichText?.active) return false;
+            if (_documentationObjectSelections().length > 1) { _documentationSetStatus('Delete one object at a time.', 'error'); return false; }
+            if (!_documentationObjectAvailable(_documentationObjectSelections())) return false;
             const selection = state.partsManualDocumentationSelection;
             if (selection?.targetType !== 'document_object') return false;
             return _documentationDispatchCommand('remove_object', null, { selection });
         }
 
         function _documentationRotateDocumentObject(degrees) {
+            if (_documentationObjectSelections().length !== 1 || !_documentationObjectAvailable(_documentationObjectSelections())) return false;
             const selection = state.partsManualDocumentationSelection;
             if (selection?.targetType !== 'document_object') return false;
             return _documentationDispatchCommand('rotate', null, {
@@ -40088,6 +40439,7 @@
                 result = await _documentationReadAfterMutation(result, bound.apiBase);
                 if (!stillCurrent()) return;
                 const selection = state.partsManualDocumentationSelection;
+                const selectionSet = _documentationSelectedTargets().map(_documentationSelectionKey);
                 _documentationUpdatePayload(result);
                 const page = _documentationActivePage();
                 await _documentationRefreshAfterSceneCommand(
@@ -40095,12 +40447,19 @@
                     historyCommand,
                     { direction }
                 );
+                const available = _documentationTargetsForPage(page);
                 const restored = selection
-                    ? _documentationTargetsForPage(page).find(target =>
+                    ? available.find(target =>
                         _documentationSelectionKey(target) === _documentationSelectionKey(selection)
                     )
                     : null;
-                _documentationSelectTarget(restored, { silent: true });
+                // Undo and redo keep a selection of several targets (those that still exist), as a save does.
+                const keptSet = restored ? selectionSet.map(key => available.find(
+                    target => _documentationSelectionKey(target) === key)).filter(Boolean) : [];
+                if (keptSet.length > 1) {
+                    state.partsManualDocumentationSelections = keptSet.map(target => ({ ...target }));
+                }
+                _documentationSelectTarget(restored, { silent: true, preserveSet: keptSet.length > 1 });
                 _documentationSetStatus(_documentationAgentName() + ': ' +
                     (direction === 'undo' ? 'Undid the document change.' : 'Redid the document change.'), 'success');
             } catch (error) {
@@ -40211,14 +40570,26 @@
         }
 
         async function _documentationArrangeSelection(arrangement, options = {}) {
+            const authored=_documentationObjectSelections();
+            if(authored.length) {
+                const minimum=arrangement.startsWith('distribute')?3:2;
+                if(authored.length<minimum) {
+                    _documentationSetStatus('Select at least '+minimum+' document objects or CAD objects to '+(minimum===3?'distribute.':'align.'),'error');return false;
+                }
+                if(!_documentationObjectAvailable(authored))return false;
+                if(!DocumentationObjectsCore.arrangementChanges(authored.map(t=>_documentationActivePage().documentationObjects[t.targetId]),_documentationObjectSize(),arrangement)) {
+                    _documentationSetStatus('The selected objects are already arranged that way.');return true;
+                }
+                return _documentationObjectBatch([{operation:'arrange_objects',objectIds:authored.map(t=>t.targetId),arrangement}]);
+            }
             const page = _documentationActivePage();
             const selected = _documentationCadSelections();
             const minimum = arrangement.startsWith('distribute_') ? 3 : 2;
             if (!page || selected.length < minimum) {
                 _documentationSetStatus(
                     arrangement.startsWith('distribute_')
-                        ? 'Select at least three CAD objects to distribute.'
-                        : 'Select at least two CAD objects to align.',
+                        ? 'Select at least three document objects or CAD objects to distribute.'
+                        : 'Select at least two document objects or CAD objects to align.',
                     'error'
                 );
                 return false;
@@ -40576,9 +40947,18 @@
             if (!page) return;
             state.partsManualDocumentationPageId = pageId;
             state.partsManualDocumentationLiveEditPageId = null;
+            const hadSelection = _documentationSelectedTargets().length > 0;
             state.partsManualDocumentationSelection = null;
             state.partsManualDocumentationSelections = [];
             _documentationRefreshSelectionToolbar();
+            if (hadSelection) {
+                // The ribbon's Format and Object groups follow the selection this just cleared: after Refresh
+                // the Object group stayed, enabled, with nothing selected (supervisor P4a-2).
+                const selectionRibbon = document.getElementById('contextRibbon');
+                if (selectionRibbon?.classList.contains('documentation-workflow-ribbon')) {
+                    _renderDocumentationWorkflowRibbon(selectionRibbon);
+                }
+            }
             if (options.busy !== false) _documentationSetBusy(true, 'Preparing figure...');
             _documentationRenderPageRail();
             _documentationRenderPublicationPage(page);
@@ -40826,10 +41206,10 @@
             clone.style.setProperty('--documentation-page-height', `${pageSize.height}px`);
             clone.querySelectorAll('[id]').forEach(element => element.removeAttribute('id'));
             clone.querySelectorAll(
-                '.documentation-resize-handle, .documentation-snap-guide'
+                '.documentation-resize-handle, .documentation-snap-guide, .documentation-object-handle'
             ).forEach(element => element.remove());
-            clone.querySelectorAll('.documentation-selected').forEach(element => {
-                element.classList.remove('documentation-selected');
+            clone.querySelectorAll('.documentation-selected, .single-selected').forEach(element => {
+                element.classList.remove('documentation-selected', 'single-selected');
             });
             const illustration = clone.querySelector('.documentation-page-illustration');
             if (illustration) {
@@ -40891,7 +41271,9 @@
             if (!list) return;
             const workspace = document.getElementById('documentationWorkspace');
             const generation = state.partsManualDocumentationGeneration;
-            const editingRichText = Boolean(window.DocumentationRichText?.active);
+            // Thumbnails are drawn on the page itself: while a text editor or the crop mode holds the page,
+            // the rail keeps the previews it has (drawing another page would end the crop mode).
+            const editingRichText = Boolean(window.DocumentationRichText?.active || documentationObjectCrop);
             const previews = editingRichText ? new Map([...list.querySelectorAll('.documentation-page-item')]
                 .map(item => [item.dataset.pageId, item.querySelector('.documentation-thumbnail-page')])) : null;
             const lightweight = options.lightweight === true || editingRichText
@@ -41109,6 +41491,7 @@
         }
 
         function _documentationNudgeSelection(horizontal, vertical, multiplier = 1) {
+            if (_documentationObjectSelections().length) return _documentationQueueObjectNudge(horizontal,-vertical,multiplier > 1);
             const selection = state.partsManualDocumentationSelection;
             if (!selection) return false;
             const workspace = document.getElementById('documentationWorkspace');
@@ -41819,6 +42202,14 @@
             const onPageElementPointerMove = event => {
                 const drag = state.partsManualDocumentationPageElementDrag;
                 if (!drag || drag.pointerId !== event.pointerId) return;
+                if (drag.objectGesture) {
+                    event.preventDefault();event.stopPropagation();
+                    const dx=event.clientX-drag.startX,dy=event.clientY-drag.startY;
+                    if (!drag.moved && Math.hypot(dx,dy)<3)return;
+                    drag.moved=true;
+                    drag.preview=DocumentationObjectsCore.move(drag.frames,drag.size,dx/drag.scale,dy/drag.scale);
+                    _documentationObjectPreview(drag.ids,drag.preview);return;
+                }
                 event.preventDefault();
                 event.stopPropagation();
                 const dx = event.clientX - drag.startX;
@@ -41833,6 +42224,18 @@
                 const drag = state.partsManualDocumentationPageElementDrag;
                 if (!drag || drag.pointerId !== event.pointerId) return;
                 state.partsManualDocumentationPageElementDrag = null;
+                if (drag.objectGesture) {
+                    if (event.type === 'pointercancel') { _documentationRenderPublicationPage(_documentationActivePage());return; }
+                    if (drag.moved && drag.preview) {
+                        const frames=drag.preview.map(DocumentationObjectsCore.rounded);
+                        await _documentationObjectBatch(drag.ids.map((id,i)=>({operation:'set_object_frame',objectId:id,x:frames[i].x,y:frames[i].y})),
+                            {binding:drag.binding,previewFrames:Object.fromEntries(drag.ids.map((id,i)=>[id,frames[i]]))});
+                    } else {
+                        if(drag.collapse)_documentationSelectTarget(drag.target,{silent:true});
+                        if(_documentationPayload()?.documentationRichText)_documentationRichObjectPressed(drag.target,event.timeStamp);
+                    }
+                    return;
+                }
                 if (!drag.moved || Math.hypot(drag.delta[0], drag.delta[1]) <= 1e-6) {
                     if (drag.target?.targetType !== 'document_object') {
                         _documentationRenderPublicationPage(_documentationActivePage());
@@ -41851,6 +42254,14 @@
             const onPageElementResizeMove = event => {
                 const drag = state.partsManualDocumentationResizeDrag;
                 if (!drag || drag.pointerId !== event.pointerId) return;
+                if(drag.objectGesture) {
+                    event.preventDefault();event.stopPropagation();
+                    const dx=event.clientX-drag.startX,dy=event.clientY-drag.startY;
+                    if(!drag.moved && Math.hypot(dx,dy)<3)return;
+                    drag.moved=true;
+                    drag.preview=DocumentationObjectsCore.resize(drag.frame,drag.size,drag.handle,[dx/drag.scale,dy/drag.scale],drag.locked,event.shiftKey);
+                    _documentationObjectPreview([drag.target.targetId],[drag.preview]);return;
+                }
                 event.preventDefault();
                 event.stopPropagation();
                 const dx = event.clientX - drag.startX;
@@ -41867,6 +42278,14 @@
                 const drag = state.partsManualDocumentationResizeDrag;
                 if (!drag || drag.pointerId !== event.pointerId) return;
                 state.partsManualDocumentationResizeDrag = null;
+                if(drag.objectGesture) {
+                    if(event.type==='pointercancel' || !drag.moved || !drag.preview) {
+                        _documentationRenderPublicationPage(_documentationActivePage());return;
+                    }
+                    const f=DocumentationObjectsCore.rounded(drag.preview);
+                    await _documentationObjectBatch([{operation:'set_object_frame',objectId:drag.target.targetId,
+                        x:f.x,y:f.y,width:f.width,height:f.height}],{binding:drag.binding});return;
+                }
                 if (!drag.moved || Math.hypot(drag.delta[0], drag.delta[1]) <= 1e-6) {
                     _documentationRenderPublicationPage(_documentationActivePage());
                     return;
@@ -44873,6 +45292,32 @@
                         event.preventDefault(); _documentationOpenFind(); return;
                     }
                     if (typing || window.DocumentationRichText?.active?.ownsFocus(target)) return;
+                    // The object keys never act while a text editor is open; the workspace's older keys keep
+                    // their own rules (supervisor P4a-2).
+                    const objectKeys = !window.DocumentationRichText?.active
+                        && !document.querySelector('#documentationPublicationSurface [contenteditable="true"]');
+                    if (documentationObjectCrop) {
+                        if (event.key === 'Escape' || event.key === 'Enter') {
+                            event.preventDefault();_documentationEndCrop(event.key === 'Enter' ? 'apply' : 'cancel');
+                        }
+                        return;
+                    }
+                    if (documentationObjectInFlight && !event.key.startsWith('Arrow')) {
+                        // One change at a time: the workspace's own keys wait; every other key stays the browser's.
+                        if (modifier || ['Delete', 'Backspace', 'Enter', 'Escape'].includes(event.key)) event.preventDefault();
+                        return;
+                    }
+                    if (objectKeys && _documentationObjectSelections().length) {
+                        if (modifier && (event.code === 'BracketLeft' || event.code === 'BracketRight')) {
+                            event.preventDefault();
+                            _documentationObjectOrder(event.code === 'BracketLeft' ? (event.shiftKey?'back':'backward') : (event.shiftKey?'front':'forward'));return;
+                        }
+                        if (event.key === 'Delete' || event.key === 'Backspace') {event.preventDefault();_documentationRemoveSelectedObject();return;}
+                        if (event.key === 'Enter' && _documentationObjectSelections().length === 1 && !documentationObjectInFlight) {
+                            const selected=_documentationObjectSelections()[0],value=_documentationActivePage().documentationObjects[selected.targetId];
+                            if(value.type==='text') {event.preventDefault();_documentationBeginInlineTextEdit(null,selected,_documentationObjectElement(selected.targetId));return;}
+                        }
+                    }
                     if (modifier && !event.shiftKey && event.key.toLowerCase() === 'z') {
                         event.preventDefault();
                         _documentationMoveHistory('undo');
@@ -44956,6 +45401,8 @@
                     window.DocumentationRichText?.dispose();
                     documentationRichReadCache = null;
                     documentationRichFields.clear();
+                    documentationObjectCrop=null;documentationObjectNudges=null;
+                    state.partsManualDocumentationCropId=null;
                     state.documentationRichLastPress = null;
                     detachInteractions();
                     detachRailSplitter();
@@ -46738,8 +47185,9 @@
         }
 
         function _documentationAlignMenu(options = {}) {
+            const authored = _documentationObjectSelections();
             return _documentationRibbonMenu(
-                'align', 'Align', 'Align or distribute selected CAD objects', [
+                'align', 'Align', 'Align or distribute the selected objects', [
                     { type: 'heading', label: 'Align' },
                     { id: 'documentationAlignLeftRibbon', icon: 'align-left', label: 'Left', title: 'Align left edges', handler: () => _documentationArrangeSelection('align_left') },
                     { id: 'documentationAlignCenterRibbon', icon: 'align-center', label: 'Center', title: 'Align horizontal centers', handler: () => _documentationArrangeSelection('align_center') },
@@ -46750,11 +47198,14 @@
                     { type: 'heading', label: 'Distribute' },
                     { id: 'documentationDistributeHorizontalRibbon', icon: 'distribute-horizontal', label: 'Horizontal', title: 'Distribute horizontally', handler: () => _documentationArrangeSelection('distribute_horizontal') },
                     { id: 'documentationDistributeVerticalRibbon', icon: 'distribute-vertical', label: 'Vertical', title: 'Distribute vertically', handler: () => _documentationArrangeSelection('distribute_vertical') },
-                ],
+                ].map(item => ({...item,
+                    id: options.triggerId && item.id ? options.triggerId + item.id : item.id,
+                    disabled: authored.length ? documentationObjectInFlight || !!documentationObjectCrop
+                        || authored.length < (item.id?.includes('Distribute') ? 3 : 2) : false})),
                 {
                     gallery: true,
                     menuClass: 'align-gallery',
-                    triggerId: 'documentationAlignMenuRibbon',
+                    triggerId: options.triggerId || 'documentationAlignMenuRibbon',
                     size: options.size || 'medium',
                 }
             );
@@ -47155,7 +47606,7 @@
             ]);
             appendGroup('arrange', 'Arrange', [
                 _documentationArrangeMenu({ size: 'medium' }),
-                _documentationAlignMenu({ size: 'medium' }),
+                ...(_documentationObjectSelections().length > 1 ? [] : [_documentationAlignMenu({ size: 'medium' })]),
             ]);
             appendGroup('content', 'Content', [
                 _documentationRibbonButton(
@@ -47202,24 +47653,14 @@
             inspector.setAttribute('aria-expanded', inspectorOpen ? 'true' : 'false');
             appendGroup('workspace', 'Workspace', [inspector]);
 
-            const formatControls = _documentationFormatRibbonControls();
+            const formatControls = documentationObjectCrop || documentationObjectInFlight || _documentationObjectSelections().length > 1
+                ? [] : _documentationFormatRibbonControls();
             if (formatControls.length) {
                 appendGroup('format', 'Format', formatControls);
             }
             const selection = state.partsManualDocumentationSelection;
             if (selection?.targetType === 'document_object') {
-                appendGroup('object', 'Object', [
-                    _documentationRibbonButton(
-                        'rotate-right-15', 'Rotate 90', 'Rotate the selected object 90 degrees',
-                        null, () => _documentationRotateDocumentObject(90),
-                        { size: 'medium' }
-                    ),
-                    _documentationRibbonButton(
-                        'facilityDelete', 'Delete', 'Delete the selected document object',
-                        null, _documentationRemoveSelectedObject,
-                        { size: 'medium' }
-                    ),
-                ]);
+                appendGroup('object', 'Object', _documentationObjectControls());
             }
             appendGroup('publish', 'Publish', [
                 publish(),

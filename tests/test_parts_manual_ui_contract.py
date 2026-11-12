@@ -363,6 +363,11 @@ def test_documentation_is_a_first_class_workflow_with_its_own_ribbon() -> None:
         "shapes.svg",
         "publish-pdf.svg",
         "search.svg",
+        "crop.svg",
+        "check.svg",
+        "close.svg",
+        "layers.svg",
+        "lock.svg",
     ):
         assert (icon_root / icon).is_file()
 

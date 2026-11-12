@@ -268,3 +268,8 @@ def review_docx_path(
     if not os.path.isfile(_filesystem_path(path)):
         raise WorkInstructionExportError("work-instruction review DOCX not found")
     return Path(_filesystem_path(path))
+
+
+def fit_report(root, assembly_number, document, asset_root=None):
+    from ai_inspector.operations_manual.exports import fit_report as operations_fit_report
+    return operations_fit_report(root, assembly_number, document, asset_root)

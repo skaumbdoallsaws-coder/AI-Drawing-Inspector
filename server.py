@@ -16077,6 +16077,7 @@ class DocumentationSceneCommandBody(BaseModel):
     style: Optional[Dict[str, Any]] = None
     theme: Optional[Dict[str, Any]] = None
     pageMasters: Optional[Dict[str, Any]] = None
+    pageSetup: Optional[Dict[str, Any]] = None
     actor: str = "user"
 
 
@@ -17384,6 +17385,8 @@ def operations_manual_documentation_scene_command(
     body: DocumentationSceneCommandBody,
 ):
     try:
+        if body.operation == "set_page_setup" and "pageSetup" not in body.model_fields_set:
+            raise DocumentEditError("unsupported_page_setup", "A page setup or null is required.")
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
         current_document, _loaded_scene = _operations_manual_build_document_with_scene(
             assembly_data=assembly_data,
@@ -17421,6 +17424,10 @@ def operations_manual_documentation_scene_command(
             catalog["sourceRevision"],
             current_document["manualPlanRevision"],
             base_revision=body.baseRevision,
+            check_candidate=_documentation_page_setup_check(command, lambda scene: build_operations_manual_document(assembly_data, catalog,
+                    evidence_root=OPERATIONS_MANUAL_EVIDENCE_ROOT, documentation_scene=scene,
+                    documentation_scene_revision=documentation_scene_revision(scene)),
+                OPERATIONS_MANUAL_ROOT, str(catalog["assemblyNumber"])),
             identity_document=_documentation_identity_document(current_document),
             command=_documentation_prepare_scene_command(current_document, _loaded_scene, command),
             page_targets=_operations_manual_editable_page_targets(current_document),
@@ -17453,6 +17460,7 @@ def operations_manual_documentation_scene_command(
         **result,
         "document": next_document,
         "objectBinding": _documentation_object_binding(next_document, result),
+        "pageSetupOptions": _documentation_page_setup_options(next_document, result),
         "occurrences": catalog["occurrences"],
         "editableTargets": _operations_manual_editable_page_targets(next_document),
     }
@@ -17514,6 +17522,7 @@ def _operations_manual_documentation_history(
         **result,
         "document": next_document,
         "objectBinding": _documentation_object_binding(next_document, result),
+        "pageSetupOptions": _documentation_page_setup_options(next_document, result),
         "occurrences": catalog["occurrences"],
         "editableTargets": _operations_manual_editable_page_targets(next_document),
     }
@@ -17875,6 +17884,8 @@ def work_instructions_documentation_scene_command(
     body: DocumentationSceneCommandBody,
 ):
     try:
+        if body.operation == "set_page_setup" and "pageSetup" not in body.model_fields_set:
+            raise DocumentEditError("unsupported_page_setup", "A page setup or null is required.")
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
         current_document, _loaded_scene = _work_instruction_build_document_with_scene(
             assembly_data=assembly_data,
@@ -17906,6 +17917,9 @@ def work_instructions_documentation_scene_command(
             catalog["sourceRevision"],
             current_document["manualPlanRevision"],
             base_revision=body.baseRevision,
+            check_candidate=_documentation_page_setup_check(command, lambda scene: _work_instruction_document_for_scene(assembly_data, catalog, scene=scene,
+                    scene_revision=documentation_scene_revision(scene)),
+                WORK_INSTRUCTION_ROOT, str(catalog["assemblyNumber"])),
             identity_document=_documentation_identity_document(current_document),
             command=_documentation_prepare_scene_command(current_document, _loaded_scene, command),
             page_targets=_operations_manual_editable_page_targets(current_document),
@@ -17942,6 +17956,7 @@ def work_instructions_documentation_scene_command(
         **result,
         "document": next_document,
         "objectBinding": _documentation_object_binding(next_document, result),
+        "pageSetupOptions": _documentation_page_setup_options(next_document, result),
         "occurrences": catalog["occurrences"],
         "editableTargets": _operations_manual_editable_page_targets(next_document),
     }
@@ -18007,6 +18022,7 @@ def _work_instructions_documentation_history(
         **result,
         "document": next_document,
         "objectBinding": _documentation_object_binding(next_document, result),
+        "pageSetupOptions": _documentation_page_setup_options(next_document, result),
         "occurrences": catalog["occurrences"],
         "editableTargets": _operations_manual_editable_page_targets(next_document),
     }
@@ -18375,6 +18391,8 @@ def specification_sheet_documentation_scene_command(
     body: DocumentationSceneCommandBody,
 ):
     try:
+        if body.operation == "set_page_setup" and "pageSetup" not in body.model_fields_set:
+            raise DocumentEditError("unsupported_page_setup", "A page setup or null is required.")
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
         current_document, _loaded_scene = _specification_sheet_build_document_with_scene(
             assembly_data=assembly_data,
@@ -18406,6 +18424,10 @@ def specification_sheet_documentation_scene_command(
             catalog["sourceRevision"],
             current_document["manualPlanRevision"],
             base_revision=body.baseRevision,
+            check_candidate=_documentation_page_setup_check(command, lambda scene: _specification_sheet_compile(assembly_data, catalog, documentation_scene=scene,
+                    identity_document=_documentation_identity_document(current_document),
+                    documentation_scene_revision=documentation_scene_revision(scene)),
+                SPECIFICATION_SHEET_ROOT, str(catalog["assemblyNumber"])),
             identity_document=_documentation_identity_document(current_document),
             command=_documentation_prepare_scene_command(current_document, _loaded_scene, command),
             page_targets=_operations_manual_editable_page_targets(current_document),
@@ -18432,6 +18454,7 @@ def specification_sheet_documentation_scene_command(
         **result,
         "document": next_document,
         "objectBinding": _documentation_object_binding(next_document, result),
+        "pageSetupOptions": _documentation_page_setup_options(next_document, result),
         "occurrences": catalog["occurrences"],
         "editableTargets": _operations_manual_editable_page_targets(next_document),
     }
@@ -18487,6 +18510,7 @@ def _specification_sheet_documentation_history(
         **result,
         "document": next_document,
         "objectBinding": _documentation_object_binding(next_document, result),
+        "pageSetupOptions": _documentation_page_setup_options(next_document, result),
         "occurrences": catalog["occurrences"],
         "editableTargets": _operations_manual_editable_page_targets(next_document),
     }
@@ -18995,6 +19019,11 @@ def _documentation_snapshot_payload(payload, document_type, *, identity_document
             "identity_document": baseline}
 
 
+def _documentation_page_setup_options(document, loaded):
+    from ai_inspector.documentation.layout import page_setup_options
+    return page_setup_options(document["documentType"], loaded.get("scene") or {})
+
+
 def _documentation_object_binding(document, loaded):
     """The hashes an object gesture sends back (the values read_document_objects gives Sage): no snapshot, no
     image reads. Every answer that carries a built document carries this too, so the page never has to read
@@ -19013,23 +19042,87 @@ def _documentation_object_binding(document, loaded):
 
 def _documentation_editor_read(document, loaded, baseline):
     from ai_inspector.documentation.targets import RICH_DOCUMENT_TYPES
+    from ai_inspector.documentation.layout import page_setup_options
+    setup_options = page_setup_options(document["documentType"], loaded["scene"])
     object_binding = _documentation_object_binding(document, loaded)
     # Parts manuals and specification sheets have no eligible generated blocks; without text objects they
     # skip the snapshot as before P3a-3 (it cost every scene read about 10-15 ms; supervisor P3a-3).
     if document.get("documentType") not in RICH_DOCUMENT_TYPES and not any(
             item.get("type") == "text" for page in document.get("pages", [])
             for item in page.get("documentationObjects", {}).values()):
-        return {"documentationRichText": documentation_rich_text_enabled(), "richTextFields": [], "objectBinding": object_binding}
+        return {"documentationRichText": documentation_rich_text_enabled(), "richTextFields": [], "objectBinding": object_binding, "pageSetupOptions": setup_options}
     snapshot = _documentation_snapshot_payload({**loaded, "document": document}, document["documentType"],
                                                 identity_document=baseline)
     requested = [{"targetId": key} for key, target in snapshot["targets"].items() if target.get("richField") is not None]
     fields = (documentation_read_targets(snapshot["state"], snapshot["targets"], requested, limit=None, internal=True)["targets"]
               if requested else [])
-    return {"documentationRichText": documentation_rich_text_enabled(), "richTextFields": fields, "objectBinding": object_binding}
+    return {"documentationRichText": documentation_rich_text_enabled(), "richTextFields": fields, "objectBinding": object_binding, "pageSetupOptions": setup_options}
+
+
+def _documentation_page_setup_check(command, compile_candidate, root, assembly_number):
+    """Run under the scene lock before a candidate can become history or stored state."""
+    if command.get("operation") != "set_page_setup":
+        return None
+
+    def report_for(document, scene):
+        kind = document["documentType"]
+        if kind == "illustrated_parts_manual":
+            from ai_inspector.parts_manual.pdf import fit_report
+            report = fit_report(root, assembly_number, document)
+        elif kind == "product_specification_sheet":
+            from ai_inspector.specification_sheet.exports import fit_report
+            report = fit_report(document, render_root=root, assembly_number=assembly_number)
+        else:
+            from ai_inspector.operations_manual.exports import fit_report
+            report = fit_report(root, assembly_number, document)
+        present_pages = {p["pageId"] for p in document.get("pages", [])}
+        for page_id, page in scene.get("pages", {}).items():
+            if page_id not in present_pages:
+                report.extend({"pageId": page_id, "targetId": key, "reason": "outside_page"}
+                              for key in page.get("documentObjects", {}))
+        return report
+
+    def check(current, candidate):
+        from ai_inspector.documentation.fit import new_failures, refuse
+        current_report = report_for(compile_candidate(current), current)
+        if current.get("pageSetup") is not None:
+            # What the generators never fitted on the design page is no reason to refuse another paper, or the
+            # way back to the design page (the real operations manual: its contents block is 5 pt over on the
+            # design page and fits on Letter). Authored objects are judged against the current page alone:
+            # their author can still change them.
+            design = {key: value for key, value in current.items() if key != "pageSetup"}
+            authored = {key for page in (current.get("pages") or {}).values()
+                        for key in (page.get("documentObjects") or {})}
+            current_report = current_report + [
+                item for item in report_for(compile_candidate(design), design)
+                if item["targetId"] not in authored]
+        try:
+            document = compile_candidate(candidate)
+        except Exception as error:
+            # Only candidate compilation is translated; the current publication keeps its usual errors.
+            findings = getattr(error, "findings", None)
+            if isinstance(findings, str):
+                detail = findings
+            elif isinstance(findings, list) and findings:
+                detail = "; ".join(str(row.get("message") if isinstance(row, dict) else row) for row in findings[:3])
+            else:
+                detail = str(error)
+            raise DocumentEditError("layout_overflow",
+                f"This publication cannot be laid out on this page setup: {detail}") from error
+        refuse(new_failures(current_report, report_for(document, candidate)), limit=50)
+
+    return check
 
 
 def _documentation_prepare_scene_command(document, loaded, command):
     """The workspace retains exact baseRevision checks; rich writes also bind the field hash."""
+    if command.get("operation") == "set_page_setup":
+        if "pageSetup" not in command:
+            raise DocumentEditError("unsupported_page_setup", "A page setup or null is required.")
+        return command
+    if command.get("operation") == "set_object_frame" and command.get("aspectLock") is None:
+        # The body model fills what a request left out with None; an unstated lock keeps the object's own.
+        command.pop("aspectLock", None)
     if command.get("operation") == "arrange_objects":
         from ai_inspector.documentation.objects import apply_operation, page_size
         page = loaded["scene"].get("pages", {}).get(command["pageId"], {})
@@ -20259,6 +20352,8 @@ def parts_manual_documentation_scene_command(
     body: DocumentationSceneCommandBody,
 ):
     try:
+        if body.operation == "set_page_setup" and "pageSetup" not in body.model_fields_set:
+            raise DocumentEditError("unsupported_page_setup", "A page setup or null is required.")
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
         known_ids = [row["occurrenceId"] for row in catalog["occurrences"]]
         loaded_plan = _parts_manual_repository().read(
@@ -20290,6 +20385,10 @@ def parts_manual_documentation_scene_command(
             catalog["sourceRevision"],
             loaded_plan["revision"],
             base_revision=body.baseRevision,
+            check_candidate=_documentation_page_setup_check(command, lambda scene: build_manual_document(loaded_plan["plan"], catalog["occurrences"], assembly_data,
+                    plan_revision=loaded_plan["revision"], documentation_scene=scene,
+                    documentation_scene_revision=documentation_scene_revision(scene)),
+                PARTS_MANUAL_ROOT, str(catalog["assemblyNumber"])),
             identity_document=_documentation_identity_document(document),
             command=_documentation_prepare_scene_command(document, _loaded_scene, command),
             page_targets=_parts_manual_editable_page_targets(document),
@@ -20332,6 +20431,7 @@ def parts_manual_documentation_scene_command(
         **result,
         "document": next_document,
         "objectBinding": _documentation_object_binding(next_document, result),
+        "pageSetupOptions": _documentation_page_setup_options(next_document, result),
         "editableTargets": _parts_manual_editable_page_targets(next_document),
     }
 
@@ -20405,6 +20505,7 @@ def _parts_manual_documentation_history(
         **result,
         "document": next_document,
         "objectBinding": _documentation_object_binding(next_document, result),
+        "pageSetupOptions": _documentation_page_setup_options(next_document, result),
         "editableTargets": _parts_manual_editable_page_targets(next_document),
     }
 

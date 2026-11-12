@@ -124,6 +124,11 @@ DOCUMENT_TYPE_REGISTRY: Dict[str, Dict[str, Any]] = {
 }
 
 
+from .layout import page_setups
+for _kind, _entry in DOCUMENT_TYPE_REGISTRY.items():
+    _entry["pageSetups"] = [p["id"] for p in page_setups(_kind)]
+
+
 def document_type_definition(document_type: str) -> Dict[str, Any]:
     key = str(document_type or "").strip()
     definition = DOCUMENT_TYPE_REGISTRY.get(key)

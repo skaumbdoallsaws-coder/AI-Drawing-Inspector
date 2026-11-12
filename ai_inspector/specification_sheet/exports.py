@@ -187,6 +187,9 @@ def _insert_textbox_checked(page: Any, rect: Any, text: str, **kwargs: Any) -> N
     text = _drawable(text, f"The text {_plain(text)[:60]!r}")
     remaining = page.insert_textbox(rect, text, **kwargs)
     if remaining < -0.01:
+        from ai_inspector.documentation import fit
+        if fit.failure(page, frame=list(rect), measuredHeight=rect.height - remaining):
+            return
         raise SpecificationSheetExportError(f"specification-sheet text overflow: {text[:80]}")
 
 
@@ -201,7 +204,7 @@ def _text_height(scratch: Any, text: str, width: float, fontname: str, fontsize:
 
 
 def _table_layout(rows: List[Mapping[str, Any]], heights: List[float], widths: Tuple[float, float],
-                  frame_height: float, shown: List[bool], fontsize: float) -> Tuple[List[float], float]:
+                  frame_height: float, shown: List[bool], fontsize: float, *, page=None) -> Tuple[List[float], float]:
     """Each shown row as tall as its text needs (at least its layout height); when the rows outgrow the frame,
     every row and its text are drawn smaller together, as the viewport shrinks the table to fit."""
     import fitz
@@ -219,15 +222,26 @@ def _table_layout(rows: List[Mapping[str, Any]], heights: List[float], widths: T
             sized.append(max(height * scale, needed))
         if sum(sized) <= frame_height + 0.5:
             return sized, scale
+    from ai_inspector.documentation import fit
+    fit.failure(page, measuredHeight=sum(sized))
     return [height if visible else 0.0 for height, visible in zip(heights, shown)], 1.0
 
 
 def _insert_fitted(page: Any, rect: Any, text: str, *, name: str, fontsize: float, **kwargs: Any) -> None:
     text = _drawable(text, name)
+    from ai_inspector.documentation import fit
+    if (rect.width <= 0 or rect.height <= 0) and fit.failure(page, frame=list(rect)):
+        return
+    measured = getattr(page, "_fit_page", page)
+    spare = 0.0
     for scale in _FIT_SCALES:
         # insert_textbox writes nothing when the text does not fit, so each smaller size starts clean.
-        if page.insert_textbox(rect, text, fontsize=fontsize * scale, **kwargs) >= -0.01:
+        spare = measured.insert_textbox(rect, text, fontsize=fontsize * scale, **kwargs)
+        if spare >= -0.01:
             return
+    from ai_inspector.documentation import fit
+    if fit.failure(page, frame=list(rect), measuredHeight=rect.height - spare):
+        return
     raise SpecificationSheetExportError(
         f"{name} does not fit its box on the page, even at 70% of its size. "
         "Shorten it, or make its box larger in the viewport."
@@ -270,6 +284,15 @@ def build_specification_fillable_pdf_bytes(
     )
 
 
+def fit_report(document, *, render_root, assembly_number, asset_root=None, fillable=False):
+    from ai_inspector.documentation import fit
+    with fit.collect(document) as report:
+        fit.authored_bounds(document)
+        _build_specification_pdf(document, render_root=render_root, assembly_number=assembly_number,
+                                 asset_root=asset_root, fillable=fillable, _fit_check=True)
+        return report.report()
+
+
 def _build_specification_pdf(
     document: Mapping[str, Any],
     *,
@@ -277,10 +300,15 @@ def _build_specification_pdf(
     assembly_number: str,
     fillable: bool,
     asset_root: str | Path | None = None,
+    _fit_check: bool = False,
 ) -> Tuple[bytes, List[Dict[str, Any]]]:
+    from ai_inspector.documentation import fit
+    from ai_inspector.documentation.layout import document_geometry
     document = export_document(document)
-    check_export(document, document.get("exportMode", "review"))
-    readiness = specification_export_readiness(document)
+    geometry = document_geometry(document)
+    if not _fit_check:
+        check_export(document, document.get("exportMode", "review"))
+    readiness = specification_export_readiness(document) if not _fit_check else {"status": "READY"}
     if readiness["status"] != "READY":
         raise SpecificationSheetExportError("the current product image must be captured before export")
     try:
@@ -306,16 +334,18 @@ def _build_specification_pdf(
     from ai_inspector.documentation.rich_layout import prepare_pdf_objects, draw_pdf_objects
     text_plans = prepare_pdf_objects(fitz, document, (width, height))
     pdf = fitz.open()
-    page = pdf.new_page(width=width, height=height)
+    page = fit.measured_page(pdf.new_page(width=width, height=height), descriptor)
     page.draw_rect(fitz.Rect(0, 0, width, height), fill=(1, 1, 1), color=None)
-    page.draw_rect(fitz.Rect(0, 0, width, 64), fill=primary, color=None)
-    page.draw_rect(fitz.Rect(0, 61, width, 64), fill=accent, color=None)
+    page.draw_rect(fitz.Rect(0, 0, width, geometry.y(64)), fill=primary, color=None)
+    page.draw_rect(fitz.Rect(0, geometry.y(61), width, geometry.y(64)), fill=accent, color=None)
+    fit.target(page, descriptor, "header_brand")
     _insert_textbox_checked(
-        page, fitz.Rect(30, 18, 230, 48), "InspectorPro",
+        page, fitz.Rect(geometry.fitz_rect(30, 18, 230, 48)), "InspectorPro",
         fontname="helv", fontsize=14, color=(1, 1, 1), align=0,
     )
+    fit.target(page, descriptor, "header_title")
     _insert_textbox_checked(
-        page, fitz.Rect(310, 20, 582, 47), "PRODUCT SPECIFICATION",
+        page, fitz.Rect(geometry.fitz_rect(310, 20, 582, 47)), "PRODUCT SPECIFICATION",
         fontname="helv", fontsize=9, color=(1, 1, 1), align=2,
     )
 
@@ -325,8 +355,11 @@ def _build_specification_pdf(
         if isinstance(block, Mapping)
     }
     def rect_of(block: Mapping[str, Any], default: tuple[float, float, float, float]) -> Any:
-        x, y, w, h = _block_frame(descriptor, block, width, height, default)
-        return fitz.Rect(x, y, x + w, y + h)
+        x, y, w, h = _block_frame(descriptor, block, width, height, geometry.rect(default))
+        rect = fitz.Rect(x, y, x + w, y + h)
+        fit.target(page, descriptor, ("slot:" + block["slot"]) if block.get("slot")
+                   else block.get("stableId") or block.get("blockId"), rect)
+        return rect
 
     slots = document.get("slots") if isinstance(document.get("slots"), Mapping) else {}
     fields: List[Dict[str, Any]] = []
@@ -383,13 +416,14 @@ def _build_specification_pdf(
     figure_block = blocks.get("spec-figure") or {}
     figure_bounds = rect_of(figure_block, (36.0, 176.0, 318.0, 346.0))
     figure_bounds.y1 -= 18
-    image_path = draft_render_path(
-        render_root,
-        assembly_number,
-        str(document.get("figureRevision") or document.get("documentRevision") or ""),
-        str(descriptor.get("pageId") or ""),
-    )
-    page.insert_image(_fit_image_rect(fitz, figure_bounds, image_path), filename=_filesystem_path(image_path))
+    if not _fit_check:
+        image_path = draft_render_path(
+            render_root,
+            assembly_number,
+            str(document.get("figureRevision") or document.get("documentRevision") or ""),
+            str(descriptor.get("pageId") or ""),
+        )
+        page.insert_image(_fit_image_rect(fitz, figure_bounds, image_path), filename=_filesystem_path(image_path))
     page.draw_rect(figure_bounds, color=rule, width=0.6)
     caption_rect = fitz.Rect(figure_bounds.x0, figure_bounds.y1 + 2, figure_bounds.x1, figure_bounds.y1 + 16)
     if figure_block.get("open"):
@@ -423,7 +457,9 @@ def _build_specification_pdf(
             color=primary,
         )
     table = blocks.get("specifications-table") or {}
-    x, y, table_width, table_height = _block_frame(descriptor, table, width, height, (374.0, 198.0, 202.0, 324.0))
+    x, y, table_width, table_height = _block_frame(descriptor, table, width, height, geometry.rect((374.0, 198.0, 202.0, 324.0)))
+    fit.target(page, descriptor, table.get("stableId") or table.get("blockId"),
+               (x, y, x + table_width, y + table_height))
     split = x + table_width * 0.58
     rows = list(table.get("rows") or [])
     heights = [float(value) for value in table.get("rowHeights") or []]
@@ -431,9 +467,9 @@ def _build_specification_pdf(
         heights = [table_height / max(1, len(rows))] * len(rows)
     shown = [fillable or not any(bool(item) for item in (row.get("open") or [])) for row in rows]
     heights, table_scale = _table_layout(rows, heights, (split - 5 - x, x + table_width - split), table_height,
-                                         shown, 7.8)
+                                         shown, 7.8, page=page)
     top = y
-    for row, row_height, visible in zip(rows, heights, shown):
+    for row_index, (row, row_height, visible) in enumerate(zip(rows, heights, shown)):
         flags = [bool(item) for item in (row.get("open") or [])] + [False, False]
         if not visible:
             continue  # the final PDF leaves out a row with nothing to say
@@ -449,6 +485,8 @@ def _build_specification_pdf(
                 add_field(row_slots[column], line_field(fitz.Rect(rect.x0, top + 2, rect.x1, bottom - 2), 7.8),
                           7.8)
                 continue
+            fit.target(page, descriptor, "slot:" + row_slots[column] if row_slots[column]
+                       else f"specifications-table.r{row_index}.c{column}", rect)
             _insert_fitted(
                 page, rect, str(cells[column]), name=name_of(row_slots[column]), fontname=font,
                 fontsize=7.8 * table_scale, color=text_color, align=align,
@@ -471,6 +509,8 @@ def _build_specification_pdf(
             if fillable:
                 add_field(card_slots.get("title"), fitz.Rect(rect.x0, rect.y0 + 11, rect.x1, rect.y0 + 27), 9.2)
         else:
+            fit.target(page, descriptor, "slot:" + card_slots["title"] if card_slots.get("title")
+                       else f"feature_{index}_title", title_rect)
             _insert_fitted(
                 page, title_rect, str(block.get("title") or ""), name=name_of(card_slots.get("title")),
                 fontname="hebo", fontsize=9.2, color=primary,
@@ -481,6 +521,8 @@ def _build_specification_pdf(
                 add_field(card_slots.get("text"), fitz.Rect(rect.x0, rect.y0 + 42, rect.x1, rect.y1 - 10), 7.6,
                           kind="multiline")
         else:
+            fit.target(page, descriptor, "slot:" + card_slots["text"] if card_slots.get("text")
+                       else f"feature_{index}_text", text_rect)
             _insert_fitted(
                 page, text_rect, str(block.get("text") or ""), name=name_of(card_slots.get("text")),
                 fontname="helv", fontsize=7.6, color=text_color, lineheight=1.35,
@@ -501,17 +543,20 @@ def _build_specification_pdf(
             bounds = rect_of(block, (36, 700, 540, 20))
             page.insert_text((bounds.x0, bounds.y1 + 5), _slot_notice(document, candidates), fontsize=5, color=(0.60, 0.22, 0))
     if _edited_slots(document, document.get("slots") or {}):
-        page.insert_text((36, 746), EDITED_LEGEND, fontsize=5, color=(0.60, 0.22, 0))
+        fit.target(page, descriptor, "edited_legend")
+        page.insert_text((geometry.x(36), geometry.y(746)), EDITED_LEGEND, fontsize=5, color=(0.60, 0.22, 0))
 
-    page.draw_rect(fitz.Rect(24, 754, 588, 780), fill=primary, color=None)
+    page.draw_rect(fitz.Rect(geometry.fitz_rect(24, 754, 588, 780)), fill=primary, color=None)
     product = document.get("product") or {}
+    fit.target(page, descriptor, "footer_product")
     _insert_textbox_checked(
-        page, fitz.Rect(36, 762, 340, 776), str(product.get("name") or "Product"),
+        page, fitz.Rect(geometry.fitz_rect(36, 762, 340, 776)), str(product.get("name") or "Product"),
         fontname="helv", fontsize=6.8, color=(1, 1, 1),
     )
+    fit.target(page, descriptor, "footer_identity")
     _insert_textbox_checked(
         page,
-        fitz.Rect(350, 762, 576, 776),
+        fitz.Rect(geometry.fitz_rect(350, 762, 576, 776)),
         f"{document.get('documentNumber') or ''} | REVIEW",
         fontname="helv",
         fontsize=6.8,
@@ -520,6 +565,9 @@ def _build_specification_pdf(
     )
     draw_pdf_objects(fitz, page, descriptor, text_plans, document=document,
                      asset_root=asset_root or render_root, assembly_number=assembly_number)
+    if _fit_check:
+        pdf.close()
+        return b"", fields
     keywords = f"InspectorPro,{assembly_number},specification sheet"
     if fillable:
         keywords = (f"{FILLABLE_KEYWORD_PREFIX};assembly={assembly_number};"
@@ -685,6 +733,9 @@ def build_specification_docx_bytes(
 
     output = Document()
     section = output.sections[0]
+    if "pageSetup" in document:
+        from docx.enum.section import WD_ORIENT
+        section.orientation = WD_ORIENT.LANDSCAPE if width_pt > height_pt else WD_ORIENT.PORTRAIT
     section.page_width = Inches(width_pt / 72.0)
     section.page_height = Inches(height_pt / 72.0)
     section.top_margin = Inches(0.52)

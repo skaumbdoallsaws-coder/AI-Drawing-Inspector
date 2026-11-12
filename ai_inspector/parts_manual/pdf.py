@@ -433,11 +433,15 @@ def _draw_header(
     root: str | Path,
     assembly_number: str,
 ) -> None:
+    from ai_inspector.documentation.layout import document_geometry
+    from ai_inspector.documentation import fit
+    geometry = document_geometry(document)
+    fit.target(page, descriptor, "header_brand")
     theme = _document_theme(document)
     colors = theme["colors"]
     typography = theme["typography"]
     page.draw_rect(
-        fitz.Rect(0, 0, page.rect.width, 50),
+        fitz.Rect(0, 0, page.rect.width, geometry.y(50)),
         color=None,
         fill=_hex_rgb(colors["primary"], "#071B2A"),
     )
@@ -447,7 +451,7 @@ def _draw_header(
         theme,
         root,
         assembly_number,
-        fitz.Rect(28, 12, 142, 38),
+        fitz.Rect(geometry.fitz_rect(28, 12, 142, 38)),
         fontsize=13,
     )
     figure = str(descriptor.get("figureNumber") or "").strip()
@@ -464,10 +468,11 @@ def _draw_header(
     metadata = _page_element_text(descriptor, "header_meta", default_metadata)
     metadata_style = _page_element_style(descriptor, "header_meta")
     heading_style = _page_element_style(descriptor, "header_title")
+    fit.target(page, descriptor, "header_meta")
     _fit_text(
         fitz,
         page,
-        fitz.Rect(170, 7, page.rect.width - 28, 19),
+        fitz.Rect(geometry.x(170), geometry.y(7), page.rect.width - geometry.x(28), geometry.y(19)),
         metadata,
         fontsize=float(metadata_style.get("fontSize") or 6.6),
         fontname=_pdf_font(
@@ -478,10 +483,11 @@ def _draw_header(
         color=_hex_rgb(metadata_style.get("color"), "#879FAC"),
         align=fitz.TEXT_ALIGN_RIGHT,
     )
+    fit.target(page, descriptor, "header_title")
     _fit_text(
         fitz,
         page,
-        fitz.Rect(170, 23, page.rect.width - 28, 42),
+        fitz.Rect(geometry.x(170), geometry.y(23), page.rect.width - geometry.x(28), geometry.y(42)),
         heading,
         fontsize=float(heading_style.get("fontSize") or 10.5),
         fontname=_pdf_font(
@@ -504,14 +510,18 @@ def _draw_footer(
     document: Mapping[str, Any],
     descriptor: Mapping[str, Any],
 ) -> None:
+    from ai_inspector.documentation.layout import document_geometry
+    from ai_inspector.documentation import fit
+    geometry = document_geometry(document)
+    fit.target(page, descriptor, "footer")
     theme = _document_theme(document)
     colors = theme["colors"]
     typography = theme["typography"]
     footer_style = _page_element_style(descriptor, "footer")
-    y = page.rect.height - 27
+    y = page.rect.height - geometry.h(27)
     page.draw_line(
-        fitz.Point(28, y),
-        fitz.Point(page.rect.width - 28, y),
+        fitz.Point(geometry.x(28), y),
+        fitz.Point(page.rect.width - geometry.x(28), y),
         color=_hex_rgb(colors["rule"], "#ABBAC4"),
         width=0.6,
     )
@@ -534,14 +544,15 @@ def _draw_footer(
     _fit_text(
         fitz,
         page,
-        fitz.Rect(28, y + 7, page.rect.width - 170, y + 21),
+        fitz.Rect(geometry.x(28), y + 7, page.rect.width - geometry.x(170), y + 21),
         left,
         fontsize=float(footer_style.get("fontSize") or 7.3),
         fontname=footer_font,
         color=footer_color,
     )
+    fit.target(page, descriptor, "footer_page_number")
     page.insert_textbox(
-        fitz.Rect(page.rect.width - 160, y + 7, page.rect.width - 28, y + 21),
+        fitz.Rect(page.rect.width - geometry.x(160), y + 7, page.rect.width - geometry.x(28), y + 21),
         f"Page {descriptor.get('pageNumber')} of {document.get('pageCount')}",
         fontsize=float(footer_style.get("fontSize") or 7.3),
         fontname=footer_font,
@@ -573,6 +584,9 @@ def _draw_image(
     *,
     framed: bool = True,
 ) -> Any:
+    from ai_inspector.documentation import fit
+    if fit.collecting():
+        return rect
     if framed:
         page.draw_rect(rect, color=(0.77, 0.81, 0.84), fill=(1, 1, 1), width=0.65)
         inset = fitz.Rect(rect.x0 + 4, rect.y0 + 4, rect.x1 - 4, rect.y1 - 4)
@@ -618,6 +632,9 @@ def _draw_balloons(
     image: Mapping[str, Any],
     theme: Mapping[str, Any] | None = None,
 ) -> None:
+    from ai_inspector.documentation import fit
+    if fit.collecting():
+        return
     theme = theme or _DEFAULT_THEME
     annotation = theme.get("annotation") if isinstance(theme, Mapping) else {}
     annotation = annotation if isinstance(annotation, Mapping) else {}
@@ -769,6 +786,7 @@ def _draw_bom_table(
     rect: Any,
     rows: Sequence[Mapping[str, Any]],
     theme: Mapping[str, Any] | None = None,
+    *, descriptor=None,
 ) -> None:
     theme = theme or _DEFAULT_THEME
     columns = (0.11, 0.30, 0.49, 0.10)
@@ -780,6 +798,9 @@ def _draw_bom_table(
     available_height = max(0.0, rect.height - header_height)
     row_height = min(18.0, available_height / max(1, len(rows)))
     if rows and row_height < 12.0:
+        from ai_inspector.documentation import fit
+        if fit.failure(page, "row_too_small", frame=list(rect), measuredHeight=18 + 12 * len(rows)):
+            return
         raise PartsManualPdfError("BOM rows do not fit inside the publication-safe page region")
     table_bottom = rect.y0 + header_height + row_height * len(rows)
     table_rect = fitz.Rect(rect.x0, rect.y0, rect.x1, table_bottom)
@@ -809,7 +830,10 @@ def _draw_bom_table(
         typography.get("headingFont"), typography.get("headingWeight"), "normal"
     )
     text_color = _hex_rgb(colors.get("text"), "#18212A")
+    from ai_inspector.documentation import fit
     for index, header in enumerate(headers):
+        if descriptor is not None:
+            fit.target(page, descriptor, f"bom_header_{index}")
         # Shrunk to fit, as the rows are: a header wider than its column would otherwise not be drawn at all.
         _fit_text(
             fitz,
@@ -837,6 +861,9 @@ def _draw_bom_table(
             str(row.get("quantity") or ""),
         )
         for index, value in enumerate(values):
+            if descriptor is not None:
+                field = ("itemNumber", "partNumber", "description", "quantity")[index]
+                fit.target(page, descriptor, (row.get("cellIds") or {}).get(field) or f"bom_{row_index}_{field}")
             _fit_text(
                 fitz,
                 page,
@@ -854,6 +881,8 @@ def _draw_bom_table(
             width=0.3,
         )
         if row.get("manualConflicts"):
+            if descriptor is not None:
+                fit.target(page, descriptor, f"bom_{row_index}_review_marker")
             from ai_inspector.documentation.conflict_exports import marker
             page.insert_text((x_positions[2] + 3, bottom - 1), marker(row), fontsize=4.5, color=(0.6, 0.22, 0.02))
         current_y = bottom
@@ -866,27 +895,34 @@ def _draw_bom_table(
         )
 
 
-def _draw_key_value_table(fitz: Any, page: Any, rows: Iterable[tuple[str, Any]], rect: Any) -> None:
+def _draw_key_value_table(fitz: Any, page: Any, rows: Iterable[tuple[str, Any]], rect: Any, *, geometry=None, descriptor=None) -> None:
+    from ai_inspector.documentation.layout import geometry as make_geometry
+    geometry = geometry or make_geometry("illustrated_parts_manual", None)
+    from ai_inspector.documentation import fit
     y = rect.y0
     for index, (label, raw_value) in enumerate(rows):
         value = str(raw_value or "Not specified")
         fill = (0.95, 0.97, 0.985) if index % 2 else (1, 1, 1)
-        page.draw_rect(fitz.Rect(rect.x0, y, rect.x1, y + 30), color=(0.78, 0.82, 0.85), fill=fill, width=0.4)
+        page.draw_rect(fitz.Rect(rect.x0, y, rect.x1, y + geometry.h(30)), color=(0.78, 0.82, 0.85), fill=fill, width=0.4)
+        if descriptor is not None:
+            fit.target(page, descriptor, f"document_control_{index}_label")
         page.insert_textbox(
-            fitz.Rect(rect.x0 + 8, y + 9, rect.x0 + 160, y + 24),
+            fitz.Rect(rect.x0 + 8, y + 9, rect.x0 + geometry.x(160), y + 24),
             label.upper(),
             fontsize=7.4,
             fontname="hebo",
             color=(0.16, 0.32, 0.43),
         )
+        if descriptor is not None:
+            fit.target(page, descriptor, f"document_control_{index}_value")
         _fit_text(
             fitz,
             page,
-            fitz.Rect(rect.x0 + 170, y + 8, rect.x1 - 8, y + 25),
+            fitz.Rect(rect.x0 + geometry.x(170), y + 8, rect.x1 - 8, y + 25),
             value,
             fontsize=8.2,
         )
-        y += 30
+        y += geometry.h(30)
 
 
 def _document_object_style(
@@ -950,7 +986,11 @@ def _draw_documentation_objects(
     theme = _document_theme(document)
     from ai_inspector.documentation.objects import ordered_objects, draw_pdf_image, draw_pdf_shape
     from ai_inspector.documentation.commands import DocumentEditError
+    from ai_inspector.documentation import fit
     for object_id, value in ordered_objects(descriptor):
+        fit.target(page, descriptor, object_id)
+        if fit.collecting() and value.get("type") != "text":
+            continue
         if rich_plans and object_id in rich_plans:
             from ai_inspector.documentation.rich_layout import draw_pdf_object
             draw_pdf_object(fitz, page, rich_plans[object_id])
@@ -1030,10 +1070,19 @@ def _draw_documentation_objects(
             raise PartsManualPdfError(f"{error.code}: {object_id}: {error}") from error
 
 
+def fit_report(root, assembly_number, document):
+    from ai_inspector.documentation import fit
+    with fit.collect(document) as report:
+        fit.authored_bounds(document)
+        build_manual_pdf_bytes(root, assembly_number, document, _fit_check=True)
+        return report.report()
+
+
 def build_manual_pdf_bytes(
     root: str | Path,
     assembly_number: str,
     document: Mapping[str, Any],
+    *, _fit_check: bool = False,
 ) -> bytes:
     try:
         import fitz
@@ -1041,10 +1090,15 @@ def build_manual_pdf_bytes(
         raise PartsManualPdfError("PyMuPDF is required to generate parts manuals") from exc
 
     from ai_inspector.documentation.provenance import check_export, export_document
+    from ai_inspector.documentation import fit
+    from ai_inspector.documentation.layout import document_geometry
     document = export_document(document)
-    check_export(document, document.get("exportMode", "review"))
+    geometry = document_geometry(document)
+    if not _fit_check:
+        check_export(document, document.get("exportMode", "review"))
     _validate_document(document)
-    render_paths = _required_render_paths(root, assembly_number, document)
+    render_paths = ({str(p["pageId"]): None for p in document.get("pages", [])} if _fit_check
+                    else _required_render_paths(root, assembly_number, document))
     layout_contract = document.get("publicationLayout")
     if not isinstance(layout_contract, Mapping):
         layout_contract = publication_layout()
@@ -1062,7 +1116,7 @@ def build_manual_pdf_bytes(
     for descriptor in pages:
         page_number = int(descriptor.get("pageNumber") or len(pdf) + 1)
         page_type = str(descriptor.get("pageType") or "")
-        page = pdf.new_page(width=width, height=height)
+        page = fit.measured_page(pdf.new_page(width=width, height=height), descriptor)
         page.draw_rect(
             page.rect,
             color=None,
@@ -1084,18 +1138,20 @@ def build_manual_pdf_bytes(
                     color=None,
                     fill=fill,
                 )
+            fit.target(page, descriptor, "cover_brand")
             _draw_brand_mark(
                 fitz,
                 page,
                 theme,
                 root,
                 assembly_number,
-                fitz.Rect(42, 39, 210, 71),
+                fitz.Rect(geometry.fitz_rect(42, 39, 210, 71)),
                 fontsize=20,
                 inspector_color=primary,
             )
+            fit.target(page, descriptor, "cover_publication_label")
             page.insert_text(
-                fitz.Point(194, 59),
+                fitz.Point(geometry.x(194), geometry.y(59)),
                 "TECHNICAL PUBLICATIONS",
                 fontsize=7.2,
                 fontname="helv",
@@ -1105,8 +1161,9 @@ def build_manual_pdf_bytes(
                 descriptor, "header_title", "ILLUSTRATED PARTS MANUAL"
             )
             cover_title_style = _page_element_style(descriptor, "header_title")
+            fit.target(page, descriptor, "header_title")
             page.insert_text(
-                fitz.Point(42, 99),
+                fitz.Point(geometry.x(42), geometry.y(99)),
                 cover_title,
                 fontsize=float(cover_title_style.get("fontSize") or 25),
                 fontname=_pdf_font(
@@ -1123,8 +1180,9 @@ def build_manual_pdf_bytes(
                 product.get("name") or document.get("title") or "",
             )
             subtitle_style = _page_element_style(descriptor, "cover_subtitle")
+            fit.target(page, descriptor, "cover_subtitle")
             page.insert_textbox(
-                fitz.Rect(42, 116, width - 42, 145),
+                fitz.Rect(geometry.x(42), geometry.y(116), width - geometry.x(42), geometry.y(145)),
                 cover_subtitle,
                 fontsize=float(subtitle_style.get("fontSize") or 14),
                 fontname=_pdf_font(
@@ -1158,6 +1216,7 @@ def build_manual_pdf_bytes(
                 metadata.append(f"Revision: {control.get('revision')}")
             if control.get("releaseDate"):
                 metadata.append(f"Release Date: {control.get('releaseDate')}")
+            fit.target(page, descriptor, "cover_assembly")
             page.insert_textbox(
                 fitz.Rect(*rect_tuple(cover_layout["documentControl"])),
                 "\n".join(metadata),
@@ -1168,6 +1227,7 @@ def build_manual_pdf_bytes(
             )
             footer_left = fitz.Rect(*rect_tuple(cover_layout["footerLeft"]))
             footer_right = fitz.Rect(*rect_tuple(cover_layout["footerRight"]))
+            fit.target(page, descriptor, "cover_footer_product")
             page.insert_textbox(
                 footer_left,
                 str(product.get("name") or "Product"),
@@ -1178,6 +1238,7 @@ def build_manual_pdf_bytes(
             footer_identity = str(control.get("documentNumber") or "Document number not specified")
             if control.get("revision"):
                 footer_identity += f" | Rev {control.get('revision')}"
+            fit.target(page, descriptor, "cover_footer_identity")
             page.insert_textbox(
                 footer_right,
                 footer_identity,
@@ -1188,7 +1249,8 @@ def build_manual_pdf_bytes(
             )
         elif page_type == "document_information":
             _draw_header(fitz, page, descriptor, document, root, assembly_number)
-            page.insert_textbox(fitz.Rect(48, 70, width - 48, 98), "DOCUMENT CONTROL", fontsize=18, fontname="hebo", color=(0.05, 0.27, 0.44))
+            fit.target(page, descriptor, "document_control_heading")
+            page.insert_textbox(fitz.Rect(geometry.x(48), geometry.y(70), width - geometry.x(48), geometry.y(98)), "DOCUMENT CONTROL", fontsize=18, fontname="hebo", color=(0.05, 0.27, 0.44))
             control = descriptor.get("documentControl") or {}
             _draw_key_value_table(
                 fitz,
@@ -1202,30 +1264,40 @@ def build_manual_pdf_bytes(
                     ("Revision", control.get("revision")),
                     ("Release date", control.get("releaseDate")),
                 ],
-                fitz.Rect(48, 112, width - 48, 322),
+                fitz.Rect(geometry.x(48), geometry.y(112), width - geometry.x(48), geometry.y(322)),
+                geometry=geometry, descriptor=descriptor,
             )
-            page.insert_textbox(fitz.Rect(48, 358, width - 48, 382), "REVISION HISTORY", fontsize=12, fontname="hebo", color=(0.05, 0.27, 0.44))
+            fit.target(page, descriptor, "revision_history_heading")
+            page.insert_textbox(fitz.Rect(geometry.x(48), geometry.y(358), width - geometry.x(48), geometry.y(382)), "REVISION HISTORY", fontsize=12, fontname="hebo", color=(0.05, 0.27, 0.44))
             for index, row in enumerate(descriptor.get("revisionHistory") or []):
-                y = 394 + index * 32
+                y = geometry.y(394 + index * 32)
                 text = f"Rev {row.get('revision')} | {row.get('date') or 'Date not specified'} | {row.get('description')}"
-                page.insert_textbox(fitz.Rect(56, y, width - 56, y + 24), text, fontsize=8.5, fontname="helv", color=(0.16, 0.21, 0.25))
+                fit.target(page, descriptor, f"revision_history_{index}")
+                page.insert_textbox(fitz.Rect(geometry.x(56), y, width - geometry.x(56), y + geometry.h(24)), text, fontsize=8.5, fontname="helv", color=(0.16, 0.21, 0.25))
             _draw_footer(fitz, page, document, descriptor)
         elif page_type == "table_of_contents":
             _draw_header(fitz, page, descriptor, document, root, assembly_number)
-            page.insert_textbox(fitz.Rect(48, 66, width - 48, 96), "TABLE OF CONTENTS", fontsize=18, fontname="hebo", color=(0.05, 0.27, 0.44))
-            page.insert_textbox(fitz.Rect(58, 102, 145, 119), "FIGURE", fontsize=7, fontname="hebo", color=(0.25, 0.36, 0.43))
-            page.insert_textbox(fitz.Rect(150, 102, width - 90, 119), "TITLE", fontsize=7, fontname="hebo", color=(0.25, 0.36, 0.43))
-            page.insert_textbox(fitz.Rect(width - 88, 102, width - 58, 119), "PAGE", fontsize=7, fontname="hebo", color=(0.25, 0.36, 0.43), align=fitz.TEXT_ALIGN_RIGHT)
-            y = 124.0
-            for entry in descriptor.get("entries") or []:
-                row_rect = fitz.Rect(58, y, width - 58, y + 27)
+            fit.target(page, descriptor, "contents_heading")
+            page.insert_textbox(fitz.Rect(geometry.x(48), geometry.y(66), width - geometry.x(48), geometry.y(96)), "TABLE OF CONTENTS", fontsize=18, fontname="hebo", color=(0.05, 0.27, 0.44))
+            fit.target(page, descriptor, "contents_figure_header")
+            page.insert_textbox(fitz.Rect(geometry.x(58), geometry.y(102), geometry.x(145), geometry.y(119)), "FIGURE", fontsize=7, fontname="hebo", color=(0.25, 0.36, 0.43))
+            fit.target(page, descriptor, "contents_title_header")
+            page.insert_textbox(fitz.Rect(geometry.x(150), geometry.y(102), width - geometry.x(90), geometry.y(119)), "TITLE", fontsize=7, fontname="hebo", color=(0.25, 0.36, 0.43))
+            fit.target(page, descriptor, "contents_page_header")
+            page.insert_textbox(fitz.Rect(width - geometry.x(88), geometry.y(102), width - geometry.x(58), geometry.y(119)), "PAGE", fontsize=7, fontname="hebo", color=(0.25, 0.36, 0.43), align=fitz.TEXT_ALIGN_RIGHT)
+            y = geometry.y(124.0)
+            for entry_index, entry in enumerate(descriptor.get("entries") or []):
+                row_rect = fitz.Rect(geometry.x(58), y, width - geometry.x(58), y + geometry.h(27))
                 figure = str(entry.get("figureNumber") or "INDEX")
-                page.insert_textbox(fitz.Rect(row_rect.x0, row_rect.y0 + 6, 142, row_rect.y1), figure, fontsize=8.5, fontname="hebo", color=(0.05, 0.43, 0.70))
-                page.insert_textbox(fitz.Rect(150, row_rect.y0 + 6, row_rect.x1 - 42, row_rect.y1), str(entry.get("title") or ""), fontsize=9, fontname="helv", color=(0.12, 0.17, 0.21))
-                page.draw_line(fitz.Point(150, row_rect.y1 - 3), fitz.Point(row_rect.x1, row_rect.y1 - 3), color=(0.82, 0.85, 0.87), dashes="1 3", width=0.4)
+                fit.target(page, descriptor, (entry.get("cellIds") or {}).get("figureNumber") or f"contents_{entry_index}_figure")
+                page.insert_textbox(fitz.Rect(row_rect.x0, row_rect.y0 + 6, geometry.x(142), row_rect.y1), figure, fontsize=8.5, fontname="hebo", color=(0.05, 0.43, 0.70))
+                fit.target(page, descriptor, (entry.get("cellIds") or {}).get("title") or f"contents_{entry_index}_title")
+                page.insert_textbox(fitz.Rect(geometry.x(150), row_rect.y0 + 6, row_rect.x1 - 42, row_rect.y1), str(entry.get("title") or ""), fontsize=9, fontname="helv", color=(0.12, 0.17, 0.21))
+                page.draw_line(fitz.Point(geometry.x(150), row_rect.y1 - 3), fitz.Point(row_rect.x1, row_rect.y1 - 3), color=(0.82, 0.85, 0.87), dashes="1 3", width=0.4)
+                fit.target(page, descriptor, (entry.get("cellIds") or {}).get("pageNumber") or f"contents_{entry_index}_page")
                 page.insert_textbox(fitz.Rect(row_rect.x1 - 38, row_rect.y0 + 6, row_rect.x1, row_rect.y1), str(entry.get("pageNumber") or ""), fontsize=9, fontname="hebo", color=(0.05, 0.43, 0.70), align=fitz.TEXT_ALIGN_RIGHT)
                 pending_links.append((page_number - 1, (row_rect.x0, row_rect.y0, row_rect.x1, row_rect.y1), int(entry.get("pageNumber") or 1) - 1))
-                y += 29
+                y += geometry.h(29)
             _draw_footer(fitz, page, document, descriptor)
         elif page_type == "assembly_overview":
             _draw_header(fitz, page, descriptor, document, root, assembly_number)
@@ -1252,18 +1324,22 @@ def build_manual_pdf_bytes(
                 overview_layout["groupIndex"],
                 "group_index",
             )
-            page.insert_textbox(fitz.Rect(group_index.x0, group_index.y0, group_index.x1, group_index.y0 + 22), "ILLUSTRATED GROUP INDEX", fontsize=9.2, fontname="hebo", color=(0.05, 0.33, 0.53))
-            y = group_index.y0 + 30
-            for group in descriptor.get("manualGroupItems") or []:
-                row_rect = fitz.Rect(group_index.x0, y, group_index.x1, y + 42)
-                page.draw_circle(fitz.Point(605, y + 14), 9, color=(0.04, 0.35, 0.57), fill=(1, 1, 1), width=1)
+            fit.target(page, descriptor, "group_index_heading")
+            page.insert_textbox(fitz.Rect(group_index.x0, group_index.y0, group_index.x1, group_index.y0 + geometry.h(22)), "ILLUSTRATED GROUP INDEX", fontsize=9.2, fontname="hebo", color=(0.05, 0.33, 0.53))
+            y = group_index.y0 + geometry.y(30)
+            for group_index_number, group in enumerate(descriptor.get("manualGroupItems") or []):
+                row_rect = fitz.Rect(group_index.x0, y, group_index.x1, y + geometry.h(42))
+                page.draw_circle(fitz.Point(geometry.x(605), y + 14), 9, color=(0.04, 0.35, 0.57), fill=(1, 1, 1), width=1)
                 group_label = str(group.get("itemNumber") or "")
                 group_label_width = fitz.get_text_length(group_label, fontname="hebo", fontsize=7.5)
-                page.insert_text(fitz.Point(605 - group_label_width * 0.5, y + 16.6), group_label, fontsize=7.5, fontname="hebo", color=(0.03, 0.20, 0.31))
-                _fit_text(fitz, page, fitz.Rect(620, y + 4, row_rect.x1, y + 20), group.get("name"), fontsize=7.8, fontname="hebo")
-                page.insert_textbox(fitz.Rect(620, y + 22, row_rect.x1, y + 37), f"Figure {group.get('figureNumber')} | Page {group.get('pageNumber')}", fontsize=6.8, fontname="helv", color=(0.35, 0.42, 0.47))
+                fit.target(page, descriptor, (group.get("cellIds") or {}).get("itemNumber") or f"group_{group_index_number}_number")
+                page.insert_text(fitz.Point(geometry.x(605) - group_label_width * 0.5, y + 16.6), group_label, fontsize=7.5, fontname="hebo", color=(0.03, 0.20, 0.31))
+                fit.target(page, descriptor, (group.get("cellIds") or {}).get("name") or f"group_{group_index_number}_name")
+                _fit_text(fitz, page, fitz.Rect(geometry.x(620), y + 4, row_rect.x1, y + 20), group.get("name"), fontsize=7.8, fontname="hebo")
+                fit.target(page, descriptor, f"group_{group_index_number}_reference")
+                page.insert_textbox(fitz.Rect(geometry.x(620), y + 22, row_rect.x1, y + 37), f"Figure {group.get('figureNumber')} | Page {group.get('pageNumber')}", fontsize=6.8, fontname="helv", color=(0.35, 0.42, 0.47))
                 pending_links.append((page_number - 1, (row_rect.x0, row_rect.y0, row_rect.x1, row_rect.y1), int(group.get("pageNumber") or 1) - 1))
-                y += 46
+                y += geometry.h(46)
             _draw_footer(fitz, page, document, descriptor)
         elif page_type == "manual_section":
             _draw_header(fitz, page, descriptor, document, root, assembly_number)
@@ -1290,38 +1366,44 @@ def build_manual_pdf_bytes(
             )
             image_rect = _draw_image(fitz, page, render_paths[str(descriptor["pageId"])], image_box, image)
             _draw_balloons(fitz, page, image_rect, image, theme)
-            _draw_bom_table(fitz, page, bom_box, rows, theme)
+            fit.target(page, descriptor, "bom", bom_box)
+            _draw_bom_table(fitz, page, bom_box, rows, theme, descriptor=descriptor)
             _draw_footer(fitz, page, document, descriptor)
         elif page_type == "manual_section_parts_list":
             _draw_header(fitz, page, descriptor, document, root, assembly_number)
             parts_layout = page_layout("manual_section_parts_list", layout=layout_contract)
+            fit.target(page, descriptor, "bom", _publication_rect(fitz, parts_layout["bom"]))
             _draw_bom_table(
                 fitz,
                 page,
                 _publication_rect(fitz, parts_layout["bom"]),
                 descriptor.get("bom") or [],
-                theme,
+                theme, descriptor=descriptor,
             )
             _draw_footer(fitz, page, document, descriptor)
         elif page_type == "parts_index":
             _draw_header(fitz, page, descriptor, document, root, assembly_number)
             heading = "PART NUMBER INDEX (CONTINUED)" if descriptor.get("continuedFrom") else "PART NUMBER INDEX"
-            page.insert_textbox(fitz.Rect(48, 66, width - 48, 96), heading, fontsize=18, fontname="hebo", color=(0.05, 0.27, 0.44))
-            y = 106.0
+            fit.target(page, descriptor, "parts_index_heading")
+            page.insert_textbox(fitz.Rect(geometry.x(48), geometry.y(66), width - geometry.x(48), geometry.y(96)), heading, fontsize=18, fontname="hebo", color=(0.05, 0.27, 0.44))
+            y = geometry.y(106.0)
             for row_index, row in enumerate(descriptor.get("entries") or []):
                 refs = ", ".join(
                     f"Figure {ref.get('figureNumber')}, Item {ref.get('itemNumber')}"
                     for ref in row.get("references") or []
                 )
                 fill = (0.95, 0.97, 0.985) if row_index % 2 else (1, 1, 1)
-                page.draw_rect(fitz.Rect(48, y, width - 48, y + 21), color=(0.82, 0.85, 0.87), fill=fill, width=0.35)
-                _fit_text(fitz, page, fitz.Rect(56, y + 5, 190, y + 18), row.get("partNumber"), fontsize=7.2, fontname="hebo")
-                _fit_text(fitz, page, fitz.Rect(198, y + 5, 475, y + 18), row.get("description"), fontsize=7.1)
-                _fit_text(fitz, page, fitz.Rect(485, y + 5, width - 56, y + 18), refs, fontsize=6.9, color=(0.05, 0.39, 0.63), align=fitz.TEXT_ALIGN_RIGHT)
+                page.draw_rect(fitz.Rect(geometry.x(48), y, width - geometry.x(48), y + geometry.h(21)), color=(0.82, 0.85, 0.87), fill=fill, width=0.35)
+                fit.target(page, descriptor, (row.get("cellIds") or {}).get("partNumber") or f"parts_index_{row_index}_partNumber")
+                _fit_text(fitz, page, fitz.Rect(geometry.x(56), y + 5, geometry.x(190), y + geometry.h(21) - 3), row.get("partNumber"), fontsize=7.2, fontname="hebo")
+                fit.target(page, descriptor, (row.get("cellIds") or {}).get("description") or f"parts_index_{row_index}_description")
+                _fit_text(fitz, page, fitz.Rect(geometry.x(198), y + 5, geometry.x(475), y + geometry.h(21) - 3), row.get("description"), fontsize=7.1)
+                fit.target(page, descriptor, (row.get("cellIds") or {}).get("references") or f"parts_index_{row_index}_references")
+                _fit_text(fitz, page, fitz.Rect(geometry.x(485), y + 5, width - geometry.x(56), y + geometry.h(21) - 3), refs, fontsize=6.9, color=(0.05, 0.39, 0.63), align=fitz.TEXT_ALIGN_RIGHT)
                 first_ref = next(iter(row.get("references") or []), None)
                 if first_ref:
-                    pending_links.append((page_number - 1, (48, y, width - 48, y + 21), int(first_ref.get("pageNumber") or 1) - 1))
-                y += 22
+                    pending_links.append((page_number - 1, (geometry.x(48), y, width - geometry.x(48), y + geometry.h(21)), int(first_ref.get("pageNumber") or 1) - 1))
+                y += geometry.h(22)
             _draw_footer(fitz, page, document, descriptor)
         else:
             pdf.close()
@@ -1337,6 +1419,9 @@ def build_manual_pdf_bytes(
             rich_plans.get(descriptor["pageId"]),
         )
 
+    if _fit_check:
+        pdf.close()
+        return b""
     for source_page, rectangle, target_page in pending_links:
         pdf[source_page].insert_link(
             {"kind": fitz.LINK_GOTO, "from": fitz.Rect(*rectangle), "page": target_page}

@@ -44,7 +44,7 @@ from ai_inspector.documentation.rich_text import (
     reserved_ids as rich_reserved_ids, field_read as rich_field_read, guard_restored_fields,
 )
 
-DOCUMENTATION_SCENE_SCHEMA_VERSION = 7
+DOCUMENTATION_SCENE_SCHEMA_VERSION = 8
 DOCUMENTATION_TARGET_TYPES = frozenset(
     {
         "manual_group",
@@ -54,6 +54,7 @@ DOCUMENTATION_TARGET_TYPES = frozenset(
         "leader",
         "page_element",
         "document_object",
+        "document_page_setup",
         "document_theme",
         "selection",
     }
@@ -84,6 +85,7 @@ DOCUMENTATION_COMMAND_OPERATIONS = frozenset(
         "update_text",
         "replace_rich_text",
         "update_style",
+        "set_page_setup",
         "set_theme",
         "apply_template",
         "reset",
@@ -272,7 +274,7 @@ def documentation_scene_revision(value: Any) -> str:
     # metadata. An untouched v2 document keeps its exact export identity.
     projection = {key: copy.deepcopy(value[key]) for key in (
         "schemaVersion", "assemblyNumber", "sourceRevision", "manualPlanRevision",
-        "createdAt", "updatedAt", "pages", "theme", "pageMasters", "commands", "historyCursor", "aliasRevision"
+        "createdAt", "updatedAt", "pages", "theme", "pageMasters", "commands", "historyCursor", "aliasRevision", "pageSetup"
     ) if key in value}
     projection["schemaVersion"] = 2
     return hashlib.sha256(canonical_documentation_bytes(projection)).hexdigest()
@@ -1105,9 +1107,11 @@ def _scene_records(scene):
             # enrich the saved command on read (its historical hash stays valid).
             previous = {"pages": replay_documentation_commands(prefix), "fieldMeta": replay_field_meta(prefix)}
             previous["theme"], previous["pageMasters"] = replay_documentation_theme(prefix)
+            replay_documentation_page_setup(previous, prefix)
             active = [*prefix, command]
             current = {"pages": replay_documentation_commands(active), "fieldMeta": replay_field_meta(active)}
             current["theme"], current["pageMasters"] = replay_documentation_theme(active)
+            replay_documentation_page_setup(current, active)
             leaves = list(_leaf_commands([command]))
             paths = scene_paths(previous, current, leaves)
             if paths:
@@ -1161,7 +1165,7 @@ def _advance_edit_versions(scene, commands):
             continue
         operation, page = command.get("operation"), str(command.get("pageId") or "")
         keys.update(command.get("identityResetTargets", []))
-        if operation in {"set_theme", "apply_template"}:
+        if operation in {"set_theme", "apply_template", "set_page_setup"}:
             scene["editEpoch"] += 1
         elif operation in {"reset_page", "add_object", "remove_object", "set_object_order"}:
             keys.add("@page:" + page)
@@ -1222,7 +1226,7 @@ def replay_documentation_commands(commands: Iterable[Mapping[str, Any]]) -> Dict
             for row in command["frames"]:
                 page["documentObjects"][row["targetId"]]["frame"] = copy.deepcopy(row["frame"])
             continue
-        if operation in {"set_theme", "apply_template"}:
+        if operation in {"set_theme", "apply_template", "set_page_setup"}:
             continue
         if operation in {
             "clear_callouts",
@@ -1354,9 +1358,44 @@ def _arrange_transforms(value: Any) -> list[Dict[str, Any]]:
     return normalized
 
 
+def _page_setup(value, document_type=None):
+    from ai_inspector.documentation.layout import DESIGN, normalize_page_setup
+    if document_type is not None:
+        return normalize_page_setup(document_type, value)
+    # Standalone history validators lack the repository owner. The repository
+    # additionally validates against its own type on every read and write.
+    for kind in DESIGN:
+        try:
+            return normalize_page_setup(kind, value)
+        except DocumentEditError:
+            pass
+    raise DocumentEditError("unsupported_page_setup", "Invalid stored publication page setup.")
+
+
+def replay_documentation_page_setup(scene, commands):
+    state = {}
+    touched = any(c.get("operation") == "set_page_setup" or
+        c.get("operation") == "restore_change" and any(v["path"][0] == "pageSetup"
+            for v in c["change"]["changes"]) for c in _leaf_commands(scene.get("commands", [])))
+    for command in _leaf_commands(commands):
+        if command.get("operation") == "set_page_setup":
+            touched = True
+            if command.get("pageSetup") is None:
+                state.pop("pageSetup", None)
+            else:
+                state["pageSetup"] = copy.deepcopy(command["pageSetup"])
+        elif command.get("operation") == "restore_change":
+            changes = [c for c in command["change"]["changes"] if c["path"][0] == "pageSetup"]
+            touched = touched or bool(changes)
+            restore_change(state, changes)
+    if touched:
+        scene.pop("pageSetup", None)
+        scene.update(state)
+
+
 def _upgrade_documentation_scene(scene: Dict[str, Any]) -> Dict[str, Any]:
     schema_version = scene.get("schemaVersion")
-    if schema_version not in {1, 2, 3, 4, 5, 6, DOCUMENTATION_SCENE_SCHEMA_VERSION}:
+    if schema_version not in {1, 2, 3, 4, 5, 6, 7, DOCUMENTATION_SCENE_SCHEMA_VERSION}:
         raise DocumentationSceneError("unsupported documentation scene schema")
     commands = scene.get("commands")
     if not isinstance(commands, list):
@@ -1364,7 +1403,10 @@ def _upgrade_documentation_scene(scene: Dict[str, Any]) -> Dict[str, Any]:
     cursor = scene.get("historyCursor")
     if not isinstance(cursor, int) or isinstance(cursor, bool):
         raise DocumentationSceneError("documentation history cursor is invalid")
+    if "pageSetup" in scene:
+        _page_setup(scene["pageSetup"])
     active_commands = commands[:cursor]
+    replay_documentation_page_setup(scene, active_commands)
     transaction_defaults(scene)
     validate_refresh_metadata(scene)
     scene["fieldMeta"] = replay_field_meta(active_commands)
@@ -1376,7 +1418,7 @@ def _upgrade_documentation_scene(scene: Dict[str, Any]) -> Dict[str, Any]:
     return scene
 
 
-def validate_documentation_scene(scene: Mapping[str, Any]) -> None:
+def validate_documentation_scene(scene: Mapping[str, Any], document_type=None) -> None:
     if not isinstance(scene, Mapping):
         raise DocumentationSceneError("documentation scene must be an object")
     if scene.get("schemaVersion") != DOCUMENTATION_SCENE_SCHEMA_VERSION:
@@ -1387,6 +1429,8 @@ def validate_documentation_scene(scene: Mapping[str, Any]) -> None:
         raise DocumentationSceneError("documentation scene source revision is required")
     if not str(scene.get("manualPlanRevision") or ""):
         raise DocumentationSceneError("documentation scene manual-plan revision is required")
+    if "pageSetup" in scene:
+        _page_setup(scene["pageSetup"], document_type)
     validate_transaction_metadata(scene)
     validate_refresh_metadata(scene)
     commands = scene.get("commands")
@@ -1397,12 +1441,12 @@ def validate_documentation_scene(scene: Mapping[str, Any]) -> None:
         raise DocumentationSceneError("documentation history cursor is invalid")
     for entry in commands:
         if isinstance(entry, Mapping) and "change" in entry:
-            validate_record(entry["change"], {"pages", "fieldMeta", "theme", "pageMasters", "conflicts", "orphans", "generatedBaseline", "resolutionHistory"})
+            validate_record(entry["change"], {"pages", "fieldMeta", "theme", "pageMasters", "pageSetup", "conflicts", "orphans", "generatedBaseline", "resolutionHistory"})
     for command in _leaf_commands(commands):
         if not isinstance(command, Mapping):
             raise DocumentationSceneError("documentation command must be an object")
         if command.get("operation") == "restore_change":
-            validate_record(command.get("change"), {"pages", "fieldMeta", "theme", "pageMasters", "conflicts", "orphans", "generatedBaseline", "resolutionHistory"})
+            validate_record(command.get("change"), {"pages", "fieldMeta", "theme", "pageMasters", "pageSetup", "conflicts", "orphans", "generatedBaseline", "resolutionHistory"})
             continue
         if command.get("operation") not in DOCUMENTATION_COMMAND_OPERATIONS:
             raise DocumentationSceneError("unsupported documentation command")
@@ -1433,6 +1477,12 @@ def validate_documentation_scene(scene: Mapping[str, Any]) -> None:
             if target_type != "document_object":
                 raise DocumentationSceneError("object insertion requires a document object")
             _document_object(command.get("documentObject"), expected_id=str(command.get("targetId") or ""), stored=True)
+            continue
+        if operation == "set_page_setup":
+            if target_type != "document_page_setup" or command.get("targetId") != "page-setup" or "pageSetup" not in command:
+                raise DocumentationSceneError("publication page setup target is invalid")
+            if command["pageSetup"] is not None:
+                _page_setup(command["pageSetup"], document_type)
             continue
         if operation == "set_theme":
             if target_type != "document_theme":
@@ -1657,7 +1707,7 @@ class DocumentationSceneRepository:
                 key = command["targetId"]
                 identities[key] = {"id": key, "ownership": "authored",
                                    "state": "active" if key in live else "tombstone"}
-        validate_documentation_scene(scene)
+        validate_documentation_scene(scene, self.document_type)
         payload = canonical_documentation_bytes(scene)
         if len(payload) > 16 * 1024 * 1024:
             raise DocumentEditError("invalid_document_operation", "Scene history exceeds its storage limit.")
@@ -1665,9 +1715,9 @@ class DocumentationSceneRepository:
         if path.is_file():
             original = path.read_bytes()
             old_version = json.loads(original).get("schemaVersion")
-            if old_version not in {1, 2, 3, 4, 5, 6, DOCUMENTATION_SCENE_SCHEMA_VERSION}:
+            if old_version not in {1, 2, 3, 4, 5, 6, 7, DOCUMENTATION_SCENE_SCHEMA_VERSION}:
                 raise DocumentEditError("unsupported_document_schema", "This scene needs a newer editor.")
-            if old_version in {1, 2, 3, 4, 5, 6}:
+            if old_version in {1, 2, 3, 4, 5, 6, 7}:
                 backup = path.with_name("documentation-scene.v" + str(max(2, old_version)) + ".json")
                 if backup.exists():
                     if backup.read_bytes() != original:
@@ -1732,7 +1782,7 @@ class DocumentationSceneRepository:
         scene = _upgrade_documentation_scene(migrate_scene(scene, catalog))
         track_authored_identities(scene)
         scene = derive_baselines(scene, identity_document)
-        validate_documentation_scene(scene)
+        validate_documentation_scene(scene, self.document_type)
         source_current = str(scene.get("sourceRevision")) == str(source_revision)
         plan_current = str(scene.get("manualPlanRevision")) == str(manual_plan_revision)
         cursor = int(scene.get("historyCursor") or 0)
@@ -1776,7 +1826,7 @@ class DocumentationSceneRepository:
                     "adoptedTargets": sorted(before_text - after_text)}]
                 candidate["historyCursor"] = len(candidate["commands"])
             candidate = _upgrade_documentation_scene(candidate)
-            validate_documentation_scene(candidate)
+            validate_documentation_scene(candidate, self.document_type)
             if len(canonical_documentation_bytes(candidate)) > 16 * 1024 * 1024:
                 raise DocumentEditError("document_history_full", "The refreshed scene exceeds its storage limit.")
         return candidate, receipt
@@ -1830,7 +1880,7 @@ class DocumentationSceneRepository:
             scene["editRevision"] = previous["editRevision"] + 1
             scene["editEpoch"] = previous["editEpoch"] + 1
             scene["createdAt"] = scene["updatedAt"] = _utc_now()
-            validate_documentation_scene(scene)
+            validate_documentation_scene(scene, self.document_type)
             path = self._scene_path(assembly_number)
             reset_id = secrets.token_hex(4)
             backup = path.with_name("sr-" + reset_id + ".json")
@@ -1870,7 +1920,7 @@ class DocumentationSceneRepository:
             scene["editEpoch"] += 1
             scene["manualPlanRevision"] = str(manual_plan_revision)
             scene["updatedAt"] = _utc_now()
-            validate_documentation_scene(scene)
+            validate_documentation_scene(scene, self.document_type)
             self._save(assembly_number, scene)
             return True
 
@@ -1925,6 +1975,7 @@ class DocumentationSceneRepository:
         command: Mapping[str, Any],
         page_targets: Mapping[str, Mapping[str, Iterable[str]]],
         identity_document: Optional[Mapping[str, Any]] = None,
+        check_candidate=None,
     ) -> Dict[str, Any]:
         with _WRITE_LOCK:
             loaded = self.read(
@@ -1944,7 +1995,9 @@ class DocumentationSceneRepository:
             command, page_targets = normalize_command(scene, command, page_targets)
             guard_command(self._conflict_state(scene, assembly_number), command)
             capture_baselines(scene, identity_document, command_targets(command))
-            candidate = apply_documentation_command_candidate(scene, command, page_targets)
+            candidate = apply_documentation_command_candidate(scene, command, page_targets, document_type=self.document_type)
+            if check_candidate is not None:
+                check_candidate(scene, candidate["scene"])
             before = scene
             scene, persisted_command = candidate["scene"], candidate["command"]
             paths = scene_paths(before, scene, [persisted_command])
@@ -2149,7 +2202,7 @@ class DocumentationSceneRepository:
             retain_receipt(candidate, receipt)
             # Replay normalizes empty page containers just like ordinary commands.
             candidate = _upgrade_documentation_scene(candidate)
-            validate_documentation_scene(candidate)
+            validate_documentation_scene(candidate, self.document_type)
             guard_restored_fields(scene, candidate)
             self._save(assembly_number, candidate)
             return {**self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document), "receipt": receipt}
@@ -2203,6 +2256,7 @@ class DocumentationSceneRepository:
 def apply_documentation_command_candidate(
     scene: Mapping[str, Any], command: Mapping[str, Any],
     page_targets: Mapping[str, Mapping[str, Iterable[str]]],
+    *, document_type=None,
 ) -> Dict[str, Any]:
     """Validate and replay one command without reading or writing a store.
 
@@ -2225,7 +2279,7 @@ def apply_documentation_command_candidate(
         raise DocumentationSceneError("unsupported documentation command actor")
     transforms = None
     arrangement = None
-    global_operation = operation in {"set_theme", "apply_template"}
+    global_operation = operation in {"set_theme", "apply_template", "set_page_setup"}
     add_object_operation = operation == "add_object"
     object_fields = {}
     from ai_inspector.documentation.objects import OPERATIONS as OBJECT_OPERATIONS, live_command
@@ -2252,8 +2306,9 @@ def apply_documentation_command_candidate(
                 page_targets=page_targets,
             )
     elif global_operation:
-        if target_type != "document_theme" or target_id != "company-theme":
-            raise DocumentationSceneError("document theme target is invalid")
+        expected = ("document_page_setup", "page-setup") if operation == "set_page_setup" else ("document_theme", "company-theme")
+        if (target_type, target_id) != expected:
+            raise DocumentationSceneError("publication setting target is invalid")
         if page_id not in page_targets:
             raise DocumentationSceneError("documentation page is not editable")
     elif add_object_operation:
@@ -2482,6 +2537,13 @@ def apply_documentation_command_candidate(
         "actor": actor,
         "createdAt": now,
     }
+    if operation == "set_page_setup":
+        if "pageSetup" not in command:
+            raise DocumentEditError("unsupported_page_setup", "Supply a page setup or null.")
+        setup = None if command["pageSetup"] is None else _page_setup(command["pageSetup"], document_type)
+        if setup == scene.get("pageSetup"):
+            raise DocumentEditError("unsupported_page_setup", "The publication already uses this page setup.")
+        persisted_command["pageSetup"] = setup
     persisted_command.update(object_fields)
     if translation is not None:
         persisted_command["translation"] = translation
@@ -2545,5 +2607,6 @@ def apply_documentation_command_candidate(
     scene["fieldMeta"] = replay_field_meta(commands)
     scene["pages"] = replay_documentation_commands(commands)
     scene["theme"], scene["pageMasters"] = replay_documentation_theme(commands)
-    validate_documentation_scene(scene)
+    replay_documentation_page_setup(scene, commands)
+    validate_documentation_scene(scene, document_type)
     return {"scene": scene, "command": persisted_command}

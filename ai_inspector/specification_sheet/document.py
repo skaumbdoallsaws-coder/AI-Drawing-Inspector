@@ -198,8 +198,8 @@ def _citation_receipt(
     return rows
 
 
-def specification_sheet_layout() -> Dict[str, Any]:
-    return {
+def specification_sheet_layout(geometry=None) -> Dict[str, Any]:
+    result = {
         "page": {
             "width": SPECIFICATION_SHEET_PAGE_WIDTH_PT,
             "height": SPECIFICATION_SHEET_PAGE_HEIGHT_PT,
@@ -219,6 +219,8 @@ def specification_sheet_layout() -> Dict[str, Any]:
             }
         },
     }
+
+    return geometry.layout(result) if geometry is not None else result
 
 
 def _apply_scene(
@@ -516,6 +518,8 @@ def build_specification_sheet_document(
         raise SpecificationSheetError("the assembly has no visible part occurrences")
 
     figure = (profile or {}).get("figure") if isinstance((profile or {}).get("figure"), Mapping) else {}
+    from ai_inspector.documentation.layout import geometry
+    page_geometry = geometry("product_specification_sheet", (documentation_scene or {}).get("pageSetup"))
     layout = specification_sheet_layout()
     illustration_frame = layout["pageTypes"]["product_specification"]["illustration"]
     table_frame = layout["pageTypes"]["product_specification"]["specifications"]
@@ -561,6 +565,8 @@ def build_specification_sheet_document(
         # The machine's finishes are in the picture: a new appearance makes the capture stale. Only when one is
         # set, so the captures of assemblies without an appearance stay valid.
         page["renderRequest"]["appearanceRevision"] = appearance_revision
+    if not page_geometry.identity:
+        page["renderRequest"]["pageSize"] = [page_geometry.page["width"], page_geometry.page["height"]]
     # The product picture depends on the model and the camera, not on the words: a text edit keeps the capture.
     figure_revision = _stable_revision({
         "assemblyNumber": assembly_number,
@@ -669,6 +675,8 @@ def build_specification_sheet_document(
         ],
     })
 
+    page_geometry.blocks([page])
+    layout = page_geometry.layout(layout)
     if profile:
         manual_plan_revision = _stable_revision({
             "assemblyNumber": assembly_number,
@@ -744,6 +752,8 @@ def build_specification_sheet_document(
 
     from ai_inspector.documentation.identity import bind_document, sync_identity_overrides
 
+    if "pageSetup" in (documentation_scene or {}):
+        document["pageSetup"] = copy.deepcopy(documentation_scene["pageSetup"])
     document, documentation_scene = bind_document(document, documentation_scene)
     sync_identity_overrides(document)
     document = project_slots(document, stored, documentation_scene)

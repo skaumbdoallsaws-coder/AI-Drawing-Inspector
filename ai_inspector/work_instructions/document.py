@@ -1706,6 +1706,8 @@ def build_work_instruction_document(
         if nomenclature_root is not None
         else {}
     )
+    from ai_inspector.documentation.layout import geometry
+    page_geometry = geometry("work_instructions", (documentation_scene or {}).get("pageSetup"))
     layout = publication_layout()
     cover = layout["pageTypes"]["operations_cover"]
     benchmark_stage_ids = [
@@ -1942,6 +1944,8 @@ def build_work_instruction_document(
                     stages_by_id=stages_by_id,
                 )
             )
+    page_geometry.blocks(pages)
+    layout = page_geometry.layout(layout)
     for page in pages:
         page["pageCount"] = len(pages)
     theme, page_masters = _apply_scene([], documentation_scene)
@@ -2100,6 +2104,11 @@ def build_work_instruction_document(
     }
     from ai_inspector.documentation.identity import bind_document, sync_identity_overrides
 
+    if "pageSetup" in (documentation_scene or {}):
+        document["pageSetup"] = copy.deepcopy(documentation_scene["pageSetup"])
+        for page in pages:
+            if not page_geometry.identity and isinstance(page.get("renderRequest"), dict):
+                page["renderRequest"]["pageSize"] = [page_geometry.page["width"], page_geometry.page["height"]]
     document, documentation_scene = bind_document(document, documentation_scene)
     _apply_scene(document["pages"], documentation_scene)
     sync_identity_overrides(document)

@@ -186,7 +186,7 @@ def scene_paths(before, after, commands):
                         paths.add(("pages", page, collection, key))
             elif a != b:
                 paths.add(("pages", page, collection))
-    for key in ("theme", "pageMasters"):
+    for key in ("theme", "pageMasters", "pageSetup"):
         if before.get(key) != after.get(key):
             paths.add((key,))
     for key in set(before.get("fieldMeta", {})) | set(after.get("fieldMeta", {})):
@@ -195,7 +195,9 @@ def scene_paths(before, after, commands):
     for command in commands:
         page = command.get("pageId")
         operation = command.get("operation")
-        if operation in {"set_theme", "apply_template"}:
+        if operation == "set_page_setup":
+            paths.add(("pageSetup",))
+        elif operation in {"set_theme", "apply_template"}:
             paths.add(("theme",))
             if operation == "apply_template":
                 paths.add(("pageMasters",))

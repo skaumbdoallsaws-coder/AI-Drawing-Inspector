@@ -84,8 +84,10 @@ def prepare_pdf_blocks(fitz, document, *, canvas_rounding=False):
                 frame = (frame[0], frame[1] + offset, frame[2], frame[3])
                 layout = layout_text(value, frame, style, fitz_module=fitz, canvas_rounding=canvas_rounding)
             rows[block.get("blockId", "")] = ObjectLayout(target, frame, style, False, layout)
-    if missing:
+    from .fit import collecting
+    if missing and not collecting():
         raise DocumentEditError("unsupported_export_glyph", "No available PDF font renders these characters.", targets=missing)
     if overflowing:
-        raise DocumentEditError("layout_overflow", "Rich narrative text must fit its generated frame.", targets=overflowing)
+        from .fit import overflow
+        overflow(overflowing, "Rich narrative text must fit its generated frame.")
     return plans

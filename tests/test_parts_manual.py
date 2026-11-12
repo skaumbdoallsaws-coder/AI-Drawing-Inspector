@@ -378,7 +378,7 @@ def test_documentation_scene_v2_replays_objects_theme_and_history(tmp_path: Path
         }
     }
     loaded = repository.read("tricycle", "source-a", "plan-a")
-    assert loaded["scene"]["schemaVersion"] == 7
+    assert loaded["scene"]["schemaVersion"] == 8
     object_id = "document-object-release-note"
     created = repository.apply_command(
         "tricycle",

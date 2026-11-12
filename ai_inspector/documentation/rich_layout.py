@@ -719,13 +719,15 @@ def prepare_pdf_objects(fitz, document, page_size, *, rich_only=False, canvas_ro
                 overflowing.append({**target, "reasons": reasons, "measuredHeight": layout.measured_height,
                                     "frame": list(bounds)})
             page_plans[key] = ObjectLayout(target, bounds, style, outline, layout)
-    if missing:
+    from .fit import collecting
+    if missing and not collecting():
         raise DocumentEditError("unsupported_export_glyph", "No available built-in PDF font renders these characters.",
                                 targets=missing, codePoints=sorted({code for item in missing for code in item["codePoints"]}))
     if overflowing:
-        raise DocumentEditError("layout_overflow", "Authored text must fit inside its text box, and the box must be on the "
-                                "page; enlarge or move the box, or shorten the text.", targets=overflowing)
-    if rotated:
+        from .fit import overflow
+        overflow(overflowing, "Authored text must fit inside its text box, and the box must be on the "
+                 "page; enlarge or move the box, or shorten the text.")
+    if rotated and not collecting():
         raise DocumentEditError("unsupported_export_rotation", "Rotated authored text is not supported by the rich PDF layout.", targets=rotated)
     return result
 
@@ -735,6 +737,9 @@ def draw_pdf_object(fitz, page, plan):
     from ai_inspector.parts_manual.pdf import _hex_rgb
 
     if plan.layout.overflow or plan.layout.unrenderable:
+        from .fit import collecting
+        if collecting():
+            return  # Preflight already collected this target; keep measuring the rest of the publication.
         raise DocumentEditError("invalid_export_layout", "Only a successful text layout can be drawn.", targets=[plan.target])
     rect, style = fitz.Rect(plan.frame), plan.style
     opacity = float(style.get("opacity") if style.get("opacity") is not None else 1)
@@ -800,7 +805,11 @@ def draw_pdf_objects(fitz, page, descriptor, plans, *, document=None, asset_root
     from ai_inspector.parts_manual.pdf import _document_theme, _document_object_style
     theme = _document_theme(document or {})
     page_plans = plans.get(descriptor["pageId"], {})
+    from . import fit
     for key, value in ordered_objects(descriptor):
+        fit.target(page, descriptor, key)
+        if fit.collecting() and value.get("type") != "text":
+            continue
         if key in page_plans:
             draw_pdf_object(fitz, page, page_plans[key])
         elif value.get("type") == "image":

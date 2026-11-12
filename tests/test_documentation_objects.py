@@ -92,7 +92,7 @@ def test_schema_six_read_is_pure_and_backup_is_exact(scene):
     raw = (json.dumps(loaded, indent=2) + "\n").encode()
     scene.path.write_bytes(raw)
     read = scene.load()
-    assert read["scene"]["schemaVersion"] == 7
+    assert read["scene"]["schemaVersion"] == 8
     assert read["scene"]["pages"][PAGE]["documentObjects"] == before
     assert read["scene"]["pages"][PAGE]["objectOrder"] == list(before)
     assert scene.path.read_bytes() == raw
@@ -100,7 +100,7 @@ def test_schema_six_read_is_pure_and_backup_is_exact(scene):
     scene.command({"operation": "set_object_frame", "frame": frame})
     assert (scene.path.parent / "documentation-scene.v6.json").read_bytes() == raw
     future = deepcopy(loaded)
-    future["schemaVersion"] = 8
+    future["schemaVersion"] = 9
     with pytest.raises(DocumentationSceneError):
         _upgrade_documentation_scene(future)
 

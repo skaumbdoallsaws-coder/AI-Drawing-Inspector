@@ -38,8 +38,8 @@ TABLE_MIN_ROW_HEIGHT_PT = 30.0
 TABLE_HEADER_HEIGHT_PT = 25.0
 
 
-def publication_layout() -> Dict[str, Any]:
-    return {
+def publication_layout(geometry=None) -> Dict[str, Any]:
+    result = {
         "page": {
             "width": PAGE_WIDTH_PT,
             "height": PAGE_HEIGHT_PT,
@@ -83,6 +83,8 @@ def publication_layout() -> Dict[str, Any]:
         },
     }
 
+    return geometry.layout(result) if geometry is not None else result
+
 
 def _char_em(character: str) -> float:
     if character in " ilI.,:;'|!":
@@ -108,6 +110,16 @@ def _renderer_text_width(text: str, font_size: float) -> float:
 
 def text_width(text: str, font_size: float) -> float:
     return _renderer_text_width(str(text), float(font_size))
+
+
+@lru_cache(maxsize=2048)
+def _bold_text_width(text: str, font_size: float) -> float:
+    try:
+        import fitz
+
+        return float(fitz.get_text_length(text, fontname="hebo", fontsize=font_size))
+    except (ImportError, RuntimeError, ValueError):
+        return text_width(text, font_size) * 1.08
 
 
 def wrap_text(text: str, width: float, font_size: float) -> list[str]:
@@ -149,12 +161,43 @@ def _frame(y: float, height: float, *, x: float = PAGE_MARGIN_X_PT, width: float
 class FlowLayoutEngine:
     """Places semantic blocks without allowing content to cross page bounds."""
 
-    def __init__(self, *, start_page_number: int = 4):
+    def __init__(self, *, start_page_number: int = 4, geometry=None):
+        from ai_inspector.documentation.layout import geometry as make_geometry
+        self.geometry = geometry or make_geometry("operations_and_maintenance_manual")
+        content = self.geometry.rect({"x": PAGE_MARGIN_X_PT, "y": PAGE_CONTENT_TOP_PT,
+            "width": PAGE_CONTENT_WIDTH_PT, "height": PAGE_CONTENT_HEIGHT_PT})
+        self.content_left, self.content_top = content["x"], content["y"]
+        self.content_width, self.content_height = content["width"], content["height"]
+        self.content_bottom = self.content_top + self.content_height
         self.start_page_number = int(start_page_number)
         self._pages: list[Dict[str, Any]] = []
         self._page: Dict[str, Any] | None = None
-        self._cursor_y = PAGE_CONTENT_TOP_PT
+        self._cursor_y = self.content_top
         self._section_title = ""
+
+    def _frame(self, y, height, *, x=None, width=None):
+        x = self.content_left if x is None else x
+        width = self.content_width if width is None else width
+        if self.geometry.identity:
+            return _frame(y, height, x=x, width=width)
+        return {k: round(float(v), 4) for k, v in zip(("x", "y", "width", "height"), (x, y, width, height))}
+
+    def _html_width(self, width, label, quantity, font_size, short=0.0):
+        """The width one line may take where the exporter draws an item as HTML (lists, figure keys).
+
+        The HTML renderer breaks a line 2 pt before the Helvetica width this engine measures, and draws an
+        item's label and quantity in bold. The design page keeps the estimate it always had (the committed
+        baselines depend on it). A stretched page gets the real need: there a line that only just fits is a
+        row too low for its text, and the export of the whole publication is refused (measured on A4: an item
+        0.9 pt short of its column)."""
+        if self.geometry.identity:
+            return width
+        bold = 0.0
+        if label:
+            bold += max(0.0, _bold_text_width(label, font_size) - text_width(label, font_size))
+        if quantity > 1:
+            bold += _bold_text_width(f" ({quantity}X)", font_size)
+        return width - short - 2.5 - bold
 
     def _new_page(self, section: Mapping[str, Any], *, continuation: bool = False) -> None:
         section_id = str(section.get("sectionId") or "section")
@@ -171,7 +214,7 @@ class FlowLayoutEngine:
             "evidenceClaimIds": [],
         }
         self._pages.append(self._page)
-        self._cursor_y = PAGE_CONTENT_TOP_PT
+        self._cursor_y = self.content_top
         self._section_title = title
         if continuation:
             self._append_block(
@@ -182,7 +225,7 @@ class FlowLayoutEngine:
                     "text": f"{title} (continued)",
                     "lines": [f"{title} (continued)"],
                     "style": self._style_dict(HEADING_2_STYLE),
-                    "frame": _frame(self._cursor_y, 25),
+                    "frame": self._frame(self._cursor_y, 25),
                     "evidenceClaimIds": [],
                 },
                 height=31,
@@ -199,7 +242,7 @@ class FlowLayoutEngine:
 
     @property
     def _remaining(self) -> float:
-        return PAGE_CONTENT_BOTTOM_PT - self._cursor_y
+        return self.content_bottom - self._cursor_y
 
     def _ensure(self, section: Mapping[str, Any], required: float) -> None:
         if self._page is None:
@@ -242,7 +285,7 @@ class FlowLayoutEngine:
         level = int((block.get("payload") or {}).get("level") or 1)
         style = HEADING_1_STYLE if level == 1 else HEADING_2_STYLE
         text = str((block.get("payload") or {}).get("text") or section.get("title") or "")
-        lines = wrap_text(text, PAGE_CONTENT_WIDTH_PT, style.font_size)
+        lines = wrap_text(text, self.content_width, style.font_size)
         height = max(style.line_height, len(lines) * style.line_height)
         # Keep the heading with the first meaningful unit that follows.
         self._ensure(
@@ -256,7 +299,7 @@ class FlowLayoutEngine:
                 "text": text,
                 "lines": lines,
                 "style": self._style_dict(style),
-                "frame": _frame(self._cursor_y, height),
+                "frame": self._frame(self._cursor_y, height),
                 "evidenceClaimIds": list(block.get("evidenceClaimIds") or []),
                 **({"evidenceBindingVersion": 1} if block.get("evidenceBindingVersion") == 1 else {}),
             },
@@ -267,7 +310,7 @@ class FlowLayoutEngine:
     def _place_paragraph(self, section: Mapping[str, Any], block: Mapping[str, Any]) -> None:
         payload = block.get("payload") or {}
         text = str(payload.get("text") or "")
-        lines = wrap_text(text, PAGE_CONTENT_WIDTH_PT, BODY_STYLE.font_size)
+        lines = wrap_text(text, self.content_width, BODY_STYLE.font_size)
         line_index = 0
         fragment_index = 1
         while line_index < len(lines):
@@ -290,7 +333,7 @@ class FlowLayoutEngine:
                     "text": " ".join(fragment),
                     "lines": fragment,
                     "style": self._style_dict(BODY_STYLE),
-                    "frame": _frame(self._cursor_y, height),
+                    "frame": self._frame(self._cursor_y, height),
                     "evidenceClaimIds": list(block.get("evidenceClaimIds") or []),
                 **({"evidenceBindingVersion": 1} if block.get("evidenceBindingVersion") == 1 else {}),
                 },
@@ -305,7 +348,7 @@ class FlowLayoutEngine:
         text = str(payload.get("text") or "")
         signal_word = str(payload.get("signalWord") or "").upper()
         display_text = f"{signal_word} {text}".strip()
-        lines = wrap_text(display_text, PAGE_CONTENT_WIDTH_PT - 78, BODY_STYLE.font_size)
+        lines = wrap_text(display_text, self.content_width - 78, BODY_STYLE.font_size)
         height = max(58.0, (len(lines) * BODY_STYLE.line_height) + 16)
         self._ensure(section, height)
         self._append_block(
@@ -317,7 +360,7 @@ class FlowLayoutEngine:
                 "tone": str(payload.get("tone") or "information"),
                 "signalWord": signal_word,
                 "style": self._style_dict(BODY_STYLE),
-                "frame": _frame(self._cursor_y, height),
+                "frame": self._frame(self._cursor_y, height),
                 "evidenceClaimIds": list(block.get("evidenceClaimIds") or []),
                 **({"evidenceBindingVersion": 1} if block.get("evidenceBindingVersion") == 1 else {}),
             },
@@ -339,9 +382,9 @@ class FlowLayoutEngine:
         columns = max(1, min(2, int(payload.get("columns") or 1)))
         font_size = 7.8 if block_type == "figure_legend" else 9.4
         line_height = 10.5 if block_type == "figure_legend" else 13.2
-        column_gap = 22.0 if columns == 2 else 0.0
+        column_gap = self.geometry.w(22.0) if columns == 2 else 0.0
         column_width = (
-            PAGE_CONTENT_WIDTH_PT - ((columns - 1) * column_gap)
+            self.content_width - ((columns - 1) * column_gap)
         ) / columns
         marker_width = 27.0 if list_style in {"numbered", "keyed"} else 8.0
         prepared: list[Dict[str, Any]] = []
@@ -350,7 +393,11 @@ class FlowLayoutEngine:
             text = str(source.get("text") or source.get("description") or "").strip()
             quantity = max(1, int(source.get("quantity") or 1))
             display = f"{label}: {text}" if label and text else (label or text)
-            lines = wrap_text(display, max(60.0, column_width - marker_width), font_size)
+            lines = wrap_text(
+                display,
+                max(60.0, self._html_width(column_width - marker_width, label, quantity, font_size)),
+                font_size,
+            )
             prepared.append(
                 {
                     **source,
@@ -407,7 +454,7 @@ class FlowLayoutEngine:
                     "items": chunk,
                     "rowHeights": [round(value, 3) for value in row_heights],
                     "continued": fragment > 1,
-                    "frame": _frame(self._cursor_y, height),
+                    "frame": self._frame(self._cursor_y, height),
                     "evidenceClaimIds": list(block.get("evidenceClaimIds") or []),
                 **({"evidenceBindingVersion": 1} if block.get("evidenceBindingVersion") == 1 else {}),
                 },
@@ -419,9 +466,9 @@ class FlowLayoutEngine:
 
     def _place_figure(self, section: Mapping[str, Any], block: Mapping[str, Any]) -> None:
         payload = block.get("payload") or {}
-        requested = float(payload.get("height") or 300)
+        requested = self.geometry.h(float(payload.get("height") or 300))
         # Leave room for the automatic continuation heading on a figure-only page.
-        maximum_height = PAGE_CONTENT_HEIGHT_PT - 44.0
+        maximum_height = self.content_height - 44.0
         height = min(maximum_height, max(180.0, requested))
         self._ensure(section, height + 4)
         self._append_block(
@@ -430,7 +477,7 @@ class FlowLayoutEngine:
                 "blockType": "cad_figure",
                 "figureId": str(payload.get("figureId") or ""),
                 "caption": str(payload.get("caption") or ""),
-                "frame": _frame(self._cursor_y, height),
+                "frame": self._frame(self._cursor_y, height),
                 "evidenceClaimIds": list(block.get("evidenceClaimIds") or []),
                 **({"evidenceBindingVersion": 1} if block.get("evidenceBindingVersion") == 1 else {}),
             },
@@ -446,14 +493,14 @@ class FlowLayoutEngine:
     ) -> None:
         figure_payload = figure_block.get("payload") or {}
         legend_payload = legend_block.get("payload") or {}
-        maximum_height = PAGE_CONTENT_HEIGHT_PT - 44.0
+        maximum_height = self.content_height - 44.0
         requested_height = min(
             maximum_height,
-            max(220.0, float(figure_payload.get("height") or 320.0)),
+            max(220.0, self.geometry.h(float(figure_payload.get("height") or 320.0))),
         )
-        gap = 20.0
-        figure_width = round(PAGE_CONTENT_WIDTH_PT * 0.625, 3)
-        legend_width = PAGE_CONTENT_WIDTH_PT - figure_width - gap
+        gap = self.geometry.w(20.0)
+        figure_width = round(self.content_width * 0.625, 3 if self.geometry.identity else 4)
+        legend_width = self.content_width - figure_width - gap
         source_items = [
             row for row in legend_payload.get("items") or [] if isinstance(row, Mapping)
         ]
@@ -469,7 +516,12 @@ class FlowLayoutEngine:
             text = str(source.get("text") or source.get("description") or "").strip()
             quantity = max(1, int(source.get("quantity") or 1))
             display = f"{label}: {text}" if label and text else (label or text)
-            lines = wrap_text(display, max(54.0, column_width - marker_width), font_size)
+            # The exporter draws a keyed item 27 pt in; this estimate has always taken 23.
+            lines = wrap_text(
+                display,
+                max(54.0, self._html_width(column_width - marker_width, label, quantity, font_size, short=4.0)),
+                font_size,
+            )
             prepared.append(
                 {
                     **copy.deepcopy(dict(source)),
@@ -500,7 +552,7 @@ class FlowLayoutEngine:
             "blockType": "cad_figure",
             "figureId": str(figure_payload.get("figureId") or ""),
             "caption": str(figure_payload.get("caption") or ""),
-            "frame": _frame(y, pair_height, width=figure_width),
+            "frame": self._frame(y, pair_height, width=figure_width),
             "evidenceClaimIds": list(figure_block.get("evidenceClaimIds") or []),
             **({"evidenceBindingVersion": 1} if figure_block.get("evidenceBindingVersion") == 1 else {}),
         }
@@ -516,10 +568,10 @@ class FlowLayoutEngine:
             "items": prepared,
             "rowHeights": [round(value, 3) for value in row_heights],
             "continued": False,
-            "frame": _frame(
+            "frame": self._frame(
                 y,
                 pair_height,
-                x=PAGE_MARGIN_X_PT + figure_width + gap,
+                x=self.content_left + figure_width + gap,
                 width=legend_width,
             ),
             "evidenceClaimIds": list(legend_block.get("evidenceClaimIds") or []),
@@ -542,12 +594,12 @@ class FlowLayoutEngine:
             if isinstance(row, Mapping)
         ]
         column_count = max(1, len(columns))
-        cell_width = (PAGE_CONTENT_WIDTH_PT / column_count) - 14.0
+        cell_width = (self.content_width / column_count) - 14.0
         maximum_fragment_lines = max(
             1,
             int(
                 (
-                    PAGE_CONTENT_HEIGHT_PT
+                    self.content_height
                     - 40.0  # Continuation heading and gap on split tables.
                     - TABLE_HEADER_HEIGHT_PT
                     - TABLE_CELL_VERTICAL_PADDING_PT
@@ -590,7 +642,7 @@ class FlowLayoutEngine:
         if (
             keep_together
             and rows
-            and complete_height <= PAGE_CONTENT_HEIGHT_PT - 40.0
+            and complete_height <= self.content_height - 40.0
             and self._page is not None
             and complete_height > self._remaining
         ):
@@ -628,7 +680,7 @@ class FlowLayoutEngine:
                     "rows": chunk,
                     "rowHeights": [round(value, 3) for value in row_heights],
                     "continued": fragment > 1,
-                    "frame": _frame(self._cursor_y, height),
+                    "frame": self._frame(self._cursor_y, height),
                     "evidenceClaimIds": list(block.get("evidenceClaimIds") or []),
                 **({"evidenceBindingVersion": 1} if block.get("evidenceBindingVersion") == 1 else {}),
                 },
@@ -683,7 +735,7 @@ class FlowLayoutEngine:
                 ):
                     row_height = float(donor_heights.pop() if donor_heights else TABLE_MIN_ROW_HEIGHT_PT)
                     row = donor_rows.pop()
-                    if float(target["frame"]["y"]) + float(target["frame"]["height"]) + row_height > PAGE_CONTENT_BOTTOM_PT:
+                    if float(target["frame"]["y"]) + float(target["frame"]["height"]) + row_height > self.content_bottom:
                         donor_rows.append(row)
                         donor_heights.append(row_height)
                         break
@@ -709,7 +761,7 @@ class FlowLayoutEngine:
                 + 10.0
                 + float(target["frame"]["height"])
             )
-            if shifted_bottom > PAGE_CONTENT_BOTTOM_PT:
+            if shifted_bottom > self.content_bottom:
                 continue
             del donor_items[-moved_count:]
             donor_heights.pop()
@@ -722,7 +774,7 @@ class FlowLayoutEngine:
             fragment["items"] = moved_items
             fragment["rowHeights"] = [round(moved_height, 3)]
             fragment["continued"] = True
-            fragment["frame"] = _frame(
+            fragment["frame"] = self._frame(
                 float(target["frame"]["y"]),
                 moved_height,
             )
@@ -780,13 +832,16 @@ class FlowLayoutEngine:
         return copy.deepcopy(self._pages)
 
 
-def assert_pages_within_bounds(pages: Iterable[Mapping[str, Any]]) -> None:
+def assert_pages_within_bounds(pages: Iterable[Mapping[str, Any]], geometry=None) -> None:
+    top_bound = geometry.y(PAGE_CONTENT_TOP_PT) if geometry is not None else PAGE_CONTENT_TOP_PT
+    bottom_bound = geometry.y(PAGE_CONTENT_BOTTOM_PT) if geometry is not None else PAGE_CONTENT_BOTTOM_PT
+    tolerance = 1e-6 if geometry is None or geometry.identity else 1e-4
     for page in pages:
         for block in page.get("layoutBlocks") or []:
             frame = block.get("frame") or {}
             top = float(frame.get("y") or 0)
             bottom = top + float(frame.get("height") or 0)
-            if top < PAGE_CONTENT_TOP_PT - 1e-6 or bottom > PAGE_CONTENT_BOTTOM_PT + 1e-6:
+            if top < top_bound - tolerance or bottom > bottom_bound + tolerance:
                 raise ValueError(
                     f"{page.get('pageId')} block {block.get('blockId')} exceeds the content bounds"
                 )

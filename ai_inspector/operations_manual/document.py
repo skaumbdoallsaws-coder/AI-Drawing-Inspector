@@ -1018,8 +1018,8 @@ def _draft_sections(snapshot: Mapping[str, Any]) -> list[Dict[str, Any]]:
     ]
 
 
-def _front_matter_pages(product_name: str, document_number: str, findings: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
-    layout = publication_layout()
+def _front_matter_pages(product_name: str, document_number: str, findings: list[Dict[str, Any]], geometry=None) -> list[Dict[str, Any]]:
+    layout = publication_layout(geometry)
     page_types = layout["pageTypes"]
     cover_layout = page_types["operations_cover"]
     control_layout = page_types["operations_document_control"]
@@ -1184,6 +1184,8 @@ def build_operations_manual_document(
     documentation_scene: Optional[Mapping[str, Any]] = None,
     documentation_scene_revision: Optional[str] = None,
 ) -> Dict[str, Any]:
+    from ai_inspector.documentation.layout import geometry
+    page_geometry = geometry("operations_and_maintenance_manual", (documentation_scene or {}).get("pageSetup"))
     repository = OperationsManualEvidenceRepository(evidence_root)
     snapshot = repository.snapshot()
     assembly_number = str(catalog.get("assemblyNumber") or "")
@@ -1314,10 +1316,12 @@ def build_operations_manual_document(
         figure_legends=figure_legends,
         overview_systems=figure_legends.get("OM-FIG-001", []),
     )
-    flow_pages = FlowLayoutEngine(start_page_number=4).layout(sections)
-    assert_pages_within_bounds(flow_pages)
-    assert_no_orphan_continuation_pages(flow_pages)
-    pages = _front_matter_pages(product_name, document_number, findings) + flow_pages
+    flow_pages = FlowLayoutEngine(start_page_number=4, geometry=page_geometry).layout(sections)
+    assert_pages_within_bounds(flow_pages, page_geometry)
+    # Short continuation pages are acceptable on stretched paper; keep the design-page orphan rule.
+    if page_geometry.identity:
+        assert_no_orphan_continuation_pages(flow_pages)
+    pages = _front_matter_pages(product_name, document_number, findings, page_geometry) + flow_pages
     for figure_page in pages:
         figure_block = next(
             (
@@ -1404,7 +1408,7 @@ def build_operations_manual_document(
             for section in sections
         ],
     ]
-    contents_layout = publication_layout()["pageTypes"]["operations_contents"]
+    contents_layout = publication_layout(page_geometry)["pageTypes"]["operations_contents"]
     pages[2]["entries"] = contents
     pages[2]["layoutBlocks"] = [
         {
@@ -1475,7 +1479,7 @@ def build_operations_manual_document(
         },
         "theme": theme,
         "pageMasters": page_masters,
-        "publicationLayout": publication_layout(),
+        "publicationLayout": publication_layout(page_geometry),
         "safetySymbolPolicy": safety_symbol_policy,
         "pageCount": len(pages),
         "pages": pages,
@@ -1499,6 +1503,11 @@ def build_operations_manual_document(
     }
     from ai_inspector.documentation.identity import bind_document, sync_identity_overrides
 
+    if "pageSetup" in (documentation_scene or {}):
+        document["pageSetup"] = copy.deepcopy(documentation_scene["pageSetup"])
+        for page in pages:
+            if not page_geometry.identity and isinstance(page.get("renderRequest"), dict):
+                page["renderRequest"]["pageSize"] = [page_geometry.page["width"], page_geometry.page["height"]]
     document, documentation_scene = bind_document(document, documentation_scene)
     _apply_scene(document["pages"], documentation_scene)
     sync_identity_overrides(document)

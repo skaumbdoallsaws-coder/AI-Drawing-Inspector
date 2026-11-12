@@ -837,7 +837,9 @@ def build_manual_document(
         )
     pages.sort(key=lambda row: int(row["pageNumber"]))
 
-    layout_contract = publication_layout()
+    from ai_inspector.documentation.layout import geometry
+    page_geometry = geometry("illustrated_parts_manual", (documentation_scene or {}).get("pageSetup"))
+    layout_contract = publication_layout(page_geometry)
     for page in pages:
         render_request = page.get("renderRequest")
         if not isinstance(render_request, dict):
@@ -894,6 +896,11 @@ def build_manual_document(
         for field, column in PART_TEXT_FIELDS.items()}
     from ai_inspector.documentation.identity import bind_document, sync_identity_overrides
 
+    if "pageSetup" in (documentation_scene or {}):
+        document["pageSetup"] = copy.deepcopy(documentation_scene["pageSetup"])
+        for page in pages:
+            if not page_geometry.identity and isinstance(page.get("renderRequest"), dict):
+                page["renderRequest"]["pageSize"] = [page_geometry.page["width"], page_geometry.page["height"]]
     document, documentation_scene = bind_document(document, documentation_scene)
     _apply_scene(document, documentation_scene)
     sync_identity_overrides(document)

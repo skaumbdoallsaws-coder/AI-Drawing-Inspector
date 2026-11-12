@@ -249,6 +249,9 @@ def _publication_page_geometry(
 def _draw_header_footer(fitz: Any, page: Any, descriptor: Mapping[str, Any], document: Mapping[str, Any]) -> None:
     if descriptor.get("pageType") == "operations_cover":
         return
+    from ai_inspector.documentation.layout import document_geometry
+    geometry = document_geometry(document)
+    from ai_inspector.documentation import fit
     navy = (0.027, 0.106, 0.165)
     accent = (0.263, 0.710, 0.933)
     muted = (0.35, 0.42, 0.47)
@@ -278,13 +281,15 @@ def _draw_header_footer(fitz: Any, page: Any, descriptor: Mapping[str, Any], doc
         color=None,
         fill=accent,
     )
-    brand_x = header_rect.x0 + 40
-    brand_baseline = header_rect.y0 + min(35, header_rect.height - 14)
+    brand_x = header_rect.x0 + geometry.x(40)
+    brand_baseline = header_rect.y0 + min(geometry.y(35), header_rect.height - 14)
+    fit.target(page, descriptor, "header_brand")
     page.insert_text(fitz.Point(brand_x, brand_baseline), "Inspector", fontsize=13, fontname="hebo", color=(1, 1, 1))
     inspector_width = fitz.get_text_length("Inspector", fontname="hebo", fontsize=13)
     page.insert_text(fitz.Point(brand_x + inspector_width, brand_baseline), "Pro", fontsize=13, fontname="hebo", color=accent)
+    fit.target(page, descriptor, "header_title")
     page.insert_textbox(
-        fitz.Rect(page_width * 0.43, header_rect.y0 + 16, header_rect.x1 - 40, header_rect.y1 - 9),
+        fitz.Rect((page_width * 0.43 if geometry.identity else geometry.x(960 * 0.43)), header_rect.y0 + geometry.y(16), header_rect.x1 - geometry.x(40), header_rect.y1 - 9),
         str(descriptor.get("title") or "Operations and Maintenance Manual"),
         fontsize=9.2,
         fontname="hebo",
@@ -303,15 +308,17 @@ def _draw_header_footer(fitz: Any, page: Any, descriptor: Mapping[str, Any], doc
         f"{document.get('documentNumber') or 'Document number not specified'} | "
         f"{status_label}"
     )
+    fit.target(page, descriptor, "footer")
     page.insert_textbox(
-        fitz.Rect(footer_rect.x0, footer_rect.y0 + 4, footer_rect.x1 - 130, footer_rect.y1),
+        fitz.Rect(footer_rect.x0, footer_rect.y0 + 4, footer_rect.x1 - geometry.x(130), footer_rect.y1),
         left,
         fontsize=6.2,
         fontname="helv",
         color=muted,
     )
+    fit.target(page, descriptor, "footer_page_number")
     page.insert_textbox(
-        fitz.Rect(footer_rect.x1 - 120, footer_rect.y0 + 4, footer_rect.x1, footer_rect.y1),
+        fitz.Rect(footer_rect.x1 - geometry.x(120), footer_rect.y0 + 4, footer_rect.x1, footer_rect.y1),
         f"Page {descriptor.get('pageNumber')} of {document.get('pageCount')}",
         fontsize=6.2,
         fontname="helv",
@@ -343,6 +350,11 @@ def _draw_table(fitz: Any, page: Any, block: Mapping[str, Any], rect: Any) -> No
     if len(row_heights) != len(rows):
         row_height = max(20.0, (rect.height - header_height) / max(1, len(rows)))
         row_heights = [row_height] * len(rows)
+    from ai_inspector.documentation import fit
+    if header_height + sum(row_heights) > rect.height + .01:
+        fit.failure(page, measuredHeight=header_height + sum(row_heights))
+    if column_width < 12:
+        fit.failure(page, "column_too_narrow")
     rule = (0.48, 0.54, 0.58)
     light = (0.77, 0.81, 0.84)
     page.draw_rect(rect, color=rule, fill=(1, 1, 1), width=0.6)
@@ -394,6 +406,9 @@ def _insert_htmlbox_checked(
     css: str,
     context: str,
 ) -> tuple[float, float]:
+    from ai_inspector.documentation import fit
+    if (rect.width <= 0 or rect.height <= 0) and fit.failure(page, frame=list(rect)):
+        return -1.0, 1.0
     result = page.insert_htmlbox(
         rect,
         body,
@@ -406,6 +421,9 @@ def _insert_htmlbox_checked(
         )
     spare_height, scale = float(result[0]), float(result[1])
     if spare_height < -1e-6 or scale < 0.999999:
+        from ai_inspector.documentation import fit
+        if fit.failure(page, frame=list(rect)):
+            return spare_height, scale
         raise OperationsManualExportError(
             f"{context} does not fit its reserved publication frame"
         )
@@ -488,6 +506,12 @@ def _draw_list(fitz: Any, page: Any, block: Mapping[str, Any], rect: Any) -> Non
     y = rect.y0
     item_index = 0
     rows = (len(items) + columns - 1) // columns
+    from ai_inspector.documentation import fit
+    measured_height = sum(row_heights[i] if i < len(row_heights) else 24.0 for i in range(rows))
+    if measured_height > rect.height + .01:
+        fit.failure(page, measuredHeight=measured_height)
+    if column_width < 12:
+        fit.failure(page, "column_too_narrow")
     for row_index in range(rows):
         row_height = row_heights[row_index] if row_index < len(row_heights) else 24.0
         for column in range(columns):
@@ -560,6 +584,9 @@ def _draw_contents(fitz: Any, page: Any, block: Mapping[str, Any], rect: Any) ->
     muted = (0.55, 0.58, 0.60)
     entries = [row for row in block.get("entries") or [] if isinstance(row, Mapping)]
     row_height = min(24.0, max(18.0, rect.height / max(1, len(entries))))
+    if entries and (len(entries) - 1) * row_height + 11 > rect.height:
+        from ai_inspector.documentation import fit
+        fit.failure(page, measuredHeight=(len(entries) - 1) * row_height + 11)
     for entry in entries:
         if not isinstance(entry, Mapping):
             continue
@@ -612,6 +639,8 @@ def _draw_block(
     else:
         frame = _block_frame(descriptor, block, document)
     rect = fitz.Rect(frame["x"], frame["y"], frame["x"] + frame["width"], frame["y"] + frame["height"])
+    from ai_inspector.documentation import fit
+    fit.target(page, descriptor, block.get("stableId") or block.get("blockId"), rect)
     block = _edited_block(descriptor, block)
     block_type = str(block.get("blockType") or "")
     text = _block_text(descriptor, block)
@@ -638,11 +667,12 @@ def _draw_block(
         request = descriptor.get("renderRequest") or {}
         image = request.get("image") or {}
         image_rect = fitz.Rect(rect.x0, rect.y0, rect.x1, rect.y1 - 18)
-        image_path = document_draft_render_path(root, assembly_number, document, descriptor)
-        fitted = _fit_image_rect(fitz, image_rect, image_path)
-        page.draw_rect(image_rect, color=(0.76, 0.81, 0.84), fill=(1, 1, 1), width=0.55)
-        page.insert_image(fitted, filename=str(image_path), keep_proportion=True)
-        draw_balloon_manifest(fitz, page, fitted, image)
+        if not fit.collecting():
+            image_path = document_draft_render_path(root, assembly_number, document, descriptor)
+            fitted = _fit_image_rect(fitz, image_rect, image_path)
+            page.draw_rect(image_rect, color=(0.76, 0.81, 0.84), fill=(1, 1, 1), width=0.55)
+            page.insert_image(fitted, filename=str(image_path), keep_proportion=True)
+            draw_balloon_manifest(fitz, page, fitted, image)
         if rich_plan is not None:
             from ai_inspector.documentation.rich_layout import draw_pdf_object
             draw_pdf_object(fitz, page, rich_plan)
@@ -669,6 +699,9 @@ def _draw_block(
             and not override_has_text
             else wrap_text(text, rect.width, font_size)
         )
+        measured_height = font_size + max(0, len(lines) - 1) * line_height
+        if measured_height > rect.height + 0.5:
+            fit.failure(page, measuredHeight=measured_height)
         for index, line in enumerate(lines):
             baseline = rect.y0 + font_size + (index * line_height)
             if baseline > rect.y1 + 0.5:
@@ -682,15 +715,28 @@ def _draw_block(
             )
 
 
+def fit_report(root, assembly_number, document, asset_root=None):
+    from ai_inspector.documentation import fit
+    with fit.collect(document) as report:
+        fit.authored_bounds(document)
+        build_prototype_pdf_bytes(root, assembly_number, document, asset_root, _fit_check=True)
+        return report.report()
+
+
 def build_prototype_pdf_bytes(
     root: str | Path,
     assembly_number: str,
     document: Mapping[str, Any],
     asset_root: str | Path | None = None,
+    *, _fit_check: bool = False,
 ) -> bytes:
+    from ai_inspector.documentation import fit
+    from ai_inspector.documentation.layout import document_geometry
     document = export_document(document)
-    check_export(document, document.get("exportMode", "review"))
-    readiness = prototype_export_readiness(document)
+    geometry = document_geometry(document)
+    if not _fit_check:
+        check_export(document, document.get("exportMode", "review"))
+    readiness = prototype_export_readiness(document) if not _fit_check else {"status": "READY"}
     if readiness["status"] != "READY":
         raise OperationsManualExportError(
             f"capture {readiness['requiredCaptureCount']} technical figure(s) before manual export"
@@ -705,7 +751,7 @@ def build_prototype_pdf_bytes(
     block_plans = prepare_pdf_blocks(fitz, document)
     pdf = fitz.open()
     for descriptor in pages:
-        page = pdf.new_page(width=page_width, height=page_height)
+        page = fit.measured_page(pdf.new_page(width=page_width, height=page_height), descriptor)
         if descriptor.get("pageType") == "operations_cover":
             theme_colors = (document.get("theme") or {}).get("colors") or {}
             navy = _rgb(theme_colors.get("primary"), "#071B2A")
@@ -723,29 +769,33 @@ def build_prototype_pdf_bytes(
                     color=None,
                     fill=fill,
                 )
-            page.insert_text(fitz.Point(40, 59), "Inspector", fontsize=17, fontname="hebo", color=navy)
+            fit.target(page, descriptor, "cover_brand")
+            page.insert_text(fitz.Point(geometry.x(40), geometry.y(59)), "Inspector", fontsize=17, fontname="hebo", color=navy)
             inspector_width = fitz.get_text_length("Inspector", fontname="hebo", fontsize=17)
-            page.insert_text(fitz.Point(40 + inspector_width, 59), "Pro", fontsize=17, fontname="hebo", color=accent)
+            page.insert_text(fitz.Point(geometry.x(40) + inspector_width, geometry.y(59)), "Pro", fontsize=17, fontname="hebo", color=accent)
+            fit.target(page, descriptor, "cover_publication_label")
             page.insert_text(
-                fitz.Point(185, 57),
+                fitz.Point(geometry.x(185), geometry.y(57)),
                 "TECHNICAL PUBLICATIONS",
                 fontsize=7.2,
                 fontname="helv",
                 color=muted,
             )
-            image_path = document_draft_render_path(root, assembly_number, document, descriptor)
-            image_frame = (descriptor.get("renderRequest") or {}).get("frame") \
-                or cover_layout.get("illustration") \
-                or {"x": 150, "y": 184, "width": 660, "height": 294}
-            image_bounds = fitz.Rect(
-                float(image_frame.get("x") or 150),
-                float(image_frame.get("y") or 184),
-                float(image_frame.get("x") or 150) + float(image_frame.get("width") or 660),
-                float(image_frame.get("y") or 184) + float(image_frame.get("height") or 294),
-            )
-            page.insert_image(_fit_image_rect(fitz, image_bounds, image_path), filename=str(image_path), keep_proportion=True)
+            if not _fit_check:
+                image_path = document_draft_render_path(root, assembly_number, document, descriptor)
+                image_frame = (descriptor.get("renderRequest") or {}).get("frame") \
+                    or cover_layout.get("illustration") \
+                    or {"x": 150, "y": 184, "width": 660, "height": 294}
+                image_bounds = fitz.Rect(
+                    float(image_frame.get("x") or 150),
+                    float(image_frame.get("y") or 184),
+                    float(image_frame.get("x") or 150) + float(image_frame.get("width") or 660),
+                    float(image_frame.get("y") or 184) + float(image_frame.get("height") or 294),
+                )
+                page.insert_image(_fit_image_rect(fitz, image_bounds, image_path), filename=str(image_path), keep_proportion=True)
             product_name = str((document.get("product") or {}).get("name") or "Product")
             document_number = str(document.get("documentNumber") or "Document number not specified")
+            fit.target(page, descriptor, "cover_footer_product")
             page.insert_textbox(
                 _layout_rect(fitz, cover_layout, "footerLeft"),
                 product_name,
@@ -753,6 +803,7 @@ def build_prototype_pdf_bytes(
                 fontname="helv",
                 color=(1, 1, 1),
             )
+            fit.target(page, descriptor, "cover_footer_identity")
             page.insert_textbox(
                 _layout_rect(fitz, cover_layout, "footerRight"),
                 f"{document_number} | {document.get('statusLabel') or 'DRAFT'}",
@@ -769,6 +820,9 @@ def build_prototype_pdf_bytes(
                             block_plans.get(descriptor["pageId"], {}).get(block.get("blockId")))
         draw_pdf_objects(fitz, page, descriptor, text_plans, document=document,
                          asset_root=asset_root or root, assembly_number=assembly_number)
+    if _fit_check:
+        pdf.close()
+        return b""
     toc = [[1, str(document.get("title") or "Operations and Maintenance Manual"), 1]]
     seen_sections: set[str] = set()
     for descriptor in pages:

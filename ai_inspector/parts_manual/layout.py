@@ -76,9 +76,10 @@ _PUBLICATION_LAYOUT: Dict[str, Any] = {
 }
 
 
-def publication_layout() -> Dict[str, Any]:
+def publication_layout(geometry=None) -> Dict[str, Any]:
     """Return an isolated copy suitable for API/document serialization."""
-    return copy.deepcopy(_PUBLICATION_LAYOUT)
+    result = copy.deepcopy(_PUBLICATION_LAYOUT)
+    return geometry.layout(result) if geometry is not None else result
 
 
 def page_layout(

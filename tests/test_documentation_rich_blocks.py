@@ -331,12 +331,12 @@ def test_scene_v5_backup_and_future_refusal(narrative):
     old["schemaVersion"] = 5
     raw = (json.dumps(old, indent=2) + "\n").encode("utf-8")
     narrative.path.write_bytes(raw)
-    assert narrative.load()["scene"]["schemaVersion"] == 7
+    assert narrative.load()["scene"]["schemaVersion"] == 8
     assert narrative.path.read_bytes() == raw
     narrative.generated()
     assert narrative.path.with_name("documentation-scene.v5.json").read_bytes() == raw
     future = json.loads(narrative.path.read_bytes())
-    future["schemaVersion"] = 8
+    future["schemaVersion"] = 9
     raw = json.dumps(future).encode("utf-8")
     narrative.path.write_bytes(raw)
     # A read refuses an unknown schema as every earlier scene version did (supervisor P3a-3).

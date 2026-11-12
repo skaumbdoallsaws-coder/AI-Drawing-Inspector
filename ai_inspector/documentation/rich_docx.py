@@ -298,8 +298,9 @@ def _write_table(output, model, target, container, width, numbering):
     from .tables import column_widths
     columns = column_widths(width, [c["width"] for c in model.columns])
     if any(w < 12 for w in columns):
-        raise DocumentEditError("layout_overflow", "Table columns must be at least twelve points wide.",
-            targets=[{**target, "reasons": ["table_column_too_narrow"]}])
+        from .fit import overflow
+        overflow([{**target, "reasons": ["table_column_too_narrow"]}],
+                 "Table columns must be at least twelve points wide.")
     twips = [round(w * 20) for w in columns[:-1]]
     twips.append(round((width - 1) * 20) - sum(twips))
     table = _element("w:tbl")

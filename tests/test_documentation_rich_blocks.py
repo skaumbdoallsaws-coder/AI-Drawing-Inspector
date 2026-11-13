@@ -301,7 +301,7 @@ def test_generated_overflow_names_target():
 
 
 @pytest.mark.parametrize("builder", ["operations", "wi"])
-def test_plain_generated_export_bytes_unchanged_since_p3a2(tmp_path, monkeypatch, builder):
+def test_plain_generated_export_kept_since_p3a2_except_p4b3_additions(tmp_path, monkeypatch, builder):
     import fitz
     from PIL import Image
     from ai_inspector.operations_manual import exports as ops
@@ -318,12 +318,24 @@ def test_plain_generated_export_bytes_unchanged_since_p3a2(tmp_path, monkeypatch
     monkeypatch.setattr(old, "document_draft_render_path", lambda *a: image)
     save = fitz.Document.tobytes
     monkeypatch.setattr(fitz.Document, "tobytes", lambda self, *a, **kw: save(self, *a, **{**kw, "no_new_id": True}))
-    assert ops.build_prototype_pdf_bytes(tmp_path, "PROOF", document) == old.build_prototype_pdf_bytes(tmp_path, "PROOF", document)
-    # ZIP timestamps are transport entropy; compare every native package member byte for byte.
+    from tests.documentation_fidelity_support import assert_docx_fidelity_delta, assert_pdf_fidelity_delta
+    from tests.test_documentation_rich_exports import docx_parts
+    # P4b-3 adds the header's identity line; every glyph, rule, image and link of de5e171 stays where it was.
+    assert_pdf_fidelity_delta(old.build_prototype_pdf_bytes(tmp_path, "PROOF", document),
+                              ops.build_prototype_pdf_bytes(tmp_path, "PROOF", document), document)
+    # ZIP timestamps are transport entropy; compare every native package member byte for byte, except the
+    # body's top margin in word/document.xml (the body now starts below the header band).
     def parts(payload):
         with zipfile.ZipFile(io.BytesIO(payload)) as package:
             return {name: package.read(name) for name in package.namelist()}
-    assert parts(ops.build_prototype_docx_bytes(tmp_path, "PROOF", document)) == parts(old.build_prototype_docx_bytes(tmp_path, "PROOF", document))
+    current_docx = ops.build_prototype_docx_bytes(tmp_path, "PROOF", document)
+    previous_docx = old.build_prototype_docx_bytes(tmp_path, "PROOF", document)
+    now, was = parts(current_docx), parts(previous_docx)
+    assert now.keys() == was.keys()
+    for name in now:
+        if name != "word/document.xml":
+            assert now[name] == was[name], name
+    assert_docx_fidelity_delta(docx_parts(previous_docx), docx_parts(current_docx), document)
 
 
 def test_scene_v5_backup_and_future_refusal(narrative):

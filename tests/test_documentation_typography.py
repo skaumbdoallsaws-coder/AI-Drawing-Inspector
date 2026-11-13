@@ -386,13 +386,18 @@ def _xml_bytes(payload):
         return {name: package.read(name) for name in package.namelist() if name.endswith((".xml", ".rels"))}
 
 
-def assert_pdf_schema1_delta(current, previous, new_plans, old_plans):
+def assert_pdf_schema1_delta(current, previous, new_plans, old_plans, publication=None):
     """Only the analytically derived y positions/decorations may differ."""
     with fitz.open(stream=current, filetype="pdf") as new, fitz.open(stream=previous, filetype="pdf") as old:
         assert len(new) == len(old)
-        for new_page, old_page, page_id in zip(new, old, new_plans):
+        for page_index, (new_page, old_page, page_id) in enumerate(zip(new, old, new_plans)):
             assert new_page.rect == old_page.rect
-            assert new_page.get_fonts() == old_page.get_fonts()
+            # Object numbers move when a page gains text; the fonts themselves stay. A page may gain only the
+            # built-in fonts of the P4b-3 additions (the header identity line, the restored headings).
+            new_fonts = [font[1:] for font in new_page.get_fonts()]
+            old_fonts = [font[1:] for font in old_page.get_fonts()]
+            assert [font for font in new_fonts if font in old_fonts] == old_fonts
+            assert all(font[3] in {"helv", "hebo"} for font in new_fonts if font not in old_fonts)
             pairs = []
             for target, new_plan in new_plans[page_id].items():
                 old_plan = old_plans[page_id][target]
@@ -417,6 +422,28 @@ def assert_pdf_schema1_delta(current, previous, new_plans, old_plans):
                         assert nr.baseline - run.baseline == pytest.approx(delta, abs=1e-8)
                         pairs.append((nr, run, delta))
             before, after = old_page.get_texttrace(), new_page.get_texttrace()
+            added_sequences = []
+            if publication is not None:
+                descriptor = publication["pages"][page_index]
+                addition = None
+                if publication["documentType"] in {"operations_and_maintenance_manual", "work_instructions"}:
+                    addition = (f"{publication.get('product', {}).get('name') or 'Product'} | "
+                                f"{publication.get('documentNumber') or 'Document number not specified'} | "
+                                f"{publication.get('statusLabel') or 'DRAFT'}")
+                elif publication["documentType"] == "illustrated_parts_manual" and descriptor["pageType"] == "table_of_contents":
+                    addition = "TABLE OF CONTENTS"
+                if addition:
+                    added = [span for span in after if "".join(chr(c[0]) for c in span["chars"]) == addition
+                             and span["bbox"][1] < 100]
+                    assert len(added) == 1, addition
+                    assert added[0]["size"] == pytest.approx(18 if descriptor["pageType"] == "table_of_contents" else 6.6)
+                    added_sequences = [span["seqno"] for span in added]
+                    after = [span for span in after if span not in added]
+            def unshift(item):
+                result = dict(item)
+                result["seqno"] -= sum(n < result["seqno"] for n in added_sequences)
+                return result
+            after = [unshift(span) for span in after]
             assert len(before) == len(after)
             for os_, ns in zip(before, after):
                 chars = os_["chars"]
@@ -431,7 +458,7 @@ def assert_pdf_schema1_delta(current, previous, new_plans, old_plans):
                     assert new_char[:2] == old_char[:2]
                     assert new_char[2] == pytest.approx((old_char[2][0], old_char[2][1] + delta), abs=.001)
                     assert new_char[3] == pytest.approx(tuple(v + (delta if i % 2 else 0) for i, v in enumerate(old_char[3])), abs=.001)
-            before, after = old_page.get_drawings(), new_page.get_drawings()
+            before, after = old_page.get_drawings(), [unshift(d) for d in new_page.get_drawings()]
             assert len(before) == len(after)
             for od, nd in zip(before, after):
                 item = od["items"][0]
@@ -453,7 +480,8 @@ def assert_pdf_schema1_delta(current, previous, new_plans, old_plans):
             before, after = old_page.get_links(), new_page.get_links()
             assert len(before) == len(after)
             for ol, nl in zip(before, after):
-                for key in ol.keys() - {"from"}:
+                # xref and id are object numbers: they move when a page gains text (P4b-3), the link does not.
+                for key in ol.keys() - {"from", "xref", "id"}:
                     assert nl[key] == ol[key]
                 pair = next(((n, o, d) for n, o, d in pairs if o.href == ol.get("uri") and not o.hanging
                              and abs(o.rect[0] - ol["from"].x0) < .01 and abs(o.rect[1] - ol["from"].y0) < .01), None)
@@ -484,8 +512,9 @@ def assert_schema1_callers(document, builder, tmp_path, monkeypatch, image_path=
         if current_docx:
             assert calls["docx"] > 0, "Oracle did not execute the P2b-2 DOCX writer"
     if current_docx:
-        assert _xml_bytes(current_docx) == _xml_bytes(previous_docx)
-    assert_pdf_schema1_delta(current_pdf, previous_pdf, current_plans, old_plans)
+        from tests.documentation_fidelity_support import assert_docx_fidelity_delta
+        assert_docx_fidelity_delta(proof.docx_parts(previous_docx), proof.docx_parts(current_docx), document)
+    assert_pdf_schema1_delta(current_pdf, previous_pdf, current_plans, old_plans, publication=document)
 
 
 _CHECKED_SCHEMA1 = set()
@@ -534,7 +563,12 @@ def assert_schema1_vector(value, style, frame, tmp_path, monkeypatch):
             assert calls["docx"] > 0
         if old_error is None:
             assert calls["pdf"] > 0
-    assert current_docx == old_docx
+    assert current_docx[1] == old_docx[1]
+    if current_docx[1] is None:
+        from lxml import etree
+        from tests.documentation_fidelity_support import assert_docx_fidelity_delta
+        parse = lambda parts: {name: etree.fromstring(value) for name, value in parts.items()}
+        assert_docx_fidelity_delta(parse(old_docx[0]), parse(current_docx[0]), document)
     assert current_error == old_error
     if current_error is None:
         assert_pdf_schema1_delta(current_pdf, previous_pdf, current_plans, old_plans)

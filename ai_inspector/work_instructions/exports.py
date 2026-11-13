@@ -29,7 +29,7 @@ class WorkInstructionExportError(RuntimeError):
 
 _SAFE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,180}$")
 _EXPORT_LOCK = threading.RLock()
-_DOCX_RENDERER_VERSION = "work-instructions-docx-rich-v3"
+_DOCX_RENDERER_VERSION = "work-instructions-docx-fidelity-v4"
 
 
 def _safe(value: Any, label: str) -> str:

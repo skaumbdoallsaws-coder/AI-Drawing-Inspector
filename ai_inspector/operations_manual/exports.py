@@ -18,6 +18,11 @@ from ai_inspector.parts_manual.pdf import draw_balloon_manifest
 
 from ai_inspector.documentation.conflict_exports import marker as conflict_marker, mark_pdf, mark_docx
 from ai_inspector.documentation.provenance import EDITED_MARKER, EDITED_LEGEND, check_export, export_document
+# Kept as aliases for callers; the compiler and exporter use this one vocabulary.
+from ai_inspector.documentation.safety import (
+    SAFETY_SYMBOL_STYLES as _SAFETY_SYMBOL_STYLES,
+    safety_symbol_semantics as _safety_symbol_semantics,
+)
 from .artifacts import document_draft_render_path
 from .flow import wrap_text
 
@@ -28,7 +33,7 @@ class OperationsManualExportError(RuntimeError):
 
 _SAFE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,180}$")
 _EXPORT_LOCK = threading.RLock()
-_DOCX_RENDERER_VERSION = "operations-docx-rich-v5"
+_DOCX_RENDERER_VERSION = "operations-docx-fidelity-v6"
 
 
 def _safe(value: Any, label: str) -> str:
@@ -287,6 +292,17 @@ def _draw_header_footer(fitz: Any, page: Any, descriptor: Mapping[str, Any], doc
     page.insert_text(fitz.Point(brand_x, brand_baseline), "Inspector", fontsize=13, fontname="hebo", color=(1, 1, 1))
     inspector_width = fitz.get_text_length("Inspector", fontname="hebo", fontsize=13)
     page.insert_text(fitz.Point(brand_x + inspector_width, brand_baseline), "Pro", fontsize=13, fontname="hebo", color=accent)
+    identity = (
+        f"{document.get('product', {}).get('name') or 'Product'} | "
+        f"{document.get('documentNumber') or 'Document number not specified'} | "
+        f"{document.get('statusLabel') or 'DRAFT'}"
+    )
+    fit.target(page, descriptor, "header_meta")
+    page.insert_textbox(
+        fitz.Rect(header_rect.x0 + 170, header_rect.y0 + 7, header_rect.x1 - 28, header_rect.y0 + 19),
+        identity, fontsize=6.6, fontname="helv", color=(135/255, 159/255, 172/255),
+        align=fitz.TEXT_ALIGN_RIGHT,
+    )
     fit.target(page, descriptor, "header_title")
     page.insert_textbox(
         fitz.Rect((page_width * 0.43 if geometry.identity else geometry.x(960 * 0.43)), header_rect.y0 + geometry.y(16), header_rect.x1 - geometry.x(40), header_rect.y1 - 9),
@@ -379,23 +395,6 @@ def _draw_table(fitz: Any, page: Any, block: Mapping[str, Any], rect: Any) -> No
     for index in range(1, len(columns)):
         x = rect.x0 + index * column_width
         page.draw_line(fitz.Point(x, rect.y0), fitz.Point(x, rect.y1), color=light, width=0.35)
-
-
-_SAFETY_SYMBOL_STYLES = {
-    "DANGER": {"kind": "safety_alert", "color": (0.78, 0.04, 0.09)},
-    "WARNING": {"kind": "safety_alert", "color": (0.93, 0.39, 0.05)},
-    "CAUTION": {"kind": "safety_alert", "color": (0.90, 0.67, 0.03)},
-    "NOTICE": {"kind": "notice_information", "color": (0.03, 0.43, 0.67)},
-}
-
-
-def _safety_symbol_semantics(signal_word: str) -> Dict[str, Any]:
-    return copy.deepcopy(
-        _SAFETY_SYMBOL_STYLES.get(
-            str(signal_word or "NOTICE").upper(),
-            _SAFETY_SYMBOL_STYLES["NOTICE"],
-        )
-    )
 
 
 def _insert_htmlbox_checked(
@@ -999,7 +998,15 @@ def _docx_configure_page_masters(
     }.get(document_type, "OPERATIONS AND MAINTENANCE MANUAL")
 
     section.different_first_page_header_footer = True
-    section.header_distance = Pt(12)
+    # The page-anchored band is independent of Word's flow; reserve it plus the body gap.
+    body_header = shared.get("header") or {"y": 0, "height": 56}
+    band_top = float(body_header.get("y") or 0)
+    band_height = float(body_header.get("height") or 56)
+    band_bottom = band_top + band_height
+    # Keep the 14 pt brand line above the 3 pt accent, with at most its existing 12 pt inset.
+    header_inset = min(12.0, max(0.0, (band_height - 3.0 - 14.0) / 2.0))
+    section.header_distance = Pt(band_top + header_inset)
+    section.top_margin = Pt(band_bottom + 12)
     section.footer_distance = Pt(16)
 
     header = section.header
@@ -1444,6 +1451,7 @@ def _store_export(
         "status": "ready",
         "artifactClass": "draft_review",
         "provenanceVersion": 1,
+        "publicationFidelityVersion": 1,
         "controlledRelease": False,
         "finalApprovalRequired": True,
         "mimeType": "application/pdf" if kind == "pdf" else "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -1502,6 +1510,7 @@ def _cached_export(
     expected = {
         "status": "ready",
         "provenanceVersion": 1,
+        "publicationFidelityVersion": 1,
         "documentRevision": revision,
         "sourceRevision": str(document.get("sourceRevision") or ""),
         "manualPlanRevision": str(document.get("manualPlanRevision") or ""),

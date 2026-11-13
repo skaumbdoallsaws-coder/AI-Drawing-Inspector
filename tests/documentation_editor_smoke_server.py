@@ -133,7 +133,9 @@ def main():
     gateway = DocumentationGateway(server._DOCUMENTATION_AGENT_HOST,
         SimpleNamespace(tenant_id="isolated-proof", principal_id="reviewer", roles=(), allowed_site_ids=()),
         {"assemblyNumber": "MMLE-50D", "documentType": "illustrated_parts_manual"},
-        turn_id="documentation-browser-proof", max_calls=80, timeout=1800,
+        # One proof session serves the whole smoke phase. On a busy machine a phase runs longer than half an
+        # hour (P4a: 34 minutes), and the session closing mid-phase is not what any phase checks.
+        turn_id="documentation-browser-proof", max_calls=80, timeout=7200,
         user_message=("Resolve only the selected description conflict using merge_text with P1c reviewed merged description."
                       if (scratch / "source-fixture.json").exists() else
                       "Change the selected description in this temporary proof document."))

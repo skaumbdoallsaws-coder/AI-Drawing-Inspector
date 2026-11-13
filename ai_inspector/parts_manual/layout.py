@@ -44,7 +44,7 @@ _PUBLICATION_LAYOUT: Dict[str, Any] = {
             "footerLeft": _rect(42, 565, 404, 14),
             "footerRight": _rect(454, 565, PAGE_WIDTH_PT - 496, 14),
             "illustration": _rect(86, 168, PAGE_WIDTH_PT - 172, 300),
-            "documentControl": _rect(80, 482, PAGE_WIDTH_PT - 160, 50),
+            "documentControl": _rect(80, 482, PAGE_WIDTH_PT - 160, 56),
         },
         "document_information": {
             "content": _rect(48, 70, PAGE_WIDTH_PT - 96, PAGE_HEIGHT_PT - 118),

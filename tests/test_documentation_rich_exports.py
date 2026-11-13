@@ -307,7 +307,7 @@ def test_docx_rotation_refuses_before_artifact_write(builder, tmp_path, image_pa
 
 @pytest.mark.parametrize("builder", ("specification", "operations", "wi"))
 @pytest.mark.parametrize("mode", ("review", "draft", "customer", "controlled"))
-def test_docx_legacy_xml_parts_equal_p2b1(builder, mode, tmp_path, image_path, monkeypatch):
+def test_docx_legacy_xml_kept_except_p4b3_header_clearance(builder, mode, tmp_path, image_path, monkeypatch):
     from lxml import etree
     document = fixture_document(builder, mode)
     old = legacy_module(spec if builder == "specification" else ops, monkeypatch, "9b01855")
@@ -315,9 +315,8 @@ def test_docx_legacy_xml_parts_equal_p2b1(builder, mode, tmp_path, image_path, m
         old.draft_render_path = lambda *args: image_path
     current = docx_parts(build_docx(builder, document, tmp_path))
     previous = docx_parts(build_docx(builder, document, tmp_path, old))
-    assert current.keys() == previous.keys()
-    for name in current:
-        assert etree.tostring(current[name]) == etree.tostring(previous[name]), name
+    from tests.documentation_fidelity_support import assert_docx_fidelity_delta
+    assert_docx_fidelity_delta(previous, current, document)
 
 
 @pytest.mark.parametrize("builder", ("parts", "specification", "fillable", "operations", "wi"))
@@ -747,7 +746,7 @@ def legacy_module(current, monkeypatch, commit=LEGACY_COMMIT):
 
 @pytest.mark.parametrize("builder", BUILDERS)
 @pytest.mark.parametrize("mode", MODES)
-def test_legacy_export_bytes_equal_p2a_head(builder, mode, tmp_path, image_path, monkeypatch):
+def test_legacy_export_geometry_kept_with_p4b3_additions(builder, mode, tmp_path, image_path, monkeypatch):
     document = fixture_document(builder, mode)
     if builder == "parts":
         attach(document, "Plain legacy object\nsecond line", style={"fontFamily": "Times New Roman", "fontStyle": "italic",
@@ -762,7 +761,9 @@ def test_legacy_export_bytes_equal_p2a_head(builder, mode, tmp_path, image_path,
     modules = (legacy if builder == "parts" else parts,
                legacy if builder in {"specification", "fillable"} else spec,
                legacy if builder in {"operations", "wi"} else ops)
-    assert build(builder, deepcopy(document), tmp_path) == build(builder, deepcopy(document), tmp_path, modules=modules)
+    from tests.documentation_fidelity_support import assert_pdf_fidelity_delta
+    assert_pdf_fidelity_delta(build(builder, deepcopy(document), tmp_path, modules=modules),
+                              build(builder, deepcopy(document), tmp_path), document)
 
 
 def test_operations_cache_invalidates_only_authored_text_exports(tmp_path, image_path):

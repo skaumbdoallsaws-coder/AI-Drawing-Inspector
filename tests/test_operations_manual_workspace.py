@@ -618,7 +618,7 @@ def test_docx_renderer_version_invalidates_an_older_cached_export(
     )
     first = store_prototype_docx(tmp_path, "MMLE-50D", document)
     assert first["cacheHit"] is False
-    assert first["rendererVersion"] == "operations-docx-rich-v5"
+    assert first["rendererVersion"] == "operations-docx-fidelity-v6"
 
     metadata_path = (
         tmp_path
@@ -1308,7 +1308,9 @@ def test_frontend_source_contract_exposes_operations_generation_hooks() -> None:
     assert "/api/operations-manual/${encodeURIComponent(assemblyNumber)}" in source
     assert "Export PDF" in source
     assert "Export DOCX" in source
-    assert "| DRAFT" in source
+    # P4b-3: the cover footer shows the document's status label as the PDF cover does; DRAFT is the fallback.
+    assert "`${documentNumber} | ${documentModel?.statusLabel || 'DRAFT'}`" in source
+    assert "`${documentNumber} | DRAFT`" not in source
     assert "PROTOTYPE - NOT FOR FIELD USE" not in source
     assert "CAD-grounded technical illustration" not in source
     assert "overflow-wrap: anywhere" in source
@@ -1328,3 +1330,20 @@ def test_frontend_source_contract_exposes_operations_generation_hooks() -> None:
     assert "one bold, self-contained conclusion" in skill
     assert "original source-document page" in skill
     assert "claimSourcePageReferences" in skill
+
+
+def test_publication_fidelity_stamp_invalidates_cached_pdf(tmp_path, monkeypatch):
+    document = _document()
+    first_bytes = b"%PDF-1.7 old header"
+    monkeypatch.setattr("ai_inspector.operations_manual.exports.build_prototype_pdf_bytes", lambda *a, **k: first_bytes)
+    first = store_prototype_pdf(tmp_path, "MMLE-50D", document)
+    assert first["publicationFidelityVersion"] == 1
+    metadata_path = tmp_path / "mmle-50d" / "documents" / document["documentRevision"] / "review-pdf.json"
+    metadata = json.loads(metadata_path.read_text(encoding="ascii"))
+    metadata.pop("publicationFidelityVersion")
+    metadata_path.write_text(json.dumps(metadata), encoding="ascii")
+    new_bytes = b"%PDF-1.7 identity header"
+    monkeypatch.setattr("ai_inspector.operations_manual.exports.build_prototype_pdf_bytes", lambda *a, **k: new_bytes)
+    second = store_prototype_pdf(tmp_path, "MMLE-50D", document)
+    assert second["cacheHit"] is False
+    assert second["sha256"] == hashlib.sha256(new_bytes).hexdigest()

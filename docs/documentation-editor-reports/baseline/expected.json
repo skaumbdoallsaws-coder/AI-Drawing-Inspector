@@ -108,35 +108,35 @@
     }
   },
   "parts": {
-    "before": "d33d018658aa76fa4ac7dea3b25f4e9af59e9408aebdab8df47e8d48b6d64f1f",
+    "before": "2ae4fa1dd92712b594189028e0e247a2ec861d42f9bdbc90730525315c887640",
     "docx": "unsupported",
-    "edited": "b555d2dd8db32c86acbd49baf37efe398f300c3ea8fc51c1e9a582697bcedb7f",
+    "edited": "566695dd76f88d8004bad80be72aeaf6c20914b5604075bffe910695c40e7010",
     "pdf": {
       "before": {
         "pages": [
           {
-            "characters": 140,
+            "characters": 249,
             "sizePt": [
               792.0,
               612.0
             ],
-            "textSha256": "2acb03b92377845fc732a00b5cd4e0180880ddd3f75cdf472ad9037efd225f96"
+            "textSha256": "d8f4d7b86d9a8b0f590c7b84e9850bc81b5da4d42295cb916e3c3fcb937c10df"
           },
           {
-            "characters": 477,
+            "characters": 494,
             "sizePt": [
               792.0,
               612.0
             ],
-            "textSha256": "cc4d5e992c3ce73c68f1521a9126761774fb4015cc4abbe2ad351b60faa17d4e"
+            "textSha256": "f01bb768599f80fb469ae3fc64ec489180703acb6cc73191d51673706ec84c7a"
           },
           {
-            "characters": 279,
+            "characters": 297,
             "sizePt": [
               792.0,
               612.0
             ],
-            "textSha256": "33df27ab5b84a2fcc7b27fc9495ae0d59f2ccfe767e088e205b5c572894dbd7c"
+            "textSha256": "f415e56c304feab53c1d247fed557a8ec40195a51177e0aee2b38583e5b9c2d0"
           },
           {
             "characters": 279,
@@ -155,40 +155,40 @@
             "textSha256": "4f42f6db89839464392e9f3dbdbaf895f92ede9540591f0ed9a5487cadc06618"
           },
           {
-            "characters": 258,
+            "characters": 276,
             "sizePt": [
               792.0,
               612.0
             ],
-            "textSha256": "c6be4cbc4659e9b57bf050a042e6444f655917ec6bea4f104066a39df287a432"
+            "textSha256": "c7a2722480b125afaddd5fbceb81ed67226267415cbea4453f26cfc71a09cd1c"
           }
         ]
       },
       "edited": {
         "pages": [
           {
-            "characters": 137,
+            "characters": 246,
             "sizePt": [
               792.0,
               612.0
             ],
-            "textSha256": "cfb78bdf8c738466c22af4921416624a9aff9636ef396633909e0b52962a83aa"
+            "textSha256": "abcfec7b2c331a55212e94f676169b4c9a45907a918fcd30a932ca7470fb7a00"
           },
           {
-            "characters": 477,
+            "characters": 494,
             "sizePt": [
               792.0,
               612.0
             ],
-            "textSha256": "cc4d5e992c3ce73c68f1521a9126761774fb4015cc4abbe2ad351b60faa17d4e"
+            "textSha256": "f01bb768599f80fb469ae3fc64ec489180703acb6cc73191d51673706ec84c7a"
           },
           {
-            "characters": 279,
+            "characters": 297,
             "sizePt": [
               792.0,
               612.0
             ],
-            "textSha256": "33df27ab5b84a2fcc7b27fc9495ae0d59f2ccfe767e088e205b5c572894dbd7c"
+            "textSha256": "f415e56c304feab53c1d247fed557a8ec40195a51177e0aee2b38583e5b9c2d0"
           },
           {
             "characters": 279,
@@ -207,19 +207,19 @@
             "textSha256": "7476d5fdfb19b1d0826cb649378276ee1233b393c2bae0cd38420c9bf98306ef"
           },
           {
-            "characters": 264,
+            "characters": 282,
             "sizePt": [
               792.0,
               612.0
             ],
-            "textSha256": "d28ac406d7fb61d808720fa8c84596333936cb046028ca79e3e620997b55251b"
+            "textSha256": "73df2cdbc3c8e6b1aa1b8df8d1a9765e3a664dbf08bb2a9e5a996f1f3ea5eca9"
           }
         ]
       }
     },
     "readDidNotWrite": true,
     "reopenUnchanged": true,
-    "reopened": "b555d2dd8db32c86acbd49baf37efe398f300c3ea8fc51c1e9a582697bcedb7f",
+    "reopened": "566695dd76f88d8004bad80be72aeaf6c20914b5604075bffe910695c40e7010",
     "undo": {
       "commandsForTwoEdits": 2,
       "oneUndoPreservesFirstEdit": true,

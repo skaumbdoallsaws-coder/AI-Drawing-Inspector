@@ -1135,6 +1135,41 @@ def _front_matter_pages(product_name: str, document_number: str, findings: list[
     ]
 
 
+def _contents_capacity(page_geometry):
+    layout = publication_layout(page_geometry)
+    frame = layout["pageTypes"]["operations_contents"]["list"]
+    content = layout["shared"]["content"]
+    return max(1, int((content["y"] + content["height"] - frame["y"]) // 18))
+
+
+def _contents_pages(entries, page_geometry):
+    """Reserve whole 18 pt rows and paginate only contents, before numbering the body."""
+    layout = publication_layout(page_geometry)
+    regions = layout["pageTypes"]["operations_contents"]
+    capacity = _contents_capacity(page_geometry)
+    available = layout["shared"]["content"]["y"] + layout["shared"]["content"]["height"] - regions["list"]["y"]
+    result = []
+    for index, start in enumerate(range(0, len(entries), capacity)):
+        rows = copy.deepcopy(entries[start:start + capacity])
+        title = "Table of Contents" + (" (continued)" if index else "")
+        frame = copy.deepcopy(regions["list"])
+        frame["height"] = round(min(available, max(frame["height"], 18.0 * len(rows))), 4)
+        result.append({
+            "pageId": "page-operations-contents" + (f"-{index + 1}" if index else ""),
+            "pageNumber": 3 + index, "pageType": "operations_contents", "title": title,
+            "entries": rows,
+            "layoutBlocks": [
+                {"blockId": "contents-heading", "blockType": "heading", "text": title, "lines": [title],
+                 "style": {"fontSize": 20, "lineHeight": 25, "fontWeight": 700, "color": "#071B2A"},
+                 "frame": copy.deepcopy(regions["heading"]), "evidenceClaimIds": []},
+                {"blockId": "contents-list", "blockType": "contents_list",
+                 "entries": [{**row, "level": 0} for row in rows],
+                 "frame": frame, "evidenceClaimIds": []},
+            ],
+        })
+    return result
+
+
 def _apply_scene(
     pages: list[Dict[str, Any]],
     documentation_scene: Optional[Mapping[str, Any]],
@@ -1316,7 +1351,8 @@ def build_operations_manual_document(
         figure_legends=figure_legends,
         overview_systems=figure_legends.get("OM-FIG-001", []),
     )
-    flow_pages = FlowLayoutEngine(start_page_number=4, geometry=page_geometry).layout(sections)
+    contents_count = (len(sections) + 2 + _contents_capacity(page_geometry) - 1) // _contents_capacity(page_geometry)
+    flow_pages = FlowLayoutEngine(start_page_number=3 + contents_count, geometry=page_geometry).layout(sections)
     assert_pages_within_bounds(flow_pages, page_geometry)
     # Short continuation pages are acceptable on stretched paper; keep the design-page orphan rule.
     if page_geometry.identity:
@@ -1408,34 +1444,13 @@ def build_operations_manual_document(
             for section in sections
         ],
     ]
-    contents_layout = publication_layout(page_geometry)["pageTypes"]["operations_contents"]
-    pages[2]["entries"] = contents
-    pages[2]["layoutBlocks"] = [
-        {
-            "blockId": "contents-heading",
-            "blockType": "heading",
-            "text": "Table of Contents",
-            "lines": ["Table of Contents"],
-            "style": {"fontSize": 20, "lineHeight": 25, "fontWeight": 700, "color": "#071B2A"},
-            "frame": copy.deepcopy(contents_layout["heading"]),
-            "evidenceClaimIds": [],
-        },
-        {
-            "blockId": "contents-list",
-            "blockType": "contents_list",
-            "entries": [
-                {
-                    "sourceKey": row["sourceKey"],
-                    "title": row["title"],
-                    "pageNumber": int(row["pageNumber"]),
-                    "level": 0,
-                }
-                for row in contents
-            ],
-            "frame": copy.deepcopy(contents_layout["list"]),
-            "evidenceClaimIds": [],
-        },
-    ]
+    contents_pages = _contents_pages(contents, page_geometry)
+    if len(contents_pages) != contents_count:
+        # The body was numbered for contents_count pages; a different count would misnumber every entry.
+        raise ValueError("The table of contents does not match the page count it was numbered for.")
+    pages[2:3] = contents_pages
+    from ai_inspector.documentation.safety import annotate_safety_symbols
+    annotate_safety_symbols(pages)
     for page in pages:
         page["pageCount"] = len(pages)
     theme, page_masters = _apply_scene([], documentation_scene)

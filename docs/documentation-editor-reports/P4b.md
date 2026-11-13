@@ -322,3 +322,270 @@ PDFs drop (see the P4b-1 gate).
 - The gate machine: when other applications are busy the suites run at half speed or less (the documentation
   suites took 64 minutes instead of 28). The wide parts need a limit above 560 s then (`wide-part-long.sh`).
 - P5a: `set_page_setup` from Sage compiles and measures as the page's command does (up to three times).
+
+## P4b-3
+
+### CHANGED
+
+- **parts_manual/layout.py, parts_manual/pdf.py:** the cover document-control rectangle is 56 pt high (was 50); the 18 pt body-heading rectangles are 32 pt high (were 28 for Document Control and 30 for Contents/Parts Index). Top edges, fonts, sizes and neighbouring rows stay in place. The additional height also fits the stretched A4 rectangles. No fitting threshold or shrink rule changed.
+- **work_instructions/document.py:** the benchmark operation's parts list reserves max(34, sum(rowHeights)). The measured eight-item page gets 44 pt, up 10. Its following safety notice moves from y=450 to y=460, retaining its 46 pt height and a 4 pt gap after the list. This is a row-count rule, not a page-ID exception; other frames stay in place.
+- **operations_manual/document.py:** contents frames reserve whole rows of at least 18 pt within the content rectangle. Additional contents pages are allocated before body pagination so section references follow them. The real 19-entry design contents frame becomes 342 pt (was 330), with one contents page and unchanged 18 pt row positions. The design-page HTML measurement estimate is untouched.
+- **New documentation/safety.py:** one copy of the existing PDF signal-word semantics. Operations and WI compilers attach safetySymbol; PDF drawing imports the table and the canvas consumes the compiled kind/color. Notice is the blue information circle; hazards retain their PDF colors. SVG dimensions and separate triangle rules follow the PDF. The redundant canvas signal label below the symbol is removed; the copy still begins with the signal.
+- **static/index.html:** lists use compiled row heights, column gaps and text sizes, with text at the top and no additional CSS row gap. Unmarked rows use one text column. Quantity labels use the PDF's parenthesized form. No external static JavaScript file changed, so no script URL version changed.
+- **operations_manual/exports.py, work_instructions/exports.py:** each non-cover operations/WI PDF header gains the identity line, 6.6 pt Helvetica, #879fac, top 7 pt, right inset 28 pt; the existing title stays. DOCX body clearance derives from the page-anchored band; header content is unchanged. The operations cache gains publicationFidelityVersion=1 so older cached PDF/DOCX files rebuild. DOCX renderer pins change to operations-docx-fidelity-v6 and work-instructions-docx-fidelity-v4.
+- **Tests:** real fit reports must be empty for all four types on design/Letter/A4. Added contents continuation/numbering, safety semantics, WI allocation and DOCX clearance checks. The export matrix covers every supported paper, authored text/rich/table/image/shape, independent CAD placement with real captures, DOCX page dimensions, and A4 glyph/overflow/missing/stale-capture refusals. Unsupported DOCX types remain explicit.
+- **New tests/documentation_fidelity_support.py and compatibility tests:** old callers still run. Existing glyph positions/fonts/sizes/colors, drawings, images and links must stay; only named added text is accepted. Native DOCX XML permits only the new body top margin. Schema-1 typography still checks its analytical baseline/decoration changes, separately accounting for the new header/heading paint sequence. Real MMLE comparisons exercise 8ac3838, including its old 50 pt cover contract; compiler-frame tests pin the WI notice move separately.
+- **tests/smoke_documentation_editor.py:** run_p4b_words follows run_p4b. It checks every page of the four design publications and operations on A4, reuses valid captures, exports through the workspace and activates each page once. Visible text-node ranges within the publication surface supply whitespace-normalized word multisets. UI controls are excluded by element. Mismatches save counts, missing/extra words, fragments and both PNGs. The added part records its six-minute budget; earlier smoke bodies are unchanged.
+
+### TESTS
+
+Static checks only: Python AST parsing passed for 15 changed/new Python files; JavaScript syntax passed for all four executable inline scripts and the word-measurement script; git diff --check passed. LF endings and ASCII additions in index.html were checked; server.py is untouched.
+
+No pytest, Node test, browser, PDF renderer, Word, baseline or runtime smoke ran here. Runtime results and durations are unverified.
+
+### NOT RUN
+
+Claude must run:
+
+    python -m pytest tests/test_documentation_page_setup.py tests/test_documentation_export_matrix.py tests/test_documentation_rich_exports.py tests/test_documentation_typography.py tests/test_documentation_tables.py tests/test_documentation_rich_blocks.py tests/test_operations_manual_workspace.py tests/test_work_instruction_workflow.py
+    node --test tests/documentation_page_setup.test.cjs tests/documentation_objects.test.cjs tests/documentation_rich_text.test.cjs tests/documentation_tables.test.cjs
+    python tools/documentation_baseline.py --check
+    python tools/documentation_baseline.py --local --check
+    python tests/smoke_documentation_editor.py --phase P4b
+    python tests/smoke_documentation_editor.py --phase P4a
+    python tests/smoke_documentation_editor.py --phase P3b
+    python tests/smoke_documentation_editor.py --phase P3a
+    python tests/smoke_documentation_editor.py --phase P2b
+    python tests/smoke_documentation_editor.py --phase P2a
+    python tests/smoke_documentation_editor.py --phase P1c
+    python tests/smoke_documentation_editor.py --phase P1b
+    python tests/smoke_documentation_editor.py --phase P1a
+    python -m pytest tests -k documentation
+    python -m pytest tests
+
+Use DOC_SMOKE_SLOW=1 on an idle machine for the added six-minute budget. Review each word mismatch and its two images. Open operations and WI DOCX exports for design/Letter/A4 in Word and LibreOffice; confirm the first heading clears the band. XML assertions do not replace rendering.
+
+### Expected baseline changes
+
+Baseline JSON files are untouched; review and promotion belong to the supervisor.
+
+- Parts compiled fingerprints: the cover document-control height. PDF text hashes/character counts gain cover metadata and Document Control, Contents and Parts Index headings (five measured body-heading pages). Existing text and row positions remain guarded against the old caller.
+- Operations compiled fingerprints: the contents frame and safetySymbol data. The real design publication keeps one contents page and its body page numbers/count. Every non-cover PDF page gains the identity line, changing its text hash/character count. The real 19-entry contents positions stay.
+- WI compiled fingerprints: safetySymbol and row-derived parts/notice frames. The measured parts frame grows 10 pt and its notice moves down 10 pt. Every non-cover PDF gains the identity line. The final parts row is explicitly checked in extraction. No design text-flow estimate changed.
+- Operations/WI DOCX section top margins and renderer metadata change; native paragraph text stays. Word pagination can change because the body starts below the band.
+- Specification/inspection geometry and text stay. Scene schema stays 8; stored values and scene revisions are untouched; no pageSetup key appears on read. Real design page counts/sizes are expected to stay. Compiled document revisions can change with the compiler fields; capture geometry is unchanged.
+
+### Word-comparison exception table (decision 7)
+
+| Exception | Allowed count | Reason |
+| --- | ---: | --- |
+| None | 0 | No publication word is suppressed. UI controls/handles are excluded by element, not by word. |
+
+The smoke's single source is P4B_WORD_EXCEPTIONS, initially empty. It prints the actual table and writes p4b-words.json and report.p4bWordExceptions. Actual equality/counts remain unmeasured; an unexpected difference fails instead of becoming an exception.
+
+### DOCX header numbers (decision 9)
+
+Band bottom is y plus height. Body top is 12 pt below that. The header paragraph inset is bounded by band height minus the 3 pt accent and 14 pt brand-line allowance, capped at the existing 12 pt; it remains 12 pt for all three pages. Header text and shapes are unchanged.
+
+| Operations and WI page | Band bottom, pt | Requested body top, pt | Stored Word top margin, pt | Header distance, pt |
+| --- | ---: | ---: | ---: | ---: |
+| Design 960 x 540 | 56 | 68 | 68 | 12 |
+| Letter landscape | 63.4667 | 75.4667 | 75.45 | 12 |
+| A4 landscape | 61.7327 | 73.7327 | 73.75 | 12 |
+
+Word margins round to twentieths of a point. These are expected geometry/XML values; Word rendering is unverified here.
+
+### DEVIATIONS
+
+- The list audit also found canvas quantities without the PDF's parentheses and synthetic numbers on unmarked list styles. Both are corrected on the canvas for word equality; the PDF list renderer is unchanged.
+- The separate canvas-only notice label was removed; its signal remains first in the copy. No signal-word list is duplicated in JavaScript.
+- No margins/orientation UI, new page-setup operation, design-page text reflow, baseline edit or relaxed relative-fit rule was introduced. DOCX body clearance is the requested exception to unchanged margins.
+
+### OPEN QUESTIONS
+
+Supervisor runtime verification must establish empty fit reports, full word equality and the added smoke's six-minute budget. Word/LibreOffice must confirm header clearance on all three sizes. There are no pre-authorized word exceptions: a further omission needs a named fix or an explicitly reviewed counted exception, never a word blacklist.
+
+
+## P4b-3 round 2
+
+### CHANGED
+
+- **static/index.html:** draft banners now use the notice renderer, compiled safetySymbol and signal word; removed their pink box/red-text styling. Operations/WI cover footers use statusLabel with the PDF's DRAFT fallback. Generated table headers use CSS capitals; body cells and authored table headers keep their text. Parts default non-figure header titles use capitals; an explicit override, including an empty value, wins unchanged.
+- **static/documentation_publication_core.js, tests/documentation_publication.test.cjs:** pure parts-heading and width-fitting rules, with Node tests. The fitting formula matches parts PDF _fit_text, including the 0.96 allowance and 4.5 pt floor, measured with the page's own font. The new script URL is versioned 20261112-p4b-3-r2.
+- **Parts canvas:** BOM cells and group names wrap at the fitted size. The same width-fitting rule covers parts-index entries, document-control values and the parts header/footer fields that the PDF fits. Numeric BOM cells use the PDF's 3 pt side inset. Bold measurement uses weight 700. Cover metadata uses a 1.374 line-height at 9.2 pt (12.6408 pt pitch; four lines occupy 50.5632 pt inside the 56 pt frame). A missing revision no longer invents a cover line; a missing parts-index number no longer invents "Not specified". These match the PDF branches. Stored values are unchanged.
+- **tests/smoke_documentation_editor.py:** both word multisets use NFKC. A wrapped text node keeps its original word boundaries; separate blocks/cells and actual inline gaps remain boundaries. SVG text elements are separate boxes. Open specification input hints are excluded by their UI element, not their words. The exception table remains empty.
+- **Capture measurement:** part 1 pictures and part 2 words share the accepted-capture gate: current image, decoded pixels, ready class and ready SVG overlay. The product puts the opaque white-backed image at z-index 20 and accepted SVG at 21, above the sibling live viewer's stacking context (container-type: inline-size). The check verifies those computed conditions and that live text lies under the image before excluding that occluded subtree. It does not blacklist balloon classes or use hit testing through pointer-events:none. A failed paint contract is reported immediately after readiness. Evidence records the contract and any uncovered live labels.
+- **tests/documentation_paper_support.py; page-setup/export-matrix tests:** module-owned caches key unchanged real publications by (route, paper), and bytes by format too. Every document/report return is a deep copy; real captures remain in module temporary directories. No readiness check is patched. Page-setup fit/semantics/allocation/geometry/pagination/size/oracle tests share compiled documents; size and old-caller checks share current export bytes. Matrix cases share the pristine paper publication, captures and baseline export; modified-object exports and refusal attempts still run separately. Stale-capture cases reuse only design captures; missing-capture cases still use an empty root. Stateful route, undo, retry and relative-fit cases remain fresh. A test guards cache copy isolation. No parameter case or assertion was removed.
+- No compiler, PDF/DOCX exporter, server, baseline JSON or saved store was changed in this round. The supervisor's contents-count guard and revised legacy comparison tests are retained.
+
+### Text audit (C)
+
+This is a source comparison, not a claim that the new browser gate has passed.
+
+| Place | PDF | Page before this round | Fixed / left with reason |
+| --- | --- | --- | --- |
+| Parts cover document control | Conditional revision/date; four 9.2 pt lines in 56 pt | 18 pt pitch clipped line four; invented missing revision | Fixed pitch and conditional revision. |
+| Parts body header | Default non-figure title uppercase; override verbatim; width fitting | Mixed-case default; ellipsis | Fixed default rule and fitting; overrides preserved. |
+| Parts BOM, including continuation pages | Whole cell text, width fit with 4.5 pt floor, wrap | One line and ellipsis | Fixed all four columns with the PDF rule. |
+| Parts overview group index | Whole name fitted; number and figure/page reference | Name cut off | Fixed name fitting/wrap; references unchanged. |
+| Parts document information and revision history | Uppercase labels, fitted values; revision lines as compiled | Labels/lines agree; values could ellipsize | Fixed value fitting; revision lines unchanged. |
+| Parts contents and body headings | Explicit headings, FIGURE/TITLE/PAGE, compiled entries | Same words after round-1 PDF restoration | Unchanged; no ellipsis rule at these entries. |
+| Parts number index | Fitted number/description/reference; empty missing number | Unfitted entries; synthetic missing-number text | Fixed fitting and empty fallback. |
+| Operations/WI cover | Compiled kicker/title and statusLabel footer | Footer hardcoded DRAFT | Fixed footer; cover text unchanged. |
+| Operations/WI headings, continuation headings, paragraphs | Compiled text/lines, then bounded frame drawing | Same text projection; browser soft wraps | Unchanged; smoke no longer invents spaces at a soft wrap. The design flow estimate stays unchanged. |
+| Operations/WI generated tables/key-value tables | Header labels uppercased; cell values as typed | Mixed-case headers | CSS capitals only on generated, unedited headers. Authored tables are outside this selector. |
+| Operations/WI lists, legends, contents | Compiled entries, row heights, marker/quantity rules | Round 1 aligned the marker/quantity text and row heights | Retained; no new PDF change. |
+| Operations/WI note/status/draft banner | Symbol, signal, copy; no draft box | Draft banner omitted signal/symbol | Fixed draft branch and styling; existing compiled semantics suffice. |
+| CAD captions and balloons | Caption and one balloon text set | Caption agrees; two overlay sets exist in DOM | Measurement now counts only the displayed set. Black/radius-13 accepted balloons versus blue/radius-10 PDF balloons remain untouched (B8). |
+| Specification filled title/kicker/tagline/headings/features/caption/table | Filled slot text, bounded fitting; REVIEW footer | Same filled slot text; open-slot input prompts also visible | Filled rendering retained; input prompts excluded as UI elements. |
+| Specification partially open table row / all-open feature section | Final PDF omits a row if either slot is open; suppresses features heading when all cards are open | Editor can still show a filled row label or section heading beside open inputs | Left and reported: hiding an entered value to satisfy the check would change editing semantics. No exception hides it. A product decision is needed for this editor-versus-final-PDF policy. |
+| Header/footer overrides on operations/WI and specification | Some drawing branches use generated strings rather than page-element overrides | Page displays overrides verbatim | Left: honoring the author's text in those PDFs requires an exporter change, forbidden this round. |
+| Authored plain/rich text and tables | Existing run drawing, header marks, native content | Existing static renderer | Unchanged; no forced capitalization on authored tables. |
+| Review/conflict annotations | Format-specific marker and legend drawing | Existing provenance marker UI (including generated CSS text) | Left: this round's fresh word gate is not a proof of every annotated export mode; marker placement/legend differences require a separate exporter-aware audit. |
+
+### Publication clipping audit (B6)
+
+No -webkit-line-clamp was found in the publication styles. No external documentation_*.css or documentation_*.js file contains an ellipsis/clamp rule.
+
+| Selector | PDF rule | Action |
+| --- | --- | --- |
+| .documentation-cover-chrome-footer-copy | Original-size textbox | Removed ellipsis/nowrap; allow wrap, retain the frame. |
+| .documentation-page-header-meta / -title | Parts width fit; operations/specification original-size textboxes | Removed ellipsis/nowrap; parts additionally use the fitting helper. |
+| .documentation-page-footer-left / -right | Parts left fitted; page number and other types original-size | Removed ellipsis/nowrap; fit parts left only. |
+| .documentation-page-group-row strong | _fit_text at 7.8 pt bold | Fit and wrap, no ellipsis. |
+| .documentation-page-bom th / td | _fit_text for every header/cell | Fit and wrap, no ellipsis; 4.5 pt floor retained. |
+| .documentation-control-row strong / span | Fixed uppercase labels; fitted values | Removed ellipsis/nowrap; fit values. |
+| Existing contenteditable rules for page text and BOM | Editing state, not export | Existing clip/wrap rules retained. |
+
+Remaining ellipses in the documentation area belong to toolbar titles, page-rail labels, floating selection labels, and capture-takeover titles/stages. They are workspace UI, not publication content. Earlier manual-preview/proposal/occurrence-list ellipses are also outside the publication surface. No such UI word is suppressed by a word blacklist.
+
+### TESTS
+
+Static checks only: Python AST parsing passed for all 17 changed/new Python files in the pending round-1/round-2 tree; JavaScript syntax passed for all four executable inline scripts, the new core, its Node test and both capture/word scripts. The import-map block was excluded from executable-JavaScript parsing. git diff --check passed. Round-2 code files have LF endings and added index.html lines are ASCII. server.py is untouched.
+
+No pytest, Node test execution, browser, renderer, baseline or smoke ran here. No runtime pass count or timing improvement is claimed.
+
+### NOT RUN
+
+Supervisor commands:
+
+    node --test tests/documentation_publication.test.cjs
+    python -m pytest tests/test_documentation_page_setup.py tests/test_documentation_export_matrix.py tests/test_documentation_rich_exports.py tests/test_documentation_typography.py tests/test_documentation_tables.py tests/test_documentation_rich_blocks.py tests/test_operations_manual_workspace.py tests/test_work_instruction_workflow.py
+    python tests/smoke_documentation_editor.py --phase P4b
+    python tools/documentation_baseline.py --check
+    python tools/documentation_baseline.py --local --check
+    python -m pytest tests -k documentation
+    python -m pytest tests
+
+Use DOC_SMOKE_SLOW=1 on an idle machine for the six-minute word-part budget; earlier phase commands remain listed in the round-1 report. Review words-*.json and both page images for any remaining counted difference. Baseline files remain supervisor-owned. This round adds no expected compiled-document, PDF or DOCX baseline delta beyond round 1; only canvas text and measurement change.
+
+### DEVIATIONS
+
+- The audit extends the requested BOM/group fitting to the other parts fields where the PDF already uses the same width-fit rule, and removes two synthetic missing-value differences. No PDF fitting threshold or type size was changed.
+- A3/A4 add one computed-style/visibility inspection per page, not another capture or fixed sleep. Image/SVG readiness uses the existing 20-second bound. No timeout was lengthened. The six-minute budget remains unchanged but is unverified.
+- Word exceptions: **none (allowed count 0)**. NFKC and excluding proven occluded text correct measurement; they are not publication exceptions. Open input prompts remain excluded by UI element.
+
+### OPEN QUESTIONS
+
+- Run the corrected word check to establish the remaining differences; do not treat this source audit as a browser pass. A ready capture that fails the paint contract must be investigated as a product/visibility difference, not given a longer wait.
+- B8 remains with the product owner: accepted-capture balloon color/radius.
+- Specification open-row/feature visibility and ignored generated header/footer overrides need the decisions described in the audit; neither is silently normalized away.
+- Measure the cache speedup and smoke duration on the supervisor machine. Capture bytes, mutated outputs and all stateful command behavior still need their existing assertions.
+
+## P4b-3 supervisor gate (Claude, 2026-11-12 to 13)
+
+### What I ran and what it showed
+
+Round 1: the eight test files Codex named, 1141 of 1148 passed. The 7 failures were older tests that still asked
+for exports byte-equal to an earlier commit; I rewrote them (below). Smoke `--phase P4b`: part 1 passed except
+one picture check; the new word check ran on every page of the four real documents (and the operations manual
+on A4) and reported 97 pages. I read the saved pictures and words of the pages and sorted the findings:
+
+- measurement: ligatures in the PDF's shaped text (NFKC on both sides), a line change inside one text node
+  counted as a word boundary, two balloon label sets in the DOM (the live viewer's and the accepted capture's)
+  both counted, one device-scale-2 picture taken while the figure still showed the live viewer;
+- real, and old: draft banners (the PDF draws a notice with its signal word, the page drew a pink box without
+  it), the cover footer's status (the page said DRAFT, the PDF the document's status label), table headers (the
+  PDF in capitals), the parts header title on pages without a figure (capitals in the PDF), the parts cover's
+  fourth control line cut off on the page, BOM descriptions and group names cut with an ellipsis on the page
+  where the PDF fits and wraps the whole text.
+
+Round 2 (brief `P4b-3-r2`) fixed all of these on the page side; no exporter changed. Smoke after round 2:
+196 of 198 checks; the one page left (work instructions, stage 09) is the next point.
+
+### What I changed
+
+- `ai_inspector/operations_manual/document.py`: the build raises if the number of contents pages differs from
+  the number the body was numbered for (a silent mismatch would misnumber every entry).
+- `static/index.html` `.documentation-accepted-capture.ready`: a one-pixel white ring. The live viewer stays
+  mounted under the accepted capture in the same box; on a zoomed page the box edges fall between pixels and one
+  blended row of a live balloon label showed at the capture's top edge (seen at 5x on the stage 09 page).
+- `tests/smoke_documentation_editor.py`: the paint contract judges the part of a live label that the viewer's
+  own clipping layer lets through; that part must lie under the image (within the ring).
+- `tests/test_documentation_typography.py` `assert_pdf_schema1_delta`: fonts and links are compared without PDF
+  object numbers (they move when a page gains text); a page may gain only the built-in fonts of the additions.
+- `tests/test_documentation_page_setup.py`: the parts layout comparison expects 56.0; the plain-text test compares
+  with `assert_pdf_fidelity_delta`.
+- `tests/test_documentation_rich_blocks.py`: the comparison with de5e171 is renamed and states what this round
+  adds (the identity line; the body's top margin), everything else member by member as before.
+- `tests/smoke_documentation_editor.py`: publishing the parts manual sends the browser to the PDF (one aborted
+  GET); phase P4a classified that hand-off, phase P4b did not and counted it as an unexpected network failure.
+  Same classification in both, exactly one per publish.
+- `tests/documentation_editor_smoke_server.py`: the proof session of the smoke server lived 30 minutes; on a
+  busy machine phase P4a runs longer and its last Sage call met a closed session (`codex_run_closed`). The
+  session now lives two hours. Harness only.
+- `tests/test_operations_manual_workspace.py`: the pinned page source held the constant DRAFT of the cover
+  footer; it now pins the status label rule with DRAFT as the fallback.
+- Baselines promoted after reading every changed value. Synthetic (19 values): the parts cover gains 109
+  characters (the four control lines), the three body headings 17, 18 and 18; the compiled fingerprints of the
+  parts document. Local (210 values): every operations page but the cover gains 56 characters and every
+  work-instruction page but the cover 69: the identity line and its line end, nothing else; the compiled
+  fingerprints of both documents (contents frame, safety symbol data, the work-instruction frames).
+
+### DOCX in Word
+
+Word (LibreOffice is not installed on this machine), the real operations manual and work instructions, design
+page, Letter and A4, six files, rendered read-only to PDF and read page by page:
+
+| Page | Band bottom, pt | First body text top in Word, pt (operations / work instructions) |
+| --- | ---: | ---: |
+| Design 960 x 540 | 56 | 72.0 / 68.4 |
+| Letter landscape | 63.47 | 79.4 / 75.8 |
+| A4 landscape | 61.73 | 77.7 / 74.1 |
+
+Before this round the first heading stood at 48.6 pt, under the band. Word's pagination is its own (39 to 45
+pages against 33 and 20 in the PDFs), as the plan expects.
+
+### Measured and left
+
+- Word puts the cover picture on a page of its own and on some page sizes leaves a blank page after it. The
+  exporter of b3bcc7e did the same (blank pages 3 and 6 on the design page; now 3).
+- The work-instruction DOCX footer says DRAFT where the PDF says the status label.
+- The page's balloons over an accepted capture are black with a 13 pt radius; the PDF's are the theme blue with
+  a 10 pt radius. Asked the product owner.
+- From Codex's source audit, for decisions: the specification sheet shows a filled row label beside an open
+  slot that the final PDF omits; some operations, work-instruction and specification PDF header and footer
+  branches draw generated strings where the page shows an edited one; review and conflict markers were not
+  covered by the word check (it runs on unmarked publications).
+- The word check takes about 18 minutes at wait factor 4 on this machine (97 pages plus the A4 pass); its own
+  budget is 6 minutes times the factor. It holds on a quiet machine and was overrun once when the machine
+  stalled. Carried to P5a-2: activate pages faster.
+- `_documentationFitPublicationText` reads and writes layout element by element (about 125 forced layouts on a
+  parts BOM page per render). Carried to P5a-2 with the typing measurements.
+- The work-instruction parts list of `page-wi-operation-wi-lift-03d` was never cut in the PDF: its fourth row was
+  drawn 6 pt into the notice below. It now has its own height and the notice sits 10 pt lower.
+
+### Gates
+
+| Gate | Result |
+| --- | --- |
+| `documentation_baseline.py --check`, `--local --check` | 0, 0 (promoted values) |
+| Smoke P4b | 198/198 (third run; the first counted the parts PDF download hand-off as a network failure, the second overran the word check's time budget while the machine stalled, 2666 s against 1440 s; every other check passed in both) |
+| Smoke P4a | 475 of 475 (after the proof-session change; the first run stopped at check 271 on the closed session) |
+| Smoke P3b, P3a, P2b, P2a, P1a, P1b, P1c | 169, 194, 36, 23, 27, 46, 35: all pass |
+| Documentation suites | 1992 passed, 1 known failure (`test_source_ids_references_and_local_hashes_are_closed`); the first run had one more, the pinned cover-footer DRAFT source assertion, updated and rerun (27 of 27 in its file) |
+| Node | 479 node:test cases in 7 files, 5 of 5 borrow-callout checks |
+| Wide suites | the same 179 known failing IDs, none new, none gone |
+
+Smoke durations varied between 20 and 57 minutes for the same phase and code during this gate; an old watcher
+process of mine had been holding one processor core since the morning and is stopped.

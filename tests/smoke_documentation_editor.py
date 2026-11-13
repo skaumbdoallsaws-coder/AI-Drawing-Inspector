@@ -132,7 +132,7 @@ def classify_failures(report):
         else:
             unexpected_console.append(item)
     unexpected_network = []
-    handoffs = list(report.get("exportDownloadHandoffs", [])) if report.get("phase") == "P4a" else []
+    handoffs = list(report.get("exportDownloadHandoffs", [])) if report.get("phase") in {"P4a", "P4b"} else []
     for item in report["networkFailures"]:
         route = urlsplit(item.get("url", "")).path
         if known_network_failure(item):
@@ -3941,6 +3941,8 @@ def run_p4b(page, request, server, output, report, record, begin_edit, tool, fre
                     if p is None:continue
                     name="a4-"+role+"-dpi"+str(scale)
                     if not navigate(p["pageId"],name+"_active"):continue
+                    shown=wait_for_p4b_publication_capture(page)
+                    record(name+"_accepted_capture",shown["ready"],shown)
                     root_node=page.locator('#documentationPublicationSurface')
                     png=root_node.screenshot(timeout=T(20000))
                     (output/(name+"-canvas.png")).write_bytes(png)
@@ -4133,6 +4135,244 @@ def run_p4b(page, request, server, output, report, record, begin_edit, tool, fre
     record("budget",time.monotonic()-started<=25*60*max(1,SLOW),{"seconds":time.monotonic()-started,"slow":SLOW})
     write_json(output/"p4b-page-setup.json",evidence)
 
+
+# The opaque accepted image is z=20; the SVG labels are z=21. The live viewer is a
+# sibling stacking context (container-type: inline-size), including its CSS2D labels.
+# Inspect that actual paint contract; pointer-events/hit testing cannot establish occlusion.
+P4B_CAPTURE_STATE_JS = r"""() => {
+    const root = document.querySelector('#documentationPublicationSurface');
+    const state = window.__compareDbg.state, model = state.partsManualDocumentation.document;
+    const page = model.pages.find(p => p.pageId === state.partsManualDocumentationPageId);
+    const images = [...root.querySelectorAll('img.documentation-accepted-capture')];
+    const live = root.querySelector('#assy-3d-container');
+    const overlays = [...root.querySelectorAll('svg.documentation-publication-callouts')];
+    const current = !page?.renderRequest || (page.renderRequest.image?.status === 'ready' &&
+        (!page.renderRequest.image.documentRevision || page.renderRequest.image.documentRevision === model.documentRevision));
+    const visible = node => { for (let n=node;n && n!==root.parentElement;n=n.parentElement) {
+        const c=getComputedStyle(n); if(c.display==='none'||c.visibility!=='visible'||Number(c.opacity)===0)return false;
+    } return true; };
+    const capture = images.find(img=>img.parentElement===live?.parentElement) || images[0];
+    const imagesReady = !page?.renderRequest || (images.length > 0 && images.every(img=>
+        img.complete && img.naturalWidth>0 && img.classList.contains('ready') && visible(img)));
+    const overlaysReady = overlays.every(svg=>svg.classList.contains('ready') && visible(svg));
+    let covered = !live || !visible(live), contract = null, uncovered = [];
+    if (live && capture && imagesReady && visible(live)) {
+        const a=getComputedStyle(capture), b=getComputedStyle(live), box=capture.getBoundingClientRect();
+        const context=b.containerType!=='normal'||b.isolation==='isolate'||b.transform!=='none'||b.zIndex!=='auto';
+        const opaque=Number(a.opacity)===1 && /^rgb\(/.test(a.backgroundColor);
+        covered=capture.parentElement===live.parentElement && context && opaque && Number(a.zIndex)>(Number(b.zIndex)||0);
+        contract={imageZ:a.zIndex,liveZ:b.zIndex,containerType:b.containerType,opaque,
+            box:{left:box.left,top:box.top,right:box.right,bottom:box.bottom}};
+        // Labels outside the opaque image would remain visible: do not suppress them or pass the gate.
+        if(covered) {
+            const walker=document.createTreeWalker(live,NodeFilter.SHOW_TEXT);let n;
+            // One CSS pixel on the screen: the white ring the accepted capture carries around its box.
+            const ring=root.getBoundingClientRect().width/parseFloat(root.style.width)||1;
+            contract.ring=a.boxShadow;
+            // The viewer clips its own labels (its label layer has overflow hidden): only the part of a label
+            // inside every clipping ancestor up to the viewer can be seen at all. That part must lie under
+            // the image.
+            const clipOf=node=>{let c={left:-Infinity,top:-Infinity,right:Infinity,bottom:Infinity};
+                for(let p=node.parentElement;p&&p!==live.parentElement;p=p.parentElement){const s=getComputedStyle(p);
+                    if(/(hidden|clip|auto|scroll)/.test(s.overflowX+s.overflowY)){const q=p.getBoundingClientRect();
+                        c={left:Math.max(c.left,q.left),top:Math.max(c.top,q.top),
+                           right:Math.min(c.right,q.right),bottom:Math.min(c.bottom,q.bottom)};}}
+                return c;};
+            while((n=walker.nextNode())) if(n.textContent.trim() && visible(n.parentElement)) {
+                const range=document.createRange();range.selectNodeContents(n);const clip=clipOf(n);
+                for(const r of range.getClientRects()) {
+                    const left=Math.max(r.left,clip.left),top=Math.max(r.top,clip.top),
+                          right=Math.min(r.right,clip.right),bottom=Math.min(r.bottom,clip.bottom);
+                    if(right-left<=0||bottom-top<=0) continue;
+                    if(left<box.left-ring||right>box.right+ring||top<box.top-ring||bottom>box.bottom+ring)
+                        uncovered.push(n.textContent);
+                }
+            }
+            covered=uncovered.length===0;
+        }
+    }
+    return {ready:current&&imagesReady&&overlaysReady&&covered, current, imagesReady, overlaysReady, liveCovered:covered,
+        hasFigure:!!page?.renderRequest, imageCount:images.length, liveEditing:state.partsManualDocumentationLiveEditPageId,
+        contract,uncovered};
+}"""
+
+
+def wait_for_p4b_publication_capture(page):
+    page.wait_for_function("""() => {
+        const s=window.__compareDbg.state, p=s.partsManualDocumentation.document.pages.find(p=>p.pageId===s.partsManualDocumentationPageId);
+        const root=document.querySelector('#documentationPublicationSurface');
+        const images=[...root.querySelectorAll('img.documentation-accepted-capture')];
+        const overlays=[...root.querySelectorAll('svg.documentation-publication-callouts')];
+        return !document.querySelector('#documentationWorkspace.busy') && (!p?.renderRequest ||
+            (images.length>0 && images.every(i=>i.complete&&i.naturalWidth>0&&i.classList.contains('ready')) &&
+                overlays.every(svg=>svg.classList.contains('ready'))));
+    }""", timeout=T(20000))
+    shown = page.evaluate(P4B_CAPTURE_STATE_JS)
+    if not shown["ready"]:
+        raise RuntimeError("Current figure is not showing its accepted capture: " + json.dumps(shown))
+    return shown
+
+
+# There are no accepted publication-word differences. Additions require a named selector/region,
+# a reason and an exact count here; never suppress a word globally or learn exceptions from a diff.
+P4B_WORD_EXCEPTIONS = []
+P4B_WORD_UI_SELECTORS = [
+    "button", "input", "select", "textarea", "[role=button]", "[data-handle]",
+    ".documentation-resize-handle", ".documentation-callout-handle",
+    ".documentation-figure-capture", ".documentation-rich-toolbar", ".spec-slot.open",
+]
+
+P4B_SURFACE_WORDS_JS = r"""({ui, exceptions, capture}) => {
+    const root = document.querySelector('#documentationPublicationSurface');
+    const scale = root.getBoundingClientRect().width / parseFloat(root.style.width);
+    const excluded = ui.join(','), counts = {}, fragments = [];
+    const live = root.querySelector('#assy-3d-container');
+    const boxes = new Map();
+    const blockKey = element => {
+        let n=element;
+        while(n!==root && n.tagName.toLowerCase()!=='text' &&
+            !['block','grid','flex','table-cell','list-item'].includes(getComputedStyle(n).display)) n=n.parentElement;
+        if(!boxes.has(n))boxes.set(n,boxes.size);return boxes.get(n);
+    };
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+        const element = node.parentElement;
+        if (!element || element.closest(excluded)) continue;
+        if (live?.contains(element) && capture.liveCovered && capture.contract) continue;
+        const style = getComputedStyle(element);
+        if (style.visibility !== 'visible' || style.display === 'none') continue;
+        let ancestor = element, clip = root.getBoundingClientRect(), hidden = false;
+        while (ancestor && ancestor !== root) {
+            const css = getComputedStyle(ancestor), box = ancestor.getBoundingClientRect();
+            if (css.display === 'none' || Number(css.opacity) === 0) { hidden = true; break; }
+            if (/(hidden|clip|auto|scroll)/.test(css.overflowX + css.overflowY)) {
+                clip = {left:Math.max(clip.left,box.left),top:Math.max(clip.top,box.top),
+                    right:Math.min(clip.right,box.right),bottom:Math.min(clip.bottom,box.bottom)};
+            }
+            ancestor = ancestor.parentElement;
+        }
+        if (hidden) continue;
+        let text = '', first = null, previous = null, offset = 0;
+        for (const character of node.textContent) {
+            const range = document.createRange();
+            range.setStart(node,offset); offset += character.length; range.setEnd(node,offset);
+            const r = range.getBoundingClientRect();
+            if (/\s/u.test(character)) { text += ' '; continue; }
+            if (!r.width || !r.height || r.right <= clip.left || r.left >= clip.right || r.bottom <= clip.top || r.top >= clip.bottom) continue;
+            text += character;
+            first ||= r; previous = r;
+        }
+        if (!text.trim()) continue;
+        if (style.textTransform === 'uppercase') text=text.toUpperCase();
+        if (style.textTransform === 'lowercase') text=text.toLowerCase();
+        const exception = exceptions.find(row => element.closest(row.selector));
+        if (exception) { counts[exception.name]=(counts[exception.name]||0)+text.trim().split(/\s+/u).length; continue; }
+        fragments.push({text,box:blockKey(element),breakBefore:node.previousSibling?.nodeName==='BR',
+            x:first.left,y:first.top,right:previous.right,bottom:previous.bottom,
+            element:element.tagName,cls:element.getAttribute('class')||''});
+    }
+    // DOM order is the publication's reading order. Join adjacent inline runs, but separate boxes:
+    // the notice signal's CSS gap, table cells and list markers are spaces in PDF word extraction.
+    let text = '', previous = null;
+    for (const f of fragments) {
+        if (previous && (previous.box!==f.box || f.breakBefore ||
+            (Math.abs(previous.y-f.y)<=2*scale && f.x-previous.right>1*scale))) text += ' ';
+        text += f.text; previous = f;
+    }
+    return {words:text.trim().split(/\s+/u).filter(Boolean), fragments, exceptions:counts};
+}"""
+
+
+def run_p4b_words(page, request, server, output, report, record, begin_edit, tool, fresh_page):
+    """Every publication page, real canvas text versus that exact PDF page; no inferred exclusions."""
+    from collections import Counter
+    import unicodedata
+    import fitz
+    started = time.monotonic()
+    h = rich_browser_helpers(page, request, server, output, report, begin_edit, fresh_page, "P4b-words")
+    ops = "operations_and_maintenance_manual"
+    kinds = [DOC_TYPE, ops, "work_instructions", "product_specification_sheet"]
+    evidence, exception_counts = [], Counter()
+    def checked(name, ok, details=None):
+        record("p4b_words_" + name, ok, details)
+    def scene_command(kind, payload, **fields):
+        response = request.post(h.base(kind)+"/documentation-scene/commands", data={
+            "baseRevision":payload["revision"], "sourceRevision":payload["scene"]["sourceRevision"],
+            "manualPlanRevision":payload["scene"]["manualPlanRevision"], **fields}, timeout=T(120000))
+        if not response.ok:
+            raise RuntimeError(response.text())
+        return response.json()
+    # Remove only the two fixtures this phase authored: one intentionally prevents the A4 transition.
+    payload = h.scene(ops)
+    for descriptor in payload["document"]["pages"]:
+        for key in ("document-object-p4b-fractions", "document-object-p4b-paper-fit"):
+            if key in descriptor.get("documentationObjects", {}):
+                payload = scene_command(ops, payload, operation="remove_object", pageId=descriptor["pageId"],
+                                        targetType="document_object", targetId=key)
+    for kind, paper in [(kind,None) for kind in kinds]+[(ops,"A4")]:
+        label = kind + "-" + (paper or "design")
+        try:
+            payload = h.scene(kind)
+            if payload["pageSetupOptions"]["current"] is not None or paper:
+                payload = scene_command(kind, payload, operation="set_page_setup", pageId=payload["document"]["pages"][0]["pageId"],
+                    targetType="document_page_setup", targetId="page-setup",
+                    pageSetup={"paper":paper,"orientation":"landscape"} if paper else None)
+            descriptors = payload["document"]["pages"]
+            page = h.open_document(kind, descriptors[0]["pageId"], pointer_refresh=True)
+            # Reuse captures retained by part 2. Capture All only fills this publication's missing revisions.
+            if any(p.get("renderRequest") and p["renderRequest"].get("image",{}).get("status") != "ready" for p in payload["document"]["pages"]):
+                page.locator('#documentationCaptureAllRibbon').click(timeout=T(10000))
+                page.wait_for_function("""() => !document.querySelector('#documentationWorkspace.busy') &&
+                    window.__compareDbg.state.partsManualDocumentation.document.pages.filter(p=>p.renderRequest)
+                    .every(p=>p.renderRequest.image?.status==='ready')""", timeout=T(240000))
+            response, exported = h.press_export(kind)
+            checked(label+"_export", response.ok, exported if not response.ok else None)
+            if not response.ok:
+                continue
+            if not exported.get("pdf") and exported.get("artifact"):
+                # Publishing the parts manual sends the browser to the PDF, which becomes a download: one
+                # aborted GET of that artifact, classified as in phase P4a (exactly one per publish).
+                report.setdefault("exportDownloadHandoffs", []).append(urlsplit(exported["artifact"]["url"]).path)
+            pdf_bytes = h.download(exported.get("pdf") or exported["artifact"], "words-"+label+".pdf")
+            with fitz.open(stream=pdf_bytes, filetype="pdf") as pdf:
+                checked(label+"_pages",len(pdf)==len(descriptors),{"canvas":len(descriptors),"pdf":len(pdf)})
+                for index, descriptor in enumerate(descriptors):
+                    name = label + "-" + descriptor["pageId"]
+                    try:
+                        # Activate each page once. The opening helper already activated the first page.
+                        if index:
+                            page.locator('#documentationPageList .documentation-page-item[data-page-id="'+descriptor["pageId"]+'"]').click(timeout=T(10000))
+                        page.wait_for_function("id => window.__compareDbg.state.partsManualDocumentationPageId===id",
+                            arg=descriptor["pageId"], timeout=T(20000))
+                        shown = wait_for_p4b_publication_capture(page)
+                        measured = page.evaluate(P4B_SURFACE_WORDS_JS, {"ui":P4B_WORD_UI_SELECTORS,"exceptions":P4B_WORD_EXCEPTIONS,"capture":shown})
+                        expected = [str(w[4]) for w in pdf[index].get_text("words", sort=True)]
+                        normalized = lambda words: Counter(unicodedata.normalize("NFKC", " ".join(words)).split())
+                        canvas_words, pdf_words = normalized(measured["words"]), normalized(expected)
+                        extra, missing = canvas_words-pdf_words, pdf_words-canvas_words
+                        item = {"publication":label,"pageId":descriptor["pageId"],"pageNumber":index+1,
+                            "canvasCount":sum(canvas_words.values()),"pdfCount":sum(pdf_words.values()),
+                            "extra":dict(extra),"missing":dict(missing),"exceptions":measured["exceptions"],"capture":shown}
+                        exception_counts.update(measured["exceptions"])
+                        evidence.append(item)
+                        checked(name,not extra and not missing,item)
+                        if extra or missing:
+                            write_json(output/("words-"+name+".json"),{"measurement":measured,"pdfWords":expected})
+                            page.locator('#documentationPublicationSurface').screenshot(path=str(output/("words-"+name+".png")),timeout=T(15000))
+                            pdf[index].get_pixmap(matrix=fitz.Matrix(1,1),alpha=False).save(str(output/("words-"+name+"-pdf.png")))
+                    except Exception as error:
+                        checked(name,False,{"error":str(error)})
+        except Exception as error:
+            checked(label,False,{"error":str(error)})
+    table = [{**row,"actualCount":exception_counts[row["name"]]} for row in P4B_WORD_EXCEPTIONS]
+    checked("exception_counts",all(row["actualCount"]==row["count"] for row in table),table)
+    report["p4bWordExceptions"] = table
+    report["p4bWordComparisons"] = evidence
+    print("P4b word exceptions: " + json.dumps(table,ensure_ascii=True),flush=True)
+    write_json(output/"p4b-words.json",{"pages":evidence,"exceptions":table})
+    checked("budget",time.monotonic()-started<=360*max(1,SLOW),{"seconds":time.monotonic()-started,"slow":SLOW})
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--phase", required=True, choices=PHASES)
@@ -4306,6 +4546,7 @@ def main():
 
         if args.phase == "P4b":
             run_p4b(page, request, server, output, report, record, begin_edit, tool, fresh_page)
+            run_p4b_words(page, request, server, output, report, record, begin_edit, tool, fresh_page)
         elif args.phase == "P4a":
             run_p4a(page, request, server, output, report, record, begin_edit, tool, fresh_page)
             run_p4a_controls(page, request, server, output, report, record, begin_edit, tool, fresh_page)

@@ -221,7 +221,7 @@ def test_export_refusals_name_object_and_write_no_artifact(builder, failure, tmp
 
 @pytest.mark.parametrize("builder", BUILDERS)
 @pytest.mark.parametrize("text", [False, True])
-def test_text_only_pdf_content_is_identical_to_p3b2(builder, text, tmp_path, image_path, monkeypatch):
+def test_text_only_pdf_keeps_p3b2_geometry_with_fidelity_additions(builder, text, tmp_path, image_path, monkeypatch):
     document = fixture_document(builder)
     if text:
         attach(document, mixed())
@@ -240,11 +240,12 @@ def test_text_only_pdf_content_is_identical_to_p3b2(builder, text, tmp_path, ima
                    old_caller if builder in {"specification","fillable"} else spec,
                    old_caller if builder in {"operations","wi"} else ops)
         previous = build(builder, document, tmp_path, modules=modules)
-    assert current == previous
+    from tests.documentation_fidelity_support import assert_pdf_fidelity_delta
+    assert_pdf_fidelity_delta(previous, current, document)
 
 
 @pytest.mark.parametrize("builder", ["operations", "wi", "specification"])
-def test_text_only_docx_xml_parts_equal_p3b2(builder, tmp_path, image_path, monkeypatch):
+def test_text_only_docx_keeps_p3b2_xml_except_header_clearance(builder, tmp_path, image_path, monkeypatch):
     document = attach(fixture_document(builder), mixed())
     current = docx_parts(build_docx(builder, document, tmp_path))
     old_docx = legacy_module(rich_docx, monkeypatch, "5cf7f26")
@@ -255,9 +256,8 @@ def test_text_only_docx_xml_parts_equal_p3b2(builder, tmp_path, image_path, monk
         if builder == "specification":
             old_caller.draft_render_path = lambda *args: image_path
         previous = docx_parts(build_docx(builder, document, tmp_path, old_caller))
-    assert current.keys() == previous.keys()
-    for name in current:
-        assert etree.tostring(current[name]) == etree.tostring(previous[name]), name
+    from tests.documentation_fidelity_support import assert_docx_fidelity_delta
+    assert_docx_fidelity_delta(previous, current, document)
 
 
 @pytest.mark.parametrize("builder", ["operations","wi","specification"])
@@ -418,3 +418,190 @@ def test_docx_holds_a_camera_picture_upright(turn, tmp_path, image_path):
     assert int(extent.get("cx")) == pytest.approx(w * 12700, abs=1)
     assert int(extent.get("cy")) == pytest.approx(h * 12700, abs=1)
     assert native.xpath(".//a:xfrm/@rot", namespaces=NS) == []
+
+
+# P4b-3: paper is an axis of the complete object/figure matrix, using real compilers and stores.
+from tests.test_documentation_refresh import mmle_client
+from tests.test_documentation_page_setup import (
+    _real, command, setup, capture_document, figure_revisions, PARTS, OPS, WI, SPEC,
+)
+
+PAPER_BUILDERS = [("parts", PARTS, "parts-manual"), ("operations", OPS, "operations-manual"),
+    ("wi", WI, "work-instructions"), ("specification", SPEC, "specification-sheet"),
+    ("fillable", SPEC, "specification-sheet")]
+
+
+def real_pdf(builder, document, root):
+    if builder == "parts":
+        return parts.build_manual_pdf_bytes(root, "MMLE-50D", document)
+    if builder == "fillable":
+        return spec.build_specification_fillable_pdf_bytes(document, render_root=root, assembly_number="MMLE-50D")[0]
+    if builder == "specification":
+        return spec.build_specification_pdf_bytes(document, render_root=root, assembly_number="MMLE-50D")
+    return ops.build_prototype_pdf_bytes(root, "MMLE-50D", document)
+
+
+def real_docx(builder, document, root):
+    if builder == "specification":
+        return spec.build_specification_docx_bytes(document, render_root=root, assembly_number="MMLE-50D")
+    return ops.build_prototype_docx_bytes(root, "MMLE-50D", document)
+
+
+def paper_objects(root):
+    from tests.test_documentation_tables import table_value
+    data = quadrant_png()
+    key = hashlib.sha256(data).hexdigest()
+    folder = root / "mmle-50d" / "documentation-assets"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / (key + ".png")).write_bytes(data)
+    def box(key, x, y, width=.28, height=.14, **fields):
+        return value("document-object-paper-" + key, frame={"x": x, "y": y,
+            "width": width, "height": height, "rotation": 0}, **fields)
+    return [box("plain", .04, .12, type="text", content="PaperPlain", styleOverrides={"fontSize": 10}),
+            box("rich", .36, .12, type="text", content=from_plain("PaperRich"), styleOverrides={"fontSize": 12}),
+            box("table", .04, .3, width=.36, height=.24, type="text", content=table_value(2, 2), styleOverrides={"fontSize": 10}),
+            box("image", .48, .34, type="image", altText="Paper quadrants", contentMode="contain", asset={
+                "assetId": key, "filename": "quadrants.png", "mimeType": "image/png",
+                "url": "/api/parts-manual/MMLE-50D/documentation-assets/" + key}),
+            box("shape", .7, .62, width=.12, height=.14, type="shape", name="Paper rectangle",
+                shapeType="rectangle", styleOverrides={"fill": "#ff0000", "lineWidth": 0})]
+
+
+def expected_capture_box(document, descriptor):
+    """Independent contain placement inside the compiled paper frame, including fixed PDF insets."""
+    kind = document["documentType"]
+    request = descriptor["renderRequest"]
+    if kind == PARTS:
+        from ai_inspector.parts_manual.layout import page_layout
+        regions = page_layout(descriptor["pageType"], layout_mode=descriptor.get("pageLayout"),
+                              layout=document["publicationLayout"])
+        frame = regions["illustration"]
+        inset = 0 if descriptor["pageType"] == "cover" and not regions.get("illustrationFramed") else 4
+        x, y, width, height = frame["x"]+inset, frame["y"]+inset, frame["width"]-2*inset, frame["height"]-2*inset
+    elif descriptor["pageType"] == "operations_cover":
+        frame = request.get("frame") or document["publicationLayout"]["pageTypes"]["operations_cover"]["illustration"]
+        x, y, width, height = (frame[k] for k in ("x", "y", "width", "height"))
+    else:
+        frame = next(b["frame"] for b in descriptor["layoutBlocks"] if b["blockType"] == "cad_figure")
+        x, y, width, height = frame["x"], frame["y"], frame["width"], frame["height"]-18
+    image = request["image"]
+    # The real stores record the captured dimensions; no exporter helper computes the expectation.
+    pixels = (image["widthPx"], image["heightPx"])
+    scale = min(width/pixels[0], height/pixels[1])
+    w, h = pixels[0]*scale, pixels[1]*scale
+    return (x+(width-w)/2, y+(height-h)/2, x+(width+w)/2, y+(height+h)/2), pixels
+
+
+@pytest.mark.parametrize("paper", ["Letter", "A4"])
+@pytest.mark.parametrize("builder,kind,route", PAPER_BUILDERS)
+def test_paper_matrix_all_authored_kinds_and_cad_footprints(mmle_client, builder, kind, route, paper, real_publications):
+    document, root = real_publications.captured(mmle_client, route, paper)
+    baseline = real_publications.export(mmle_client, route, paper, "fillable" if builder == "fillable" else "pdf")
+    items = paper_objects(root)
+    put(document, items)
+    payload = real_pdf(builder, document, root)
+    size = objects.page_size(document)
+    plans = rich_layout.prepare_pdf_objects(fitz, document, size)
+    with fitz.open(stream=payload, filetype="pdf") as pdf, fitz.open(stream=baseline, filetype="pdf") as old:
+        assert all(tuple(p.rect)[2:] == pytest.approx(size, abs=.01) for p in pdf)
+        page = pdf[0]
+        for item, word in zip(items[:2], ("PaperPlain", "PaperRich")):
+            matches = page.search_for(word)
+            assert len(matches) == 1
+            frame = item["frame"]
+            assert matches[0].x0 == pytest.approx(frame["x"] * size[0] + 3, abs=.05)
+            assert frame["y"] * size[1] <= matches[0].y0 < (frame["y"] + frame["height"]) * size[1]
+        plan = plans[document["pages"][0]["pageId"]][items[2]["objectId"]]
+        for line in plan.layout.lines:
+            for run in line.runs:
+                if not run.text.strip():
+                    continue
+                found = [span for span in page.get_texttrace()
+                         if "".join(chr(c[0]) for c in span["chars"]) == run.text]
+                assert any(abs(span["chars"][0][2][0]-run.x) < .05 and
+                           abs(span["chars"][0][2][1]-run.baseline) < .05 for span in found), run.text
+        table = plan.layout.tables[0]
+        assert table.box[0] == pytest.approx(items[2]["frame"]["x"] * size[0] + 3)
+        assert any(d.get("fill") == pytest.approx((233/255, 238/255, 242/255), abs=.001)
+                   for d in page.get_drawings() if d.get("fill"))
+        for point, color in zip(drawn_points(items[3], size), COLORS):
+            assert_color(color_at(page, point), color)
+        f = items[4]["frame"]
+        assert_color(color_at(page, ((f["x"]+f["width"]/2)*size[0], (f["y"]+f["height"]/2)*size[1])), COLORS[0])
+        # Every generated capture keeps the compiler's paper frame and its original image transform.
+        figures = 0
+        for i, descriptor in enumerate(document["pages"]):
+            if not descriptor.get("renderRequest"):
+                continue
+            previous = old[i].get_image_info()
+            assert previous, descriptor["pageId"]
+            expected_box, pixels = expected_capture_box(document, descriptor)
+            assert any((v["width"], v["height"]) == pixels and
+                       tuple(v["bbox"]) == pytest.approx(expected_box, abs=.05) for v in previous), descriptor["pageId"]
+            current = pdf[i].get_image_info()
+            for image_info in previous:
+                assert any(v["bbox"] == image_info["bbox"] and v["transform"] == image_info["transform"] for v in current)
+                assert fitz.Rect(image_info["bbox"]) in pdf[i].rect
+            figures += 1
+        assert figures
+    if builder in {"operations", "wi", "specification"}:
+        from docx import Document
+        from docx.enum.section import WD_ORIENT
+        payload = real_docx(builder, document, root)
+        for section in Document(io.BytesIO(payload)).sections:
+            assert (section.page_width.pt, section.page_height.pt) == pytest.approx(size, abs=.03)
+            assert section.orientation == (WD_ORIENT.LANDSCAPE if size[0] > size[1] else WD_ORIENT.PORTRAIT)
+        xml = docx_parts(payload)["word/document.xml"]
+        text = "".join(xml.xpath("//w:t/text()", namespaces=NS))
+        assert all(word in text for word in ("PaperPlain", "PaperRich", "R0C0", "R0C1", "R1C0", "R1C1"))
+        assert xml.xpath("//w:tbl//w:tbl", namespaces=NS)
+        descriptions = xml.xpath("//wp:docPr/@descr", namespaces=NS)
+        assert "Paper quadrants" in descriptions and "Shape: Paper rectangle" in descriptions
+        assert len(xml.xpath("//wp:inline", namespaces=NS)) >= figures + 2
+
+
+@pytest.mark.parametrize("builder,kind,route", PAPER_BUILDERS)
+@pytest.mark.parametrize("failure", ["glyph", "overflow", "missing_capture", "stale_capture"])
+def test_a4_matrix_refusals_before_artifact(mmle_client, builder, kind, route, failure, tmp_path, real_publications):
+    root = tmp_path / "refusal"
+    if failure == "stale_capture":
+        design, root = real_publications.captured(mmle_client, route)
+        assert list(root.rglob("*.png"))
+    document = real_publications.document(mmle_client, route, "A4")
+    if failure in {"glyph", "overflow"}:
+        document, root = real_publications.captured(mmle_client, route, "A4")
+        attach(document, from_plain("Unsupported \U0001f642" if failure == "glyph" else "Too tall\n" * 40),
+               frame={"x": .1, "y": .2, "width": .4, "height": .02, "rotation": 0})
+    elif failure == "stale_capture":
+        assert figure_revisions(design) != figure_revisions(document)
+        # Reattach through the real store: design captures cannot satisfy the new paper revision.
+        if kind == PARTS:
+            from ai_inspector.parts_manual.artifacts import attach_render_artifacts
+            document = attach_render_artifacts(root, "MMLE-50D", document)
+        else:
+            from ai_inspector.operations_manual.artifacts import attach_draft_render_artifacts
+            probe = {**document, "documentRevision": document["figureRevision"]} if kind == SPEC else document
+            attached = attach_draft_render_artifacts(root, "MMLE-50D", probe)
+            assert any(p["renderRequest"]["image"].get("status") != "ready" for p in attached["pages"] if p.get("renderRequest"))
+    with pytest.raises(Exception) as caught:
+        real_pdf(builder, document, root)
+    error = caught.value
+    if failure in {"glyph", "overflow"}:
+        assert isinstance(error, DocumentEditError)
+        assert error.code == ("unsupported_export_glyph" if failure == "glyph" else "layout_overflow")
+        assert any(t["targetId"] == TARGET for t in error.details["targets"])
+    else:
+        assert "captur" in str(error).lower() or "illustration" in str(error).lower()
+    assert not list(root.rglob("*.pdf"))
+
+
+def test_unsupported_docx_capabilities_remain_explicit():
+    from ai_inspector.documentation.registry import document_type_definition
+    for kind in (PARTS, "inspection_sheet"):
+        assert document_type_definition(kind)["supports"]["docx"] is False
+
+
+@pytest.fixture(scope="module")
+def real_publications(tmp_path_factory):
+    from tests.documentation_paper_support import PaperPublications
+    return PaperPublications(tmp_path_factory.mktemp("paper"))

@@ -1250,7 +1250,7 @@ def build_manual_pdf_bytes(
         elif page_type == "document_information":
             _draw_header(fitz, page, descriptor, document, root, assembly_number)
             fit.target(page, descriptor, "document_control_heading")
-            page.insert_textbox(fitz.Rect(geometry.x(48), geometry.y(70), width - geometry.x(48), geometry.y(98)), "DOCUMENT CONTROL", fontsize=18, fontname="hebo", color=(0.05, 0.27, 0.44))
+            page.insert_textbox(fitz.Rect(geometry.x(48), geometry.y(70), width - geometry.x(48), geometry.y(102)), "DOCUMENT CONTROL", fontsize=18, fontname="hebo", color=(0.05, 0.27, 0.44))
             control = descriptor.get("documentControl") or {}
             _draw_key_value_table(
                 fitz,
@@ -1278,7 +1278,7 @@ def build_manual_pdf_bytes(
         elif page_type == "table_of_contents":
             _draw_header(fitz, page, descriptor, document, root, assembly_number)
             fit.target(page, descriptor, "contents_heading")
-            page.insert_textbox(fitz.Rect(geometry.x(48), geometry.y(66), width - geometry.x(48), geometry.y(96)), "TABLE OF CONTENTS", fontsize=18, fontname="hebo", color=(0.05, 0.27, 0.44))
+            page.insert_textbox(fitz.Rect(geometry.x(48), geometry.y(66), width - geometry.x(48), geometry.y(98)), "TABLE OF CONTENTS", fontsize=18, fontname="hebo", color=(0.05, 0.27, 0.44))
             fit.target(page, descriptor, "contents_figure_header")
             page.insert_textbox(fitz.Rect(geometry.x(58), geometry.y(102), geometry.x(145), geometry.y(119)), "FIGURE", fontsize=7, fontname="hebo", color=(0.25, 0.36, 0.43))
             fit.target(page, descriptor, "contents_title_header")
@@ -1385,7 +1385,7 @@ def build_manual_pdf_bytes(
             _draw_header(fitz, page, descriptor, document, root, assembly_number)
             heading = "PART NUMBER INDEX (CONTINUED)" if descriptor.get("continuedFrom") else "PART NUMBER INDEX"
             fit.target(page, descriptor, "parts_index_heading")
-            page.insert_textbox(fitz.Rect(geometry.x(48), geometry.y(66), width - geometry.x(48), geometry.y(96)), heading, fontsize=18, fontname="hebo", color=(0.05, 0.27, 0.44))
+            page.insert_textbox(fitz.Rect(geometry.x(48), geometry.y(66), width - geometry.x(48), geometry.y(98)), heading, fontsize=18, fontname="hebo", color=(0.05, 0.27, 0.44))
             y = geometry.y(106.0)
             for row_index, row in enumerate(descriptor.get("entries") or []):
                 refs = ", ".join(

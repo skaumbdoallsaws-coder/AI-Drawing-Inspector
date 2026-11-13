@@ -367,7 +367,11 @@ def test_plain_parts_text_is_reported_but_export_stays_legacy(tmp_path, monkeypa
     previous = legacy_module(parts_pdf, monkeypatch, COMMIT)
     save = fitz.Document.tobytes
     monkeypatch.setattr(fitz.Document, "tobytes", lambda self,*a,**kw: save(self,*a,**{**kw,"no_new_id":True}))
-    assert parts_pdf.build_manual_pdf_bytes(tmp_path, "PROOF", document) == previous.build_manual_pdf_bytes(tmp_path, "PROOF", document)
+    # The overflowing plain text is dropped as before (reported, never refused); the only difference from the
+    # committed caller is the text P4b-3 restores.
+    from tests.documentation_fidelity_support import assert_pdf_fidelity_delta
+    assert_pdf_fidelity_delta(previous.build_manual_pdf_bytes(tmp_path, "PROOF", document),
+                              parts_pdf.build_manual_pdf_bytes(tmp_path, "PROOF", document), document)
 
 def test_fit_candidate_is_checked_before_history_or_write(scene):
     loaded = scene.load(); original = scene.path.read_bytes()
@@ -385,7 +389,7 @@ def test_fit_candidate_is_checked_before_history_or_write(scene):
 
 
 @pytest.mark.parametrize("builder", BUILDERS)
-def test_no_setup_pdf_bytes_equal_committed_caller(builder, tmp_path, image_path, monkeypatch):
+def test_no_setup_pdf_only_approved_fidelity_additions_since_committed_caller(builder, tmp_path, image_path, monkeypatch):
     document = attach(fixture_document(builder), mixed())
     save = fitz.Document.tobytes
     monkeypatch.setattr(fitz.Document, "tobytes", lambda self,*a,**kw: save(self,*a,**{**kw,"no_new_id":True}))
@@ -395,11 +399,12 @@ def test_no_setup_pdf_bytes_equal_committed_caller(builder, tmp_path, image_path
         previous.draft_render_path = lambda *a: image_path
     modules = (previous if builder == "parts" else parts_pdf, previous if builder in {"specification", "fillable"} else spec_pdf,
                previous if builder in {"operations", "wi"} else operations_pdf)
-    assert build(builder, document, tmp_path) == build(builder, document, tmp_path, modules=modules)
+    from tests.documentation_fidelity_support import assert_pdf_fidelity_delta
+    assert_pdf_fidelity_delta(build(builder, document, tmp_path, modules=modules), build(builder, document, tmp_path), document)
 
 
 @pytest.mark.parametrize("builder", ["operations", "wi", "specification"])
-def test_no_setup_docx_parts_equal_committed_caller(builder, tmp_path, image_path, monkeypatch):
+def test_no_setup_docx_only_header_clearance_since_committed_caller(builder, tmp_path, image_path, monkeypatch):
     from lxml import etree
     document = attach(fixture_document(builder), mixed())
     previous = legacy_module(spec_pdf if builder == "specification" else operations_pdf, monkeypatch, COMMIT)
@@ -407,8 +412,8 @@ def test_no_setup_docx_parts_equal_committed_caller(builder, tmp_path, image_pat
         previous.draft_render_path = lambda *a: image_path
     now = docx_parts(build_docx(builder, document, tmp_path))
     old = docx_parts(build_docx(builder, document, tmp_path, previous))
-    assert now.keys() == old.keys()
-    assert all(etree.tostring(now[k]) == etree.tostring(old[k]) for k in now)
+    from tests.documentation_fidelity_support import assert_docx_fidelity_delta
+    assert_docx_fidelity_delta(old, now, document)
 
 
 @pytest.mark.parametrize("builder", BUILDERS)
@@ -428,11 +433,9 @@ def test_a4_export_page_and_docx_section_geometry(builder, tmp_path, image_path)
 
 
 @pytest.mark.parametrize("kind,route", MMLE_ROUTES)
-def test_real_compiler_pagination_and_capture_binding(mmle_client, kind, route):
-    before = _real(mmle_client, route)
-    response = command(mmle_client, route, before, setup(kind))
-    assert response.status_code == 200, response.text
-    after = response.json()["document"]
+def test_real_compiler_pagination_and_capture_binding(mmle_client, kind, route, real_publications):
+    before = {"document": real_publications.document(mmle_client, route)}
+    after = real_publications.document(mmle_client, route, "A4")
     assert after["pageCount"] == len(after["pages"])
     assert [p["pageNumber"] for p in after["pages"]] == list(range(1, after["pageCount"] + 1))
     for page in after["pages"]:
@@ -510,8 +513,8 @@ def test_real_relative_fit_in_both_directions_and_clear(mmle_client):
     assert "pageSetup" not in accepted(paper, None)["document"]
 
 @pytest.mark.parametrize("kind,route", MMLE_ROUTES)
-def test_fit_report_skips_capture_file_access(mmle_client, kind, route, tmp_path, monkeypatch):
-    document = _real(mmle_client, route)["document"]
+def test_fit_report_skips_capture_file_access(mmle_client, kind, route, tmp_path, monkeypatch, real_publications):
+    document = real_publications.document(mmle_client, route)
     root = tmp_path / "captures"
     def forbidden(*args, **kwargs):
         raise AssertionError("Fit must not look for or open a capture")
@@ -541,7 +544,7 @@ def test_parts_row_minimum_and_outside_objects_are_reported(tmp_path):
     report = parts_pdf.fit_report(tmp_path, "PROOF", document)
     assert any(r["pageId"] == "page-bom" and r["targetId"] == "bom" and r["reason"] == "row_too_small" for r in report)
     assert any(r["targetId"] == TARGET and r["reason"] == "outside_page" for r in report)
-    assert any(r["targetId"] == "contents_heading" for r in report)
+    assert not any(r["targetId"] == "contents_heading" for r in report)
     assert not any(r["targetId"] == "header_title" for r in report)
 
 def test_generated_plain_failures_are_collected_in_page_order(tmp_path):
@@ -589,26 +592,22 @@ def test_work_capture_taken_on_design_page_is_stale_on_paper(tmp_path):
 
 @pytest.mark.parametrize("paper", ["Letter", "A4"])
 @pytest.mark.parametrize("kind,route", MMLE_ROUTES)
-def test_real_preset_pdf_and_docx_sizes_with_fresh_captures(mmle_client, kind, route, paper, tmp_path):
-    before = _real(mmle_client, route)
-    changed = command(mmle_client, route, before, setup(kind, paper))
-    assert changed.status_code == 200, changed.text
-    document = changed.json()["document"]
-    root = tmp_path / "captures"
-    document = capture_document(root, document, route)
+def test_real_preset_pdf_and_docx_sizes_with_fresh_captures(mmle_client, kind, route, paper, real_publications):
+    before = {"document": real_publications.document(mmle_client, route)}
+    document, root = real_publications.captured(mmle_client, route, paper)
     size = layout.geometry(kind, setup(kind, paper)).page
     if kind == PARTS:
-        payload = parts_pdf.build_manual_pdf_bytes(root, "MMLE-50D", document)
+        payload = real_publications.export(mmle_client, route, paper)
         word = None
     elif kind == SPEC:
-        payload = spec_pdf.build_specification_pdf_bytes(document, render_root=root, assembly_number="MMLE-50D")
-        word = spec_pdf.build_specification_docx_bytes(document, render_root=root, assembly_number="MMLE-50D")
-        fillable, _ = spec_pdf.build_specification_fillable_pdf_bytes(document, render_root=root, assembly_number="MMLE-50D")
+        payload = real_publications.export(mmle_client, route, paper)
+        word = real_publications.export(mmle_client, route, paper, "docx")
+        fillable = real_publications.export(mmle_client, route, paper, "fillable")
         with fitz.open(stream=fillable, filetype="pdf") as pdf:
             assert (pdf[0].rect.width, pdf[0].rect.height) == pytest.approx((size["width"], size["height"]), abs=.01)
     else:
-        payload = operations_pdf.build_prototype_pdf_bytes(root, "MMLE-50D", document)
-        word = operations_pdf.build_prototype_docx_bytes(root, "MMLE-50D", document)
+        payload = real_publications.export(mmle_client, route, paper)
+        word = real_publications.export(mmle_client, route, paper, "docx")
     with fitz.open(stream=payload, filetype="pdf") as pdf:
         assert len(pdf) == document["pageCount"]
         for page in pdf:
@@ -636,6 +635,10 @@ def test_identity_layout_contract_bytes_equal_p4a2(module, name, kind, monkeypat
     previous = legacy_module(module, monkeypatch, COMMIT)
     expected = getattr(previous, name)()
     actual = getattr(module, name)(layout.geometry(kind))
+    if kind == PARTS:
+        assert expected["pageTypes"]["cover"]["documentControl"]["height"] == 50
+        assert actual["pageTypes"]["cover"]["documentControl"]["height"] == 56
+        expected["pageTypes"]["cover"]["documentControl"]["height"] = 56.0
     assert json.dumps(actual, ensure_ascii=True) == json.dumps(expected, ensure_ascii=True)
 
 
@@ -752,11 +755,9 @@ def test_identity_letter_preserves_captures(mmle_client, kind, route, tmp_path):
 
 
 @pytest.mark.parametrize("kind,route", [(WI, "work-instructions"), (SPEC, "specification-sheet")])
-def test_fixed_block_geometry_inventory(mmle_client, kind, route):
-    before = _real(mmle_client, route)
-    response = command(mmle_client, route, before, setup(kind))
-    assert response.status_code == 200, response.text
-    after = response.json()["document"]
+def test_fixed_block_geometry_inventory(mmle_client, kind, route, real_publications):
+    before = {"document": real_publications.document(mmle_client, route)}
+    after = real_publications.document(mmle_client, route, "A4")
     g = layout.geometry(kind, setup(kind))
     for old_page, new_page in zip(before["document"]["pages"], after["pages"]):
         for old, new in zip(old_page.get("layoutBlocks", []), new_page.get("layoutBlocks", [])):
@@ -779,8 +780,11 @@ def test_fit_attribution_uses_the_drawn_element_and_alias(tmp_path):
     document["aliasMap"] = {page["pageId"]: {
         "contents_heading": {"targetId": "stable-contents-heading"},
         "header_title": {"targetId": "stable-header-title"}}}
+    # Exercise attribution with deliberately short paper, not the fixed generator omission.
+    document["publicationLayout"] = parts_layout.publication_layout()
+    document["publicationLayout"]["page"]["height"] = 80
     report = parts_pdf.fit_report(tmp_path, "PROOF", document)
-    assert any(r["targetId"] == "stable-contents-heading" and r["reason"] == "text_does_not_fit" for r in report)
+    assert any(r["targetId"] == "stable-contents-heading" and r["reason"] == "outside_page" for r in report)
     assert not any(r["targetId"] in {page["pageId"], "stable-header-title"} for r in report)
 
 
@@ -843,8 +847,7 @@ def test_the_renderers_need_is_what_the_estimate_reserves(size):
 
 
 def test_old_findings_of_the_design_page_do_not_block_another_paper_or_the_way_back(mmle_client):
-    """The contents block of the real operations manual is 5 pt over its frame on the design page and fits on
-    Letter. Going from Letter to A4, and clearing the setup, must not be refused for it."""
+    """Round trips remain accepted after fixing the formerly short contents frame."""
     route = "operations-manual"
     before = _real(mmle_client, route)
     response = command(mmle_client, route, before, setup(OPS, "Letter"))
@@ -1027,3 +1030,141 @@ def test_page_setup_bindings_require_options_and_keep_retry_preimage():
     bindings.record(OPS, {"pageSetupBinding": {**first, "sceneRevision": "b", "pageSetupHash": "new"}})
     assert bindings.bind_operations(OPS, args) == {**first, **args}
     assert bindings.bind_operations(OPS, {**args, "requestId": "next"})["pageSetupHash"] == "new"
+
+
+# P4b-3: real generators have no known fit debt on any advertised paper.
+@pytest.mark.parametrize("paper", [None, "Letter", "A4"])
+@pytest.mark.parametrize("kind,route", MMLE_ROUTES)
+def test_real_publication_fit_report_is_empty(mmle_client, kind, route, paper, real_publications):
+    assert real_publications.fit_report(mmle_client, route, paper) == []
+
+
+@pytest.mark.parametrize("paper", [None, "Letter", "A4"])
+@pytest.mark.parametrize("count", [19, 22, 45])
+def test_contents_reserves_whole_rows_and_continues_before_body(paper, count):
+    from ai_inspector.operations_manual.document import _contents_pages, _contents_capacity
+    g = layout.geometry(OPS, setup(OPS, paper) if paper else None)
+    capacity = _contents_capacity(g)
+    start = 3 + (count + capacity - 1) // capacity
+    sections = [{"sectionId": "proof", "title": "Proof", "blocks": [
+        {"blockId": "heading", "blockType": "heading", "payload": {"level": 1, "text": "Proof"}}]}]
+    body = flow.FlowLayoutEngine(start_page_number=start, geometry=g).layout(sections)
+    rows = [{"sourceKey": str(i), "title": "Entry " + str(i), "pageNumber": body[0]["pageNumber"]} for i in range(count)]
+    pages = _contents_pages(rows, g)
+    assert len(pages) == (count + capacity - 1) // capacity
+    assert [r for p in pages for r in p["entries"]] == rows
+    assert body[0]["pageNumber"] == pages[-1]["pageNumber"] + 1
+    for p in pages:
+        block = p["layoutBlocks"][1]
+        frame = block["frame"]
+        assert frame["height"] >= len(p["entries"]) * 18
+        assert frame["y"] + frame["height"] <= g.page["height"]
+    if count == 19:
+        assert len(pages) == 1
+
+
+@pytest.mark.parametrize("kind,route", MMLE_ROUTES)
+def test_compiled_notice_semantics_match_pdf_vocabulary(mmle_client, kind, route, real_publications):
+    from ai_inspector.documentation.safety import safety_symbol_semantics
+    document = real_publications.document(mmle_client, route)
+    for page in document["pages"]:
+        for block in page.get("layoutBlocks", []):
+            if block.get("blockType") in {"note", "status_panel", "draft_banner"} and kind in {OPS, WI}:
+                expected = safety_symbol_semantics(block.get("signalWord") or block.get("tone"))
+                assert block["safetySymbol"]["kind"] == expected["kind"]
+                assert tuple(block["safetySymbol"]["color"]) == expected["color"]
+
+
+def test_work_parts_allocation_uses_all_rows_and_moves_only_the_following_notice(mmle_client, real_publications):
+    document = real_publications.document(mmle_client, "work-instructions")
+    found = []
+    for page in document["pages"]:
+        blocks = {b["blockId"]: b for b in page.get("layoutBlocks", [])}
+        for block in blocks.values():
+            if block.get("blockType") == "list" and block["blockId"].endswith("-parts"):
+                needed = max(34, sum(block["rowHeights"]))
+                assert block["frame"] == {"x": 34, "y": 412, "width": 516, "height": needed}
+                notice = blocks[block["blockId"][:-6] + "-safety"]
+                assert notice["frame"]["y"] == max(450, 412 + needed + 4)
+                found.append(needed)
+    assert 44 in found
+
+
+@pytest.mark.parametrize("paper", [None, "Letter", "A4"])
+@pytest.mark.parametrize("builder", ["operations", "wi"])
+def test_docx_body_starts_below_real_header_band(builder, paper, tmp_path, image_path):
+    document = fixture_document(builder)
+    document["publicationLayout"] = flow.publication_layout()
+    if paper:
+        document = _paper(document, paper)
+    payload = build_docx(builder, document, tmp_path)
+    header = document["publicationLayout"]["shared"]["header"]
+    bottom = header["y"] + header["height"]
+    for section in Document(io.BytesIO(payload)).sections:
+        assert section.top_margin.pt == pytest.approx(bottom + 12, abs=.03)
+        assert section.header_distance.pt == 12
+        assert section.top_margin.pt > bottom
+    package = docx_parts(payload)
+    bands = [element for name, xml in package.items() if name.startswith("word/header")
+             for element in xml.iter() if element.get("id") == "operations-body-header-band"]
+    assert len(bands) == 1
+    assert f"height:{header['height']:.3f}pt" in bands[0].get("style").replace(" ", "")
+
+
+@pytest.mark.parametrize("kind,route", MMLE_ROUTES)
+def test_real_design_pdf_preserves_8ac3838_ink_except_named_additions(mmle_client, kind, route, monkeypatch, real_publications):
+    """Run the old drawing code on the real publication, retaining the explicit compiler-frame checks above."""
+    from tests.documentation_fidelity_support import assert_pdf_fidelity_delta
+    document, tmp_path = real_publications.captured(mmle_client, route)
+    previous_document = deepcopy(document)
+    current = parts_pdf if kind == PARTS else spec_pdf if kind == SPEC else operations_pdf
+    previous = legacy_module(current, monkeypatch, COMMIT)
+    if kind == PARTS:
+        # The old cover rectangle belongs to the layout contract, not the PDF caller.
+        previous_document["publicationLayout"]["pageTypes"]["cover"]["documentControl"]["height"] = 50
+    if kind == OPS:
+        for page in previous_document["pages"]:
+            for block in page.get("layoutBlocks", []):
+                if block["blockType"] == "contents_list":
+                    block["frame"]["height"] = 330
+    def render(module, value):
+        if kind == PARTS:
+            return module.build_manual_pdf_bytes(tmp_path, "MMLE-50D", value)
+        if kind == SPEC:
+            return module.build_specification_pdf_bytes(value, render_root=tmp_path, assembly_number="MMLE-50D")
+        return module.build_prototype_pdf_bytes(tmp_path, "MMLE-50D", value)
+    current_pdf = real_publications.export(mmle_client, route)
+    assert_pdf_fidelity_delta(render(previous, previous_document), current_pdf, document)
+    if kind == WI:
+        # The row allocator test pins the one necessary 10 pt notice move. Every list item must
+        # actually be in the PDF, including the final row of the previously short parts frame.
+        with fitz.open(stream=current_pdf, filetype="pdf") as pdf:
+            for index, page in enumerate(document["pages"]):
+                for block in page.get("layoutBlocks", []):
+                    if block.get("blockType") == "list" and block["blockId"].endswith("-parts"):
+                        f = block["frame"]
+                        words = " ".join(pdf[index].get_text("text", clip=fitz.Rect(f["x"], f["y"], f["x"]+f["width"], f["y"]+f["height"])).split())
+                        for item in block["items"]:
+                            assert " ".join(str(item.get("text") or "").split()) in words
+
+
+@pytest.fixture(scope="module")
+def real_publications(tmp_path_factory):
+    from tests.documentation_paper_support import PaperPublications
+    return PaperPublications(tmp_path_factory.mktemp("paper"))
+
+
+def test_real_publication_cache_returns_independent_values(tmp_path):
+    from tests.documentation_paper_support import PaperPublications
+    cache = PaperPublications(tmp_path)
+    key = ("operations-manual", "A4")
+    source = {"pages": [{"title": "Original"}]}
+    cache.documents[key] = deepcopy(source)
+    cache.captures[key] = (deepcopy(source), tmp_path)
+    a = cache.document(None, *key)
+    a["pages"][0]["title"] = "Mutated"
+    b, root = cache.captured(None, *key)
+    b["pages"].clear()
+    assert cache.document(None, *key) == source
+    assert cache.captured(None, *key) == (source, tmp_path)
+    assert root == tmp_path

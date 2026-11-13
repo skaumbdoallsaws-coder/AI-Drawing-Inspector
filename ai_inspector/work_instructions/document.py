@@ -1350,6 +1350,9 @@ def _benchmark_operation_page(
         ),
     )
 
+    # Reserve every compiled row; the former fixed 34 pt clipped the fourth 11 pt row.
+    parts_height = max(34.0, 11.0 * max(1, math.ceil(len(part_items) / 2)))
+    safety_top = max(450.0, 412.0 + parts_height + 4.0)
     figure_frame = {"x": 34, "y": 104, "width": 516, "height": 286}
     layout_blocks: list[Dict[str, Any]] = [
         {
@@ -1397,7 +1400,7 @@ def _benchmark_operation_page(
             "fontSize": 6.3,
             "rowHeights": [11.0] * max(1, math.ceil(len(part_items) / 2)),
             "items": part_items,
-            "frame": {"x": 34, "y": 412, "width": 516, "height": 34},
+            "frame": {"x": 34, "y": 412, "width": 516, "height": parts_height},
         },
         {
             "blockId": f"{operation_id}-safety",
@@ -1405,7 +1408,7 @@ def _benchmark_operation_page(
             "signalWord": str(primary_safety.get("signalWord") or "NOTICE"),
             "tone": str(primary_safety.get("signalWord") or "notice").lower(),
             "text": str(primary_safety.get("text") or ""),
-            "frame": {"x": 34, "y": 450, "width": 516, "height": 46},
+            "frame": {"x": 34, "y": safety_top, "width": 516, "height": 46},
         },
         {
             "blockId": f"{operation_id}-actions-heading",
@@ -1946,6 +1949,8 @@ def build_work_instruction_document(
             )
     page_geometry.blocks(pages)
     layout = page_geometry.layout(layout)
+    from ai_inspector.documentation.safety import annotate_safety_symbols
+    annotate_safety_symbols(pages)
     for page in pages:
         page["pageCount"] = len(pages)
     theme, page_masters = _apply_scene([], documentation_scene)

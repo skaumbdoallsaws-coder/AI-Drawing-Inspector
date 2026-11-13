@@ -220,7 +220,46 @@ def rich_text_capabilities(target):
     return None
 
 
-def read_targets(state: dict, targets: Mapping[str, dict], requested: list[dict], *, limit=65536, internal=False) -> dict:
+def _table_structure_read(item):
+    """A table address/size read never returns its cell text, including provenance copies."""
+    value = item.get("richText")
+    if not value or value.get("schemaVersion") != 3:
+        return item
+    from .tables import grid
+    def text_length(node):
+        # Already validated by field_read. Count code points without validating a cell as a
+        # separate field (a large cell is entitled to the enclosing table's larger node budget).
+        if node["type"] == "text":
+            return len(node["text"])
+        if node["type"] == "hardBreak":
+            return 1
+        children = node.get("content", [])
+        return sum(text_length(child) for child in children) + (0 if node["type"] == "paragraph" else max(0, len(children)-1))
+    tables = []
+    for table in value["doc"].get("content", []):
+        if table["type"] != "table":
+            continue
+        anchors, _ = grid(table)
+        # Parallel arrays avoid repeating each 39-character ID and field names 600 times.
+        tables.append({"tableId": table["attrs"]["id"], "style": table["attrs"]["style"],
+            "columns": deepcopy(table["attrs"]["columns"]),
+            "rows": [{"rowId": row["attrs"]["id"],
+                      "cellIds": [c["attrs"]["id"] for c in row["content"]],
+                      "headers": [c["type"] == "tableHeader" for c in row["content"]],
+                      "textLengths": [text_length(c) for c in row["content"]]}
+                     for row in table["content"]],
+            "mergedRanges": [{"cellId": a["cell"]["attrs"]["id"],
+                              **{k: a[k] for k in ("row", "column", "rowspan", "colspan")}}
+                             for a in anchors if a["rowspan"] > 1 or a["colspan"] > 1]})
+    if not tables:
+        return item
+    result = {key: val for key, val in item.items() if key not in {"text", "richText", "provenance"}}
+    result.update(tables=tables, structureOnly=True, isExcerpt=True)
+    return result
+
+
+def read_targets(state: dict, targets: Mapping[str, dict], requested: list[dict], *, limit=65536, internal=False,
+                 table_structure_only=False) -> dict:
     if not (1 <= len(requested) and (internal or len(requested) <= 12)):
         raise DocumentEditError("invalid_document_operation", "Read 1-12 targets at a time.")
     values = hash_values(targets)
@@ -247,6 +286,8 @@ def read_targets(state: dict, targets: Mapping[str, dict], requested: list[dict]
                        **({**rich, "richTextEligible": True, "richTextCapabilities": rich_text_capabilities(target),
                            "plainEditConsequence": PLAIN_EDIT_CONSEQUENCE,
                            "wholeFieldReplacementRequired": rich["isRichText"]} if rich else {})})
+    if table_structure_only:
+        output = [_table_structure_read(item) for item in output]
     from .refresh import open_conflicts
     result = {**binding(state), "documentationRichText": rich_text_enabled(), "openConflictCount": len(open_conflicts(state)), "sceneRevision": state.get("sceneRevision"), "targets": output,
               "aliasRevision": state.get("aliasRevision"),
@@ -370,7 +411,8 @@ class ReadBindings:
                 raise DocumentEditError("document_read_required", "Read the complete target before editing.",
                                         operationIndex=index, targetId=operation["targetId"])
             read = matches[-1]
-            if read["isExcerpt"] and not (read.get("rangeRead") and operation["operation"] in {"replace_range", "format_range"}):
+            structural = read.get("structureOnly") and operation["operation"] in {"create_table", "modify_table"}
+            if read["isExcerpt"] and not structural and not (read.get("rangeRead") and operation["operation"] in {"replace_range", "format_range"}):
                 raise DocumentEditError("full_read_required", "Read this target in full before replacement.",
                                         operationIndex=index, targetId=operation["targetId"])
             if operation["operation"] == "replace_rich_text":
@@ -394,7 +436,7 @@ class ReadBindings:
         return result
 
 
-def summarize_page(page: dict, summary: dict, state: dict, targets: dict) -> tuple[dict, list[dict]]:
+def summarize_page(page: dict, summary: dict, state: dict, targets: dict, *, table_structure_only=False) -> tuple[dict, list[dict]]:
     """Keep the historical page/block keys; label every editable summary string."""
     captured = []
     def visit(value):
@@ -408,12 +450,14 @@ def summarize_page(page: dict, summary: dict, state: dict, targets: dict) -> tup
                 except DocumentEditError:
                     pass
                 else:
-                    full = read_targets(state, targets, [{"targetId": target["targetId"], "pageId": page["pageId"]}], limit=None)["targets"][0]
+                    full = read_targets(state, targets, [{"targetId": target["targetId"], "pageId": page["pageId"]}], limit=None, table_structure_only=table_structure_only)["targets"][0]
                     # Match the prior summary budgets without using normalized
                     # whitespace as the replacement material.
                     budget = max(len(value["text"]), 80)
-                    excerpt = len(full["text"]) > budget
-                    item = {**full, "text": full["text"][:budget], "isExcerpt": excerpt}
+                    excerpt = len(full.get("text", "")) > budget
+                    item = full if full.get("structureOnly") else {**full, "text": full["text"][:budget], "isExcerpt": excerpt}
+                    if full.get("structureOnly"):
+                        value.pop("text", None)
                     value.update(item)
                     captured.append(item)
             for key, item in list(value.items()):
@@ -425,8 +469,8 @@ def summarize_page(page: dict, summary: dict, state: dict, targets: dict) -> tup
     for key, target in targets.items():
         if key in known or str(page["pageId"]) not in target.get("pageIds", [target["pageId"]]):
             continue
-        full = read_targets(state, targets, [{"targetId": key, "pageId": page["pageId"]}], limit=None)["targets"][0]
-        item = {**full, "text": full["text"][:600], "isExcerpt": len(full["text"]) > 600}
+        full = read_targets(state, targets, [{"targetId": key, "pageId": page["pageId"]}], limit=None, table_structure_only=table_structure_only)["targets"][0]
+        item = full if full.get("structureOnly") else {**full, "text": full["text"][:600], "isExcerpt": len(full["text"]) > 600}
         extra.append(item)
         captured.append(item)
     if extra:

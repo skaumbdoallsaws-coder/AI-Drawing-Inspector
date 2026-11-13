@@ -212,3 +212,11 @@ def test_a_planned_build_step_is_staged_whole_as_one_review(setup, monkeypatch):
     added = {m["markingId"] for m in committed["layout"]["floorMarkings"]} - \
         {m["markingId"] for m in saved["layout"]["floorMarkings"]}
     assert len(added) == 60
+
+
+def test_document_page_table_structure_option_is_additive_and_read_only():
+    from ai_inspector.codex_runtime.documentation_tools import tool_specs as documentation_specs
+    spec = next(row for row in documentation_specs() if row["name"] == "read_document_pages")
+    assert spec.get("read_only", True) is True  # read tools carry no flag: the default is read-only
+    assert spec["input_schema"]["properties"]["tableStructureOnly"] == {"type": "boolean"}
+    assert "tableStructureOnly" not in spec["input_schema"].get("required", [])

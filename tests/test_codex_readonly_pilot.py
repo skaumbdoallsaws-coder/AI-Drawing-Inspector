@@ -1065,3 +1065,11 @@ def test_edit_instructions_keep_answers_short_and_name_zone_types_that_reject_pl
     accepting = text.split("maintenance, in ", 1)[1].split(" zones.", 1)[0]
     assert names(rejecting) == set(_NON_PLACEMENT_ZONE_TYPES)
     assert names(accepting) == set(G1_ZONE_TYPES) - set(_NON_PLACEMENT_ZONE_TYPES)
+
+
+def test_document_page_table_structure_option_is_additive_and_read_only():
+    from ai_inspector.codex_runtime.documentation_tools import tool_specs as documentation_specs
+    spec = next(row for row in documentation_specs() if row["name"] == "read_document_pages")
+    assert spec.get("read_only", True) is True  # read tools carry no flag: the default is read-only
+    assert spec["input_schema"]["properties"]["tableStructureOnly"] == {"type": "boolean"}
+    assert "tableStructureOnly" not in spec["input_schema"].get("required", [])

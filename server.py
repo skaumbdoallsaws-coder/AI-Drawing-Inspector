@@ -17419,20 +17419,21 @@ def operations_manual_documentation_scene_command(
             raise DocumentationSceneError(
                 "parts-list callouts are not available in this operations-manual draft"
             )
+        page_setup_check = _documentation_page_setup_check(command, lambda scene: build_operations_manual_document(assembly_data, catalog,
+                    evidence_root=OPERATIONS_MANUAL_EVIDENCE_ROOT, documentation_scene=scene,
+                    documentation_scene_revision=documentation_scene_revision(scene)),
+                OPERATIONS_MANUAL_ROOT, str(catalog["assemblyNumber"]), current=(_loaded_scene["scene"], current_document))
         result = _operations_manual_scene_repository().apply_command(
             catalog["assemblyNumber"],
             catalog["sourceRevision"],
             current_document["manualPlanRevision"],
             base_revision=body.baseRevision,
-            check_candidate=_documentation_page_setup_check(command, lambda scene: build_operations_manual_document(assembly_data, catalog,
-                    evidence_root=OPERATIONS_MANUAL_EVIDENCE_ROOT, documentation_scene=scene,
-                    documentation_scene_revision=documentation_scene_revision(scene)),
-                OPERATIONS_MANUAL_ROOT, str(catalog["assemblyNumber"])),
+            check_candidate=page_setup_check,
             identity_document=_documentation_identity_document(current_document),
             command=_documentation_prepare_scene_command(current_document, _loaded_scene, command),
             page_targets=_operations_manual_editable_page_targets(current_document),
         )
-        next_document = build_operations_manual_document(
+        next_document = page_setup_check.document if page_setup_check is not None else build_operations_manual_document(
             assembly_data,
             catalog,
             evidence_root=OPERATIONS_MANUAL_EVIDENCE_ROOT,
@@ -17912,19 +17913,20 @@ def work_instructions_documentation_scene_command(
             raise DocumentationSceneError(
                 "instruction callout membership comes from the assumed process plan"
             )
+        page_setup_check = _documentation_page_setup_check(command, lambda scene: _work_instruction_document_for_scene(assembly_data, catalog, scene=scene,
+                    scene_revision=documentation_scene_revision(scene)),
+                WORK_INSTRUCTION_ROOT, str(catalog["assemblyNumber"]), current=(_loaded_scene["scene"], current_document))
         result = _work_instruction_scene_repository().apply_command(
             catalog["assemblyNumber"],
             catalog["sourceRevision"],
             current_document["manualPlanRevision"],
             base_revision=body.baseRevision,
-            check_candidate=_documentation_page_setup_check(command, lambda scene: _work_instruction_document_for_scene(assembly_data, catalog, scene=scene,
-                    scene_revision=documentation_scene_revision(scene)),
-                WORK_INSTRUCTION_ROOT, str(catalog["assemblyNumber"])),
+            check_candidate=page_setup_check,
             identity_document=_documentation_identity_document(current_document),
             command=_documentation_prepare_scene_command(current_document, _loaded_scene, command),
             page_targets=_operations_manual_editable_page_targets(current_document),
         )
-        next_document = _work_instruction_document_for_scene(
+        next_document = page_setup_check.document if page_setup_check is not None else _work_instruction_document_for_scene(
             assembly_data,
             catalog,
             scene=result["scene"],
@@ -18419,20 +18421,21 @@ def specification_sheet_documentation_scene_command(
             raise DocumentationSceneError(
                 "parts-list callouts are not available on a product specification sheet"
             )
+        page_setup_check = _documentation_page_setup_check(command, lambda scene: _specification_sheet_compile(assembly_data, catalog, documentation_scene=scene,
+                    identity_document=_documentation_identity_document(current_document),
+                    documentation_scene_revision=documentation_scene_revision(scene)),
+                SPECIFICATION_SHEET_ROOT, str(catalog["assemblyNumber"]), current=(_loaded_scene["scene"], current_document))
         result = _specification_sheet_scene_repository().apply_command(
             catalog["assemblyNumber"],
             catalog["sourceRevision"],
             current_document["manualPlanRevision"],
             base_revision=body.baseRevision,
-            check_candidate=_documentation_page_setup_check(command, lambda scene: _specification_sheet_compile(assembly_data, catalog, documentation_scene=scene,
-                    identity_document=_documentation_identity_document(current_document),
-                    documentation_scene_revision=documentation_scene_revision(scene)),
-                SPECIFICATION_SHEET_ROOT, str(catalog["assemblyNumber"])),
+            check_candidate=page_setup_check,
             identity_document=_documentation_identity_document(current_document),
             command=_documentation_prepare_scene_command(current_document, _loaded_scene, command),
             page_targets=_operations_manual_editable_page_targets(current_document),
         )
-        next_document = _specification_sheet_compile(
+        next_document = page_setup_check.document if page_setup_check is not None else _specification_sheet_compile(
             assembly_data,
             catalog,
             documentation_scene=result["scene"],
@@ -19059,8 +19062,8 @@ def _documentation_editor_read(document, loaded, baseline):
     return {"documentationRichText": documentation_rich_text_enabled(), "richTextFields": fields, "objectBinding": object_binding, "pageSetupOptions": setup_options}
 
 
-def _documentation_page_setup_check(command, compile_candidate, root, assembly_number):
-    """Run under the scene lock before a candidate can become history or stored state."""
+def _documentation_page_setup_check(command, compile_candidate, root, assembly_number, *, current=None):
+    """Check under the scene lock before the final candidate journal is committed."""
     if command.get("operation") != "set_page_setup":
         return None
 
@@ -19082,24 +19085,24 @@ def _documentation_page_setup_check(command, compile_candidate, root, assembly_n
                               for key in page.get("documentObjects", {}))
         return report
 
+    compiled = {}
+    def scene_key(scene):
+        return documentation_scene_revision(scene)
+    if current is not None:
+        compiled[scene_key(current[0])] = current[1]
+    def compile_once(scene):
+        key = scene_key(scene)
+        if key not in compiled:
+            compiled[key] = compile_candidate(scene)
+        return compiled[key]
+
     def check(current, candidate):
         from ai_inspector.documentation.fit import new_failures, refuse
-        current_report = report_for(compile_candidate(current), current)
-        if current.get("pageSetup") is not None:
-            # What the generators never fitted on the design page is no reason to refuse another paper, or the
-            # way back to the design page (the real operations manual: its contents block is 5 pt over on the
-            # design page and fits on Letter). Authored objects are judged against the current page alone:
-            # their author can still change them.
-            design = {key: value for key, value in current.items() if key != "pageSetup"}
-            authored = {key for page in (current.get("pages") or {}).values()
-                        for key in (page.get("documentObjects") or {})}
-            current_report = current_report + [
-                item for item in report_for(compile_candidate(design), design)
-                if item["targetId"] not in authored]
+        current_report = report_for(compile_once(current), current)
         try:
-            document = compile_candidate(candidate)
+            document = compile_once(candidate)
+            check.document = document
         except Exception as error:
-            # Only candidate compilation is translated; the current publication keeps its usual errors.
             findings = getattr(error, "findings", None)
             if isinstance(findings, str):
                 detail = findings
@@ -19109,7 +19112,23 @@ def _documentation_page_setup_check(command, compile_candidate, root, assembly_n
                 detail = str(error)
             raise DocumentEditError("layout_overflow",
                 f"This publication cannot be laid out on this page setup: {detail}") from error
-        refuse(new_failures(current_report, report_for(document, candidate)), limit=50)
+        candidate_report = report_for(document, candidate)
+        failures = new_failures(current_report, candidate_report)
+        if failures and current.get("pageSetup") is not None:
+            # What the generators never fitted on the design page is no reason to refuse another paper, or the
+            # way back to the design page (the real operations manual: its contents block is 5 pt over on the
+            # design page and fits on Letter). Authored objects are judged against the current page alone:
+            # their author can still change them.
+            design = {key: value for key, value in current.items() if key != "pageSetup"}
+            authored = {key for page in (current.get("pages") or {}).values()
+                        for key in (page.get("documentObjects") or {})}
+            current_report = current_report + [
+                item for item in report_for(compile_once(design), design)
+                if item["targetId"] not in authored]
+            failures = new_failures(current_report, candidate_report)
+        refuse(failures, limit=50)
+
+    check.document = None
 
     return check
 
@@ -20380,20 +20399,21 @@ def parts_manual_documentation_scene_command(
             document=document,
             catalog_rows=catalog["occurrences"],
         )
+        page_setup_check = _documentation_page_setup_check(command, lambda scene: build_manual_document(loaded_plan["plan"], catalog["occurrences"], assembly_data,
+                    plan_revision=loaded_plan["revision"], documentation_scene=scene,
+                    documentation_scene_revision=documentation_scene_revision(scene)),
+                PARTS_MANUAL_ROOT, str(catalog["assemblyNumber"]), current=(_loaded_scene["scene"], document))
         result = _documentation_scene_repository().apply_command(
             catalog["assemblyNumber"],
             catalog["sourceRevision"],
             loaded_plan["revision"],
             base_revision=body.baseRevision,
-            check_candidate=_documentation_page_setup_check(command, lambda scene: build_manual_document(loaded_plan["plan"], catalog["occurrences"], assembly_data,
-                    plan_revision=loaded_plan["revision"], documentation_scene=scene,
-                    documentation_scene_revision=documentation_scene_revision(scene)),
-                PARTS_MANUAL_ROOT, str(catalog["assemblyNumber"])),
+            check_candidate=page_setup_check,
             identity_document=_documentation_identity_document(document),
             command=_documentation_prepare_scene_command(document, _loaded_scene, command),
             page_targets=_parts_manual_editable_page_targets(document),
         )
-        next_document = build_manual_document(
+        next_document = page_setup_check.document if page_setup_check is not None else build_manual_document(
             loaded_plan["plan"],
             catalog["occurrences"],
             assembly_data,
@@ -42246,24 +42266,21 @@ class _DocumentationAgentHost:
         command = _documentation_prepare_scene_command(document, loaded, {
             "operation": "set_page_setup", "targetType": "document_page_setup", "targetId": "page-setup",
             "pageId": document["pages"][0]["pageId"], "pageSetup": value})
-        compiled = {}
-        def compile_checked(candidate):
-            compiled["document"] = compile_scene(candidate)
-            return compiled["document"]
-        check = _documentation_page_setup_check(command, compile_checked, root, assembly_number)
+        check = _documentation_page_setup_check(command, compile_scene, root, assembly_number,
+            current=(scene, document))
         def check_candidate(current, candidate):
             try:
                 check(current, candidate)
             except DocumentEditError as error:
                 if error.code == "layout_overflow" and error.details.get("targets"):
                     pages = {p["pageId"]: p for p in document["pages"]}
-                    pages.update({p["pageId"]: p for p in compiled.get("document", document)["pages"]})
+                    pages.update({p["pageId"]: p for p in (check.document or document)["pages"]})
                     error.details["targets"] = [{**item,
                         "pageNumber": pages.get(item["pageId"], {}).get("pageNumber"),
                         "pageTitle": pages.get(item["pageId"], {}).get("title", item["pageId"])}
                         for item in error.details["targets"]]
                 raise
-            after = compiled["document"]
+            after = check.document
             def figures(publication):
                 from ai_inspector.work_instructions.document import page_figure_revision
                 return {p["pageId"]: (publication["figureRevision"] if document_type == "product_specification_sheet"

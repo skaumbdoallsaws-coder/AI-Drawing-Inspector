@@ -8,6 +8,7 @@ by people and Sage.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import copy
 from datetime import datetime, timezone
 import hashlib
@@ -129,6 +130,9 @@ _DOCUMENT_OBJECT_ID_RE = re.compile(
 )
 _HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 _WRITE_LOCK = threading.RLock()
+_STORE_LOCK_SECONDS = 60.0
+_STORE_LOCKS: Dict[str, list] = {}  # store root -> [depth, held lock]; guarded by _WRITE_LOCK
+_STORE_MUTEXES: Dict[str, Any] = {}  # Windows: store root -> mutex handle, kept for the life of the process
 _MAX_COMMANDS = 2000
 _MAX_CALLOUT_ITEMS = 256
 _MAX_TRANSLATION_COMPONENT = 10000.0
@@ -278,6 +282,99 @@ def documentation_scene_revision(value: Any) -> str:
     ) if key in value}
     projection["schemaVersion"] = 2
     return hashlib.sha256(canonical_documentation_bytes(projection)).hexdigest()
+
+
+def _store_busy() -> "DocumentationSceneError":
+    return DocumentationSceneError(
+        "another InspectorPro process is writing this documentation store; try again"
+    )
+
+
+def _acquire_store_lock(root: Path):
+    """Hold the store against other processes. Nothing is written: a named mutex on Windows, a lock on the
+    store folder itself elsewhere. None where neither is available (the thread lock alone, as before)."""
+    key = os.path.normcase(str(root))
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = _STORE_MUTEXES.get(key)
+        if handle is None:
+            kernel32.CreateMutexW.argtypes = (wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR)
+            kernel32.CreateMutexW.restype = wintypes.HANDLE
+            name = "Local\\InspectorPro-documentation-" + hashlib.sha256(key.encode("utf-8")).hexdigest()
+            handle = kernel32.CreateMutexW(None, False, name)
+            if not handle:
+                return None
+            _STORE_MUTEXES[key] = handle
+        kernel32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+        kernel32.WaitForSingleObject.restype = wintypes.DWORD
+        waited = kernel32.WaitForSingleObject(handle, int(_STORE_LOCK_SECONDS * 1000))
+        if waited in (0x00000000, 0x00000080):  # owned; 0x80: the previous owner died while holding it
+            return ("mutex", handle)
+        if waited == 0x00000102:  # still held after the wait
+            raise _store_busy()
+        return None
+    try:
+        import fcntl
+
+        descriptor = os.open(str(root), os.O_RDONLY)
+    except (ImportError, OSError):
+        return None  # no folder yet: the first write creates it
+    deadline = time.monotonic() + _STORE_LOCK_SECONDS
+    while True:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return ("flock", descriptor)
+        except OSError:
+            if time.monotonic() >= deadline:
+                os.close(descriptor)
+                raise _store_busy() from None
+            time.sleep(0.02)
+
+
+def _release_store_lock(held) -> None:
+    if held is None:
+        return
+    kind, value = held
+    if kind == "mutex":
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.ReleaseMutex.argtypes = (wintypes.HANDLE,)
+        kernel32.ReleaseMutex.restype = wintypes.BOOL
+        kernel32.ReleaseMutex(value)  # by the thread that took it: the same with-block
+        return
+    import fcntl
+
+    try:
+        fcntl.flock(value, fcntl.LOCK_UN)
+    except OSError:
+        pass  # closing the folder handle releases the lock as well
+    finally:
+        os.close(value)
+
+
+@contextmanager
+def _store_writer(root: Path):
+    """One transaction on a store at a time: the threads of this process, as before, and the other processes
+    that share the folder (a second server on the same data). A process that dies releases the lock. The
+    transaction reads the scene inside the lock, so the second process meets the first one's revision and is
+    refused as stale instead of replacing it."""
+    with _WRITE_LOCK:
+        state = _STORE_LOCKS.setdefault(str(root), [0, None])
+        if state[0] == 0:
+            state[1] = _acquire_store_lock(root)
+        state[0] += 1
+        try:
+            yield
+        finally:
+            state[0] -= 1
+            if state[0] == 0:
+                held, state[1] = state[1], None
+                _release_store_lock(held)
 
 
 def _write_atomic(path: Path, payload: bytes) -> None:
@@ -1832,7 +1929,7 @@ class DocumentationSceneRepository:
         return candidate, receipt
 
     def commit_refresh(self, assembly_number, candidate, receipt, *, base_revision, identity_document):
-        with _WRITE_LOCK:
+        with _store_writer(self.root):
             current = self.read(assembly_number, identity_document["sourceRevision"],
                 identity_document["manualPlanRevision"], identity_document=identity_document)
             self._assert_revision(current["scene"], base_revision)
@@ -1843,7 +1940,7 @@ class DocumentationSceneRepository:
 
     def refresh(self, assembly_number, source_revision, manual_plan_revision, *,
                 base_revision, identity_document, actor="user", validate_candidate=None):
-        with _WRITE_LOCK:
+        with _store_writer(self.root):
             candidate, receipt = self.prepare_refresh(assembly_number, source_revision, manual_plan_revision,
                 base_revision=base_revision, identity_document=identity_document, actor=actor)
             if validate_candidate is not None:
@@ -1852,7 +1949,7 @@ class DocumentationSceneRepository:
                 base_revision=base_revision, identity_document=identity_document)
 
     def reset_preview(self, assembly_number, source_revision, manual_plan_revision, *, identity_document):
-        with _WRITE_LOCK:
+        with _store_writer(self.root):
             loaded = self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document)
             preview = preview_reset(loaded["scene"])
             for field, default, target in (("theme", DEFAULT_DOCUMENT_THEME, "company-theme"),
@@ -1868,7 +1965,7 @@ class DocumentationSceneRepository:
         """Explicit human reset only. Retain the exact prior file beside the store."""
         if user_authorized is not True:
             raise DocumentEditError("manual_edit_conflict", "A complete reset requires the user's reset action.")
-        with _WRITE_LOCK:
+        with _store_writer(self.root):
             loaded = self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document)
             self._assert_revision(loaded["scene"], base_revision)
             previous = loaded["scene"]
@@ -1903,7 +2000,7 @@ class DocumentationSceneRepository:
         change started from is carried; its pages are keyed by section, so the
         sections that did not change keep their edits. Returns whether the
         scene was carried."""
-        with _WRITE_LOCK:
+        with _store_writer(self.root):
             path = self._scene_path(assembly_number)
             if not path.is_file():
                 return False
@@ -1977,7 +2074,7 @@ class DocumentationSceneRepository:
         identity_document: Optional[Mapping[str, Any]] = None,
         check_candidate=None,
     ) -> Dict[str, Any]:
-        with _WRITE_LOCK:
+        with _store_writer(self.root):
             loaded = self.read(
                 assembly_number,
                 source_revision,
@@ -1996,8 +2093,6 @@ class DocumentationSceneRepository:
             guard_command(self._conflict_state(scene, assembly_number), command)
             capture_baselines(scene, identity_document, command_targets(command))
             candidate = apply_documentation_command_candidate(scene, command, page_targets, document_type=self.document_type)
-            if check_candidate is not None:
-                check_candidate(scene, candidate["scene"])
             before = scene
             scene, persisted_command = candidate["scene"], candidate["command"]
             paths = scene_paths(before, scene, [persisted_command])
@@ -2007,6 +2102,8 @@ class DocumentationSceneRepository:
                     created_at=persisted_command["createdAt"],
                     version_keys=_command_version_keys(persisted_command))
             _advance_edit_versions(scene, [persisted_command])
+            if check_candidate is not None:
+                check_candidate(before, scene)
             self._save(assembly_number, scene)
             # The same projection as read() (history choices, change list), so a write never returns another shape.
             return {**self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document),
@@ -2045,7 +2142,7 @@ class DocumentationSceneRepository:
         payload_hash = request_hash(request_id, payload if payload is not None else {
             "commands": commands, "expectedRevision": expected_revision, "hashes": expected_hashes,
             "sourceRevision": source_revision, "manualPlanRevision": manual_plan_revision, "actor": actor})
-        with _WRITE_LOCK:
+        with _store_writer(self.root):
             loaded = self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document)
             scene = loaded["scene"]
             self._assert_binding(scene, source_revision, manual_plan_revision)
@@ -2086,12 +2183,9 @@ class DocumentationSceneRepository:
                     changed.extend(row["objectId"] for row in object_results[index]["objects"] if row["objectId"] not in changed)
                 else:
                     changed.append(target)
-            checked = check_candidate(scene, candidate) if check_candidate is not None else None
             receipt = make_receipt(scene, request_id=request_id, payload_hash=payload_hash,
                 document=document_id(self.document_type, assembly_number), expected_revision=expected_revision,
                 changed=changed, undoable=True)
-            if checked is not None:
-                receipt["pageSetupResult"] = copy.deepcopy(checked)
             if table_results is not None or object_results is not None:
                 receipt["operationResults"] = copy.deepcopy(table_results if table_results is not None else object_results)
             removed = [target for target, command in zip(changed, persisted) if command.get("richTextRemoved")]
@@ -2101,6 +2195,10 @@ class DocumentationSceneRepository:
                     "changed": receipt["changedIds"]}}, ensure_ascii=False, allow_nan=False).encode("utf-8")) > 65536:
                 raise DocumentEditError("codex_result_too_large", "Retry fewer table operations so their identity results fit the tool response.")
             if not changed:
+                if check_candidate is not None:
+                    checked = check_candidate(scene, candidate)
+                    if checked is not None:
+                        receipt["pageSetupResult"] = copy.deepcopy(checked)
                 retain_receipt(candidate, receipt)
                 guard_restored_fields(scene, candidate)
                 self._save(assembly_number, candidate)
@@ -2121,6 +2219,11 @@ class DocumentationSceneRepository:
                 scene_paths(scene, candidate, persisted), change_id=receipt["changeId"], actor=actor,
                 created_at=_utc_now(), version_keys=[key for c in persisted for key in _command_version_keys(c)])
             _advance_edit_versions(candidate, persisted)
+            # Check the final journal projection so its compiled document can also serve the response.
+            if check_candidate is not None:
+                checked = check_candidate(scene, candidate)
+                if checked is not None:
+                    receipt["pageSetupResult"] = copy.deepcopy(checked)
             retain_receipt(candidate, receipt)
             self._save(assembly_number, candidate)
             return {**self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document),
@@ -2133,7 +2236,7 @@ class DocumentationSceneRepository:
         if arguments["documentId"] != document_id(self.document_type, assembly_number):
             raise DocumentEditError("document_binding_changed", "This resolution belongs to another document.")
         payload_hash = request_hash(arguments["requestId"], {"resolution": arguments, "actor": actor})
-        with _WRITE_LOCK:
+        with _store_writer(self.root):
             loaded = self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document)
             scene = loaded["scene"]
             self._assert_binding(scene, source_revision, manual_plan_revision)
@@ -2170,7 +2273,7 @@ class DocumentationSceneRepository:
             return {**self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document), "receipt": receipt}
 
     def inspect_change(self, assembly_number, source_revision, manual_plan_revision, change_id, *, identity_document=None):
-        with _WRITE_LOCK:
+        with _store_writer(self.root):
             loaded = self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document)
             self._assert_binding(loaded["scene"], source_revision, manual_plan_revision)
             return inspect_change(_scene_records(loaded["scene"]), change_id,
@@ -2180,7 +2283,7 @@ class DocumentationSceneRepository:
                     change_id, expected_revision, request_id, actor="sage", identity_document=None):
         payload_hash = request_hash(request_id, {"changeId": change_id, "expectedRevision": expected_revision,
             "actor": actor, "sourceRevision": source_revision, "manualPlanRevision": manual_plan_revision})
-        with _WRITE_LOCK:
+        with _store_writer(self.root):
             loaded = self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document)
             scene = loaded["scene"]
             self._assert_binding(scene, source_revision, manual_plan_revision)
@@ -2215,7 +2318,7 @@ class DocumentationSceneRepository:
     def move_history(self, assembly_number, source_revision, manual_plan_revision, *, base_revision, direction, identity_document=None):
         if direction not in {"undo", "redo"}:
             raise DocumentationSceneError("unsupported documentation history operation")
-        with _WRITE_LOCK:
+        with _store_writer(self.root):
             loaded = self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document)
             scene = loaded["scene"]
             self._assert_revision(scene, base_revision)

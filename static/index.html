@@ -22566,8 +22566,11 @@
                     || state.specificationSheetPayload || state.workInstructionsPayload
                     || state.partsManualDocumentation || state.partsManualDocumentationWorkflowMode,
                     state.partsManualDraftOccurrenceIds.size || state.partsManualDraftName
-                        || state.partsManualDocumentationLiveEditPageId,
-                    state.partsManualProposalLoading || state.partsManualDocumentationInitializing,
+                        || state.partsManualDocumentationLiveEditPageId
+                        // An open rich-text draft with changes is this workflow's unsaved work.
+                        || window.DocumentationRichText?.active?.dirty,
+                    state.partsManualProposalLoading || state.partsManualDocumentationInitializing
+                        || window.DocumentationRichText?.active?.saving,
                     // A finished, failed or cancelled build and ended Sage work stay recorded for the
                     // workspace; only a running one is pending (the app refused to close after any build).
                     state.partsManualProposal || state.partsManualDocumentationGeneration?.status === 'running'

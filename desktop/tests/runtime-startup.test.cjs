@@ -328,6 +328,8 @@ test('viewport replacement suspends the connected facility before removing its D
   const events = [];
   const context = vm.createContext({
     _save3DCameraState() {}, _saveAssemblyCameraState() {},
+    // One owner releases the Assembly viewer (tab switch and Documentation remount alike).
+    _disposeAssembly3DMount() { events.push('assembly-release'); },
     ASSEMBLY_VIEWPORT_STATE_PERSISTENCE: false,
     state: { activeTab: 'dfm' },
     _trainFacilityLayoutAuthoringApp: { workspace: { root: { isConnected: true } }, suspend() { events.push('suspend'); } },
@@ -337,5 +339,5 @@ test('viewport replacement suspends the connected facility before removing its D
   });
   vm.runInContext(indexFunction('renderViewport'), context);
   context.renderViewport();
-  assert.deepEqual(events, ['suspend', 'clear', 'ribbon']);
+  assert.deepEqual(events, ['assembly-release', 'suspend', 'clear', 'ribbon']);
 });

@@ -41,6 +41,8 @@ for (const [name, inject, workflowId] of [
   ['unmounted process draft', c => { c.trainingState.processMapFlowDirty = true; }, 'processMap'],
   ['process map approval in flight', c => { c._trainCurrentProcessFlowEditor = () => ({ managedProposalBusy: true }); }, 'processMap'],
   ['documentation generation', c => { c.state.partsManualDocumentationGeneration = { id: 'generation' }; }, 'documentation'],
+  ['open rich-text draft', c => { c.window.DocumentationRichText = { active: { dirty: true, saving: false } }; }, 'documentation'],
+  ['rich-text draft being saved', c => { c.window.DocumentationRichText = { active: { dirty: false, saving: true } }; }, 'documentation'],
   ['non-facility training goal', c => { c.trainingState.type = 'operator'; }, 'training'],
   ['report', c => { c.state.results = { findings: [] }; }, 'report'],
   ['edit session action', c => { c.sessionsTabState.actionBusy.s1 = true; }, 'sessions'],

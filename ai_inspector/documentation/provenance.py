@@ -129,9 +129,9 @@ def _scopes(document, scene):
                 yield page, block, owner, alias, fields, list(claims), sources, bound, watched
 
 
-def project_document(document, scene=None, *, generated_parts=None):
+def project_document(document, scene=None, *, generated_parts=None, owned=False):
     """Pure read projection, including legacy positional overrides with no row guesses."""
-    result = deepcopy(document)
+    result = document if owned else deepcopy(document)
     supported = {"operations_and_maintenance_manual": 3, "work_instructions": 3,
                  "illustrated_parts_manual": 6}.get(result.get("documentType"))
     if supported and result.get("schemaVersion", 1) > supported:
@@ -221,8 +221,15 @@ def project_document(document, scene=None, *, generated_parts=None):
                 "sourceRevision": result.get("sourceRevision", ""),
                 "manualPlanRevision": result.get("manualPlanRevision", ""), "scene": scene}
     covered = {(target["pageId"], alias) for target in targets for alias in target["values"]}
-    original = text_targets({**identity, "scene": {"pages": {}}}, result)
-    for key, target in text_targets(identity, result).items():
+    effective_targets = text_targets(identity, result)
+    # With no generated text override the source/effective strings coincide. Authored fields are
+    # already projected into the privately owned document and never use a generated string below.
+    # text_targets takes a generated element's text from two keys of its scene override: both are looked at.
+    has_text_overrides = any("text" in override or "richText" in override for page in scene.get("pages", {}).values()
+        for override in page.get("pageElementOverrides", {}).values())
+    original = (text_targets({**identity, "scene": {"pages": {}}}, result, include_objects=False)
+                if has_text_overrides else effective_targets)
+    for key, target in effective_targets.items():
         alias = target.get("storageId", target["alias"])
         if (target["pageId"], alias) in covered:
             continue
@@ -254,7 +261,7 @@ def project_document(document, scene=None, *, generated_parts=None):
         for row in targets if row["provenance"]["claimIds"] or row["provenance"]["sourceIds"]]
     from .conflict_exports import project_review
     from .rich_text import project_objects
-    return project_objects(project_review(result, scene))
+    return project_objects(project_review(result, scene, owned=True))
 
 
 def support_summary(targets):
@@ -383,8 +390,8 @@ def strip_projection(document):
     return document
 
 
-def project_slots(document, stored, scene=None):
-    result = deepcopy(document)
+def project_slots(document, stored, scene=None, *, owned=False):
+    result = document if owned else deepcopy(document)
     if result.get("schemaVersion", 1) > 3:
         raise DocumentEditError("unsupported_document_schema", "This sheet needs a newer editor.")
     result["schemaVersion"] = 3
@@ -459,7 +466,7 @@ def project_slots(document, stored, scene=None):
         result["sourceSupportSummary"] = support_summary(result["provenanceTargets"])
     from .conflict_exports import project_review
     from .rich_text import project_objects
-    return project_objects(project_review(result, stored))
+    return project_objects(project_review(result, stored, owned=True))
 
 
 def slot_mutation_meta(before, candidate, defaults, *, actor, change_id, effective_values=None):

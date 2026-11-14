@@ -756,8 +756,9 @@ def build_specification_sheet_document(
         document["pageSetup"] = copy.deepcopy(documentation_scene["pageSetup"])
     document, documentation_scene = bind_document(document, documentation_scene)
     sync_identity_overrides(document)
-    document = project_slots(document, stored, documentation_scene)
+    document = project_slots(document, stored, documentation_scene, owned=True)
     from ai_inspector.documentation.conflict_exports import project_review
-    document = project_review(document, stored, documentation_scene)
+    document = project_review(document, stored, documentation_scene, owned=True)
     document["documentRevision"] = _stable_revision(document)
-    return document
+    from ai_inspector.documentation.request_work import mark_identified
+    return mark_identified(document)

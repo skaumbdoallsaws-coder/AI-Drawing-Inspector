@@ -283,7 +283,10 @@ def test_documentation_is_a_first_class_workflow_with_its_own_ribbon() -> None:
     assert "workspace.classList.toggle('documentation-empty', visiblePages.length === 0)" in html
     assert "workspace.classList.toggle('sage-working', active)" in html
     assert "_documentationRenderPageRail({ lightweight: true })" in html
-    assert "Boolean(state.partsManualDocumentationSageWork?.active)" in html
+    # P5a-3: the rail keeps its buttons and builds previews in idle time; that queue stands still while Sage
+    # works (before, the rail's render function skipped the previews with this condition).
+    queue = html[html.index("function _documentationQueueRailThumbnails()"):html.index("function _documentationSelectRailPage()")]
+    assert "state.partsManualDocumentationSageWork?.active" in queue
     assert "documentationGenerationSnapshot" in html
     assert "function _documentationCaptureAllPages(" in html
     assert "function _documentationPublishPdf(" in html

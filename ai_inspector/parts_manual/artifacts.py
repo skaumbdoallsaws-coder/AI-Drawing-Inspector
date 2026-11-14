@@ -1469,8 +1469,9 @@ def attach_render_artifacts(
     root: str | Path,
     assembly_number: str,
     document: Mapping[str, Any],
+    *, owned=False,
 ) -> Dict[str, Any]:
-    result = copy.deepcopy(dict(document))
+    result = document if owned else copy.deepcopy(dict(document))
     for page in result.get("pages") or []:
         request = page.get("renderRequest") if isinstance(page, dict) else None
         if not isinstance(request, dict):

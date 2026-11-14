@@ -23,6 +23,7 @@ import threading
 import time
 from typing import Any, Dict, Iterable, Mapping, Optional
 
+from ai_inspector.documentation.request_work import request_work
 from ai_inspector.documentation.changes import (
     record as change_record, restore as restore_change, inverse as inverse_change,
     scene_paths, legacy_id, find_change, inspect_change, history_choices, validate_record,
@@ -1843,6 +1844,7 @@ class DocumentationSceneRepository:
             "historyCursor": 0,
         })
 
+    @request_work
     def read(
         self,
         assembly_number: str,
@@ -1851,20 +1853,39 @@ class DocumentationSceneRepository:
         *,
         identity_document: Optional[Mapping[str, Any]] = None,
     ) -> Dict[str, Any]:
+        from ai_inspector.documentation.request_work import reuse
         path = self._scene_path(assembly_number)
-        if path.is_file():
-            try:
-                scene = json.loads(path.read_text("ascii"))
-            except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-                raise DocumentationSceneError(
-                    f"could not read documentation scene: {exc}"
-                ) from exc
-        else:
-            scene = self.new_scene(
-                assembly_number,
-                source_revision,
-                manual_plan_revision,
-            )
+        try:
+            stat = path.stat()
+            stamp = [stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns]
+        except FileNotFoundError:
+            stamp = None
+
+        def load():
+            if path.is_file():
+                try:
+                    scene = json.loads(path.read_text("ascii"))
+                except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                    raise DocumentationSceneError(f"could not read documentation scene: {exc}") from exc
+                persisted = True
+            else:
+                scene = self.new_scene(assembly_number, source_revision, manual_plan_revision)
+                persisted = False
+            return self._read_scene(scene, assembly_number, source_revision, manual_plan_revision,
+                persisted=persisted, identity_document=identity_document)
+
+        # The file identity changes on atomic replace. A writer rechecks this inside _store_writer;
+        # an earlier unlocked route read can never hide another process's completed command.
+        return reuse("scene-read", [str(path), stamp, self.document_type, assembly_number, source_revision,
+            manual_plan_revision, identity_document], load)
+
+    def _saved_result(self, scene, assembly_number, source_revision, manual_plan_revision, *, identity_document):
+        # _save has already committed these exact bytes. Use the same public read projection, without
+        # reopening and parsing the file. Neither the stored scene nor an earlier response is mutated.
+        return self._read_scene(copy.deepcopy(scene), assembly_number, source_revision, manual_plan_revision,
+            persisted=True, identity_document=identity_document)
+
+    def _read_scene(self, scene, assembly_number, source_revision, manual_plan_revision, *, persisted, identity_document):
         scene = _upgrade_documentation_scene(scene)
         identity_base_revision = documentation_scene_revision(scene)
         scene.setdefault("legacySceneRevision", identity_base_revision)
@@ -1887,10 +1908,10 @@ class DocumentationSceneRepository:
         undo, redo = history_choices(records)
         return {
             **refresh_exposure(scene),
-            "scene": copy.deepcopy(scene),
+            "scene": scene,
             "revision": documentation_scene_revision(scene),
             "identityBaseRevision": identity_base_revision,
-            "persisted": path.is_file(),
+            "persisted": persisted,
             "sourceCurrent": source_current,
             "manualPlanCurrent": plan_current,
             "canUndo": bool(undo),
@@ -2062,6 +2083,7 @@ class DocumentationSceneRepository:
                 "documentation target does not belong to the selected page"
             )
 
+    @request_work
     def apply_command(
         self,
         assembly_number: str,
@@ -2106,9 +2128,10 @@ class DocumentationSceneRepository:
                 check_candidate(before, scene)
             self._save(assembly_number, scene)
             # The same projection as read() (history choices, change list), so a write never returns another shape.
-            return {**self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document),
+            return {**self._saved_result(scene, assembly_number, source_revision, manual_plan_revision, identity_document=identity_document),
                     "command": copy.deepcopy(persisted_command)}
 
+    @request_work
     def apply_batch(self, assembly_number, source_revision, manual_plan_revision, *,
                     base_revision, expected_revision, request_id, commands, page_targets,
                     expected_hashes, current_hashes, hashes_revision, actor="sage", payload=None,
@@ -2202,7 +2225,7 @@ class DocumentationSceneRepository:
                 retain_receipt(candidate, receipt)
                 guard_restored_fields(scene, candidate)
                 self._save(assembly_number, candidate)
-                return {**self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document), "receipt": receipt, "changed": []}
+                return {**self._saved_result(candidate, assembly_number, source_revision, manual_plan_revision, identity_document=identity_document), "receipt": receipt, "changed": []}
             for command in persisted:
                 for meta in (command.get("fieldMeta") or {}).values():
                     meta["changeId"] = receipt["changeId"]
@@ -2226,7 +2249,7 @@ class DocumentationSceneRepository:
                     receipt["pageSetupResult"] = copy.deepcopy(checked)
             retain_receipt(candidate, receipt)
             self._save(assembly_number, candidate)
-            return {**self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document),
+            return {**self._saved_result(candidate, assembly_number, source_revision, manual_plan_revision, identity_document=identity_document),
                     "receipt": receipt, "changed": changed}
 
     def resolve_conflicts(self, assembly_number, source_revision, manual_plan_revision, *,
@@ -2279,12 +2302,13 @@ class DocumentationSceneRepository:
             return inspect_change(_scene_records(loaded["scene"]), change_id,
                                   document_id(self.document_type, assembly_number))
 
+    @request_work
     def undo_change(self, assembly_number, source_revision, manual_plan_revision, *,
-                    change_id, expected_revision, request_id, actor="sage", identity_document=None):
+                    change_id, expected_revision, request_id, actor="sage", identity_document=None, _loaded=None):
         payload_hash = request_hash(request_id, {"changeId": change_id, "expectedRevision": expected_revision,
             "actor": actor, "sourceRevision": source_revision, "manualPlanRevision": manual_plan_revision})
         with _store_writer(self.root):
-            loaded = self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document)
+            loaded = _loaded if _loaded is not None else self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document)
             scene = loaded["scene"]
             self._assert_binding(scene, source_revision, manual_plan_revision)
             previous = prior_receipt(scene, request_id, payload_hash)
@@ -2313,8 +2337,9 @@ class DocumentationSceneRepository:
             validate_documentation_scene(candidate, self.document_type)
             guard_restored_fields(scene, candidate)
             self._save(assembly_number, candidate)
-            return {**self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document), "receipt": receipt}
+            return {**self._saved_result(candidate, assembly_number, source_revision, manual_plan_revision, identity_document=identity_document), "receipt": receipt}
 
+    @request_work
     def move_history(self, assembly_number, source_revision, manual_plan_revision, *, base_revision, direction, identity_document=None):
         if direction not in {"undo", "redo"}:
             raise DocumentationSceneError("unsupported documentation history operation")
@@ -2355,10 +2380,10 @@ class DocumentationSceneRepository:
                 retain_receipt(candidate, receipt)
                 guard_restored_fields(scene, candidate)
                 self._save(assembly_number, candidate)
-                return {**self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document), "receipt": receipt}
+                return {**self._saved_result(candidate, assembly_number, source_revision, manual_plan_revision, identity_document=identity_document), "receipt": receipt}
             return self.undo_change(assembly_number, source_revision, manual_plan_revision,
                 change_id=choices[-1], expected_revision=scene["editRevision"],
-                request_id="history-" + secrets.token_hex(16), actor="user", identity_document=identity_document)
+                request_id="history-" + secrets.token_hex(16), actor="user", identity_document=identity_document, _loaded=loaded)
 
 
 def apply_documentation_command_candidate(

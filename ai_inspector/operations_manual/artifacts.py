@@ -198,10 +198,11 @@ def attach_draft_render_artifacts(
     root: str | Path,
     assembly_number: str,
     document: Mapping[str, Any],
+    *, owned=False,
 ) -> Dict[str, Any]:
     if document.get("documentType") == "work_instructions":
-        return _attach_work_instruction_artifacts(root, assembly_number, document)
-    result = copy.deepcopy(dict(document))
+        return _attach_work_instruction_artifacts(root, assembly_number, document, owned=owned)
+    result = document if owned else copy.deepcopy(dict(document))
     revision = str(result.get("documentRevision") or "")
     try:
         directory = _render_directory(root, assembly_number, revision)
@@ -241,14 +242,14 @@ def attach_draft_render_artifacts(
 
 
 def _attach_work_instruction_artifacts(
-    root: str | Path, assembly_number: str, document: Mapping[str, Any],
+    root: str | Path, assembly_number: str, document: Mapping[str, Any], *, owned=False,
 ) -> Dict[str, Any]:
     from ai_inspector.work_instructions.document import (
         figure_request, legacy_document_revision, with_figure_revisions,
     )
 
     legacy_revision = legacy_document_revision(document)
-    result = with_figure_revisions(document)
+    result = with_figure_revisions(document, owned=owned)
     revision = str(result.get("documentRevision") or "")
     for page in result.get("pages") or []:
         request = page.get("renderRequest")

@@ -27,7 +27,7 @@
 .documentation-rich-panel[data-conflict="true"] { border-color: #e6ad45; }
 .documentation-rich-actions, .documentation-rich-controls { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
 .documentation-rich-message { margin-bottom: 6px; }
-.documentation-rich-controls { pointer-events: auto; width: 100%; max-height: 106px; overflow: auto; gap: 3px; }
+.documentation-rich-controls { pointer-events: auto; width: 100%; overflow: visible; gap: 3px; }
 .documentation-rich-controls input, .documentation-rich-controls select, .documentation-rich-controls button,
 .documentation-rich-panel button {
     pointer-events: auto; color: #edf6ff; background: #213b4c; border: 1px solid #547083;

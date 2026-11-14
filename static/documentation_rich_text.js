@@ -2,8 +2,9 @@
 const core = window.DocumentationRichTextCore;
 let kit = null;
 let active = null;
+let ready = null;
 const api = {
-    ready: null,
+    get ready() { return loadEditor(); },
     status: null,
     get active() { return active; },
     get mountedCount() { return active ? 1 : 0; },
@@ -16,7 +17,9 @@ const api = {
 window.DocumentationRichText = api;
 // A static import would prevent ready from resolving when the bundle fails to load.
 // Consume named exports only, from the reviewed self-contained module.
-api.ready = import('/static/vendor/tiptap/tiptap.bundle.js?v=c36fd989775f').then(
+function loadEditor() {
+    if (ready) return ready;
+    ready = import('/static/vendor/tiptap/tiptap.bundle.js?v=c36fd989775f').then(
     ({ Editor, Extension, Mark, StarterKit, TextStyle, Color, FontFamily, FontSize,
         Highlight, Subscript, Superscript, TextAlign, Table, TableRow, TableCell, TableHeader }) => {
         if (!core || !Editor || !Extension || !StarterKit || !TextStyle || !Color) {
@@ -28,9 +31,10 @@ api.ready = import('/static/vendor/tiptap/tiptap.bundle.js?v=c36fd989775f').then
     }, () => ({ ok: false, reason: 'The rich text editor could not load. This field is read-only.' })
 ).then(status => {
     api.status = status;
-    window.dispatchEvent(new CustomEvent('documentation-rich-ready'));
     return status;
 });
+    return ready;
+}
 
 function applyBoxStyle(element, style = {}) {
     element.style.fontFamily = core.font(style.fontFamily).canvas;

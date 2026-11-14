@@ -16115,6 +16115,7 @@ def _operations_manual_base_document(
 
 from ai_inspector.parts_manual.documentation import documentation_scene_revision
 from ai_inspector.documentation.refresh import exposure as documentation_refresh_exposure
+from ai_inspector.documentation.request_work import request_work as documentation_request_work, work_scope as documentation_work_scope
 
 
 class _DocumentationDocument(dict):
@@ -16137,7 +16138,7 @@ def _documentation_store_lock(method):
 
     @wraps(method)
     def locked(*args, **kwargs):
-        with DocumentationSceneRepository.transaction_lock, SpecificationSlotStore.transaction_lock:
+        with documentation_work_scope(), DocumentationSceneRepository.transaction_lock, SpecificationSlotStore.transaction_lock:
             return method(*args, **kwargs)
     return locked
 
@@ -16148,6 +16149,7 @@ def _operations_manual_build_document_with_scene(
     assembly_data: Mapping[str, Any],
     catalog: Mapping[str, Any],
     rebaseline_stale: bool = False,
+    editor_read: bool = True,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     baseline = _operations_manual_base_document(assembly_data, catalog)
     plan_revision = str(baseline["manualPlanRevision"])
@@ -16185,11 +16187,13 @@ def _operations_manual_build_document_with_scene(
         OPERATIONS_MANUAL_ROOT,
         str(catalog["assemblyNumber"]),
         document,
+        owned=True,
     )
     if rebaseline_stale:
         loaded_scene = repository.commit_refresh(str(catalog["assemblyNumber"]), loaded_scene["scene"],
             refresh_receipt, base_revision=refresh_revision, identity_document=baseline)
-    loaded_scene.update(_documentation_editor_read(document, loaded_scene, baseline))
+    if editor_read:
+        loaded_scene.update(_documentation_editor_read(document, loaded_scene, baseline))
     return _DocumentationDocument(document, baseline), loaded_scene
 
 
@@ -16404,6 +16408,7 @@ def _specification_sheet_build_document_with_scene(
     assembly_data: Mapping[str, Any],
     catalog: Mapping[str, Any],
     rebaseline_stale: bool = False,
+    editor_read: bool = True,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     baseline = _specification_sheet_base_document(assembly_data, catalog)
     slot_store = SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, str(catalog["assemblyNumber"]))
@@ -16471,7 +16476,8 @@ def _specification_sheet_build_document_with_scene(
     loaded_scene["slotHistory"] = {"canUndo": bool(slot_undo), "canRedo": bool(slot_redo)}
     loaded_scene["slotBinding"] = {**documentation_binding_data(snapshot["state"]),
         "hashes": {key: value for key, value in snapshot["hashes"].items() if key.startswith("slot:") or key == "@sheet"}}
-    loaded_scene.update(_documentation_editor_read(document, loaded_scene, baseline))
+    if editor_read:
+        loaded_scene.update(_documentation_editor_read(document, loaded_scene, baseline))
     return _DocumentationDocument(document, baseline), loaded_scene
 
 
@@ -16625,6 +16631,7 @@ def _work_instruction_build_document_with_scene(
     assembly_data: Mapping[str, Any],
     catalog: Mapping[str, Any],
     rebaseline_stale: bool = False,
+    editor_read: bool = True,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     resolved_package, process_map_revision = _work_instruction_process_inputs(catalog)
     baseline = build_work_instruction_document(
@@ -16668,11 +16675,13 @@ def _work_instruction_build_document_with_scene(
         WORK_INSTRUCTION_ROOT,
         str(catalog["assemblyNumber"]),
         document,
+        owned=True,
     )
     if rebaseline_stale:
         loaded_scene = repository.commit_refresh(str(catalog["assemblyNumber"]), loaded_scene["scene"],
             refresh_receipt, base_revision=refresh_revision, identity_document=baseline)
-    loaded_scene.update(_documentation_editor_read(document, loaded_scene, baseline))
+    if editor_read:
+        loaded_scene.update(_documentation_editor_read(document, loaded_scene, baseline))
     return _DocumentationDocument(document, baseline), loaded_scene
 
 
@@ -17255,6 +17264,7 @@ def _parts_manual_build_document_with_scene(
     assembly_data: Mapping[str, Any],
     catalog: Mapping[str, Any],
     loaded_plan: Mapping[str, Any],
+    editor_read: bool = True,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     # Compile source identities before the owner migrates a legacy scene.
     baseline = build_manual_document(loaded_plan["plan"], catalog["occurrences"], assembly_data,
@@ -17281,7 +17291,8 @@ def _parts_manual_build_document_with_scene(
         documentation_scene=loaded_scene["scene"],
         documentation_scene_revision=str(loaded_scene["revision"]),
     )
-    loaded_scene.update(_documentation_editor_read(document, loaded_scene, baseline))
+    if editor_read:
+        loaded_scene.update(_documentation_editor_read(document, loaded_scene, baseline))
     return _DocumentationDocument(document, baseline), loaded_scene
 
 
@@ -17353,6 +17364,7 @@ def operations_manual_generate(assembly_number: str, rebaseline: bool = False):
 
 
 @app.get("/api/operations-manual/{assembly_number}/documentation-scene", response_class=_DocumentationJSONResponse)
+@documentation_request_work
 def operations_manual_documentation_scene_get(assembly_number: str):
     try:
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
@@ -17389,6 +17401,7 @@ def operations_manual_documentation_scene_command(
             raise DocumentEditError("unsupported_page_setup", "A page setup or null is required.")
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
         current_document, _loaded_scene = _operations_manual_build_document_with_scene(
+            editor_read=False,
             assembly_data=assembly_data,
             catalog=catalog,
         )
@@ -17445,7 +17458,7 @@ def operations_manual_documentation_scene_command(
             OPERATIONS_MANUAL_ROOT, str(catalog["assemblyNumber"]), current_document, next_document
         )
         next_document = attach_draft_render_artifacts(
-            OPERATIONS_MANUAL_ROOT, str(catalog["assemblyNumber"]), next_document
+            OPERATIONS_MANUAL_ROOT, str(catalog["assemblyNumber"]), next_document, owned=True
         )
     except (
         PartsManualRepositoryError,
@@ -17467,6 +17480,7 @@ def operations_manual_documentation_scene_command(
     }
 
 
+@documentation_request_work
 def _operations_manual_documentation_history(
     assembly_number: str,
     body: DocumentationSceneHistoryBody,
@@ -17476,6 +17490,7 @@ def _operations_manual_documentation_history(
     try:
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
         current_document, _loaded_scene = _operations_manual_build_document_with_scene(
+            editor_read=False,
             assembly_data=assembly_data,
             catalog=catalog,
         )
@@ -17507,7 +17522,7 @@ def _operations_manual_documentation_history(
             OPERATIONS_MANUAL_ROOT, str(catalog["assemblyNumber"]), current_document, next_document
         )
         next_document = attach_draft_render_artifacts(
-            OPERATIONS_MANUAL_ROOT, str(catalog["assemblyNumber"]), next_document
+            OPERATIONS_MANUAL_ROOT, str(catalog["assemblyNumber"]), next_document, owned=True
         )
     except (
         PartsManualRepositoryError,
@@ -17550,10 +17565,12 @@ def operations_manual_documentation_scene_redo(
 
 
 @app.get("/api/operations-manual/{assembly_number}/document")
+@documentation_request_work
 def operations_manual_document(assembly_number: str):
     try:
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
         document, _loaded_scene = _operations_manual_build_document_with_scene(
+            editor_read=False,
             assembly_data=assembly_data,
             catalog=catalog,
         )
@@ -17654,11 +17671,13 @@ def operations_manual_render_artifact(
 
 
 @app.post("/api/operations-manual/{assembly_number}/pdf")
+@documentation_request_work
 def operations_manual_prototype_export(assembly_number: str, mode: str = "review"):
     """Export review-only PDF and DOCX artifacts from the current draft revision."""
     try:
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
         document, _loaded_scene = _operations_manual_build_document_with_scene(
+            editor_read=False,
             assembly_data=assembly_data,
             catalog=catalog,
         )
@@ -17848,6 +17867,7 @@ def work_instructions_generate(assembly_number: str, rebaseline: bool = False):
 
 
 @app.get("/api/work-instructions/{assembly_number}/documentation-scene", response_class=_DocumentationJSONResponse)
+@documentation_request_work
 def work_instructions_documentation_scene_get(assembly_number: str):
     try:
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
@@ -17889,6 +17909,7 @@ def work_instructions_documentation_scene_command(
             raise DocumentEditError("unsupported_page_setup", "A page setup or null is required.")
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
         current_document, _loaded_scene = _work_instruction_build_document_with_scene(
+            editor_read=False,
             assembly_data=assembly_data,
             catalog=catalog,
         )
@@ -17937,7 +17958,7 @@ def work_instructions_documentation_scene_command(
             WORK_INSTRUCTION_ROOT, str(catalog["assemblyNumber"]), current_document, next_document
         )
         next_document = attach_draft_render_artifacts(
-            WORK_INSTRUCTION_ROOT, str(catalog["assemblyNumber"]), next_document
+            WORK_INSTRUCTION_ROOT, str(catalog["assemblyNumber"]), next_document, owned=True
         )
     except (
         PartsManualRepositoryError,
@@ -17964,6 +17985,7 @@ def work_instructions_documentation_scene_command(
     }
 
 
+@documentation_request_work
 def _work_instructions_documentation_history(
     assembly_number: str,
     body: DocumentationSceneHistoryBody,
@@ -17973,6 +17995,7 @@ def _work_instructions_documentation_history(
     try:
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
         current_document, _loaded_scene = _work_instruction_build_document_with_scene(
+            editor_read=False,
             assembly_data=assembly_data,
             catalog=catalog,
         )
@@ -18003,7 +18026,7 @@ def _work_instructions_documentation_history(
             WORK_INSTRUCTION_ROOT, str(catalog["assemblyNumber"]), current_document, next_document
         )
         next_document = attach_draft_render_artifacts(
-            WORK_INSTRUCTION_ROOT, str(catalog["assemblyNumber"]), next_document
+            WORK_INSTRUCTION_ROOT, str(catalog["assemblyNumber"]), next_document, owned=True
         )
     except (
         PartsManualRepositoryError,
@@ -18051,10 +18074,12 @@ def work_instructions_documentation_scene_redo(
 
 
 @app.get("/api/work-instructions/{assembly_number}/document")
+@documentation_request_work
 def work_instructions_document(assembly_number: str):
     try:
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
         document, _loaded_scene = _work_instruction_build_document_with_scene(
+            editor_read=False,
             assembly_data=assembly_data,
             catalog=catalog,
         )
@@ -18174,10 +18199,12 @@ def work_instructions_render_artifact(
 
 
 @app.post("/api/work-instructions/{assembly_number}/pdf")
+@documentation_request_work
 def work_instructions_review_export(assembly_number: str, mode: str = "review"):
     try:
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
         document, _loaded_scene = _work_instruction_build_document_with_scene(
+            editor_read=False,
             assembly_data=assembly_data,
             catalog=catalog,
         )
@@ -18360,6 +18387,7 @@ def specification_sheet_generate(assembly_number: str, rebaseline: bool = False)
 
 
 @app.get("/api/specification-sheet/{assembly_number}/documentation-scene", response_class=_DocumentationJSONResponse)
+@documentation_request_work
 def specification_sheet_documentation_scene_get(assembly_number: str):
     try:
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
@@ -18397,6 +18425,7 @@ def specification_sheet_documentation_scene_command(
             raise DocumentEditError("unsupported_page_setup", "A page setup or null is required.")
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
         current_document, _loaded_scene = _specification_sheet_build_document_with_scene(
+            editor_read=False,
             assembly_data=assembly_data,
             catalog=catalog,
         )
@@ -18463,6 +18492,7 @@ def specification_sheet_documentation_scene_command(
     }
 
 
+@documentation_request_work
 def _specification_sheet_documentation_history(
     assembly_number: str,
     body: DocumentationSceneHistoryBody,
@@ -18472,6 +18502,7 @@ def _specification_sheet_documentation_history(
     try:
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
         current_document, _loaded_scene = _specification_sheet_build_document_with_scene(
+            editor_read=False,
             assembly_data=assembly_data,
             catalog=catalog,
         )
@@ -18540,10 +18571,12 @@ def specification_sheet_documentation_scene_redo(
 
 
 @app.get("/api/specification-sheet/{assembly_number}/document")
+@documentation_request_work
 def specification_sheet_document(assembly_number: str):
     try:
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
         document, _loaded_scene = _specification_sheet_build_document_with_scene(
+            editor_read=False,
             assembly_data=assembly_data,
             catalog=catalog,
         )
@@ -18992,7 +19025,7 @@ def documentation_reset(document_type: str, assembly_number: str, body: Dict[str
         return _documentation_value_error(error)
 
 
-def _documentation_snapshot_payload(payload, document_type, *, identity_document=None):
+def _documentation_snapshot_payload(payload, document_type, *, identity_document=None, include_hashes=True, include_targets=True):
     document, scene = payload["document"], payload["scene"]
     baseline = identity_document if identity_document is not None else _documentation_identity_document(document)
     number = str(scene["assemblyNumber"])
@@ -19010,10 +19043,10 @@ def _documentation_snapshot_payload(payload, document_type, *, identity_document
         state["orphans"] += scene_review["orphans"]
         state["resolutionHistory"] += scene_review["resolutionHistory"]
         state["openConflictCount"] += scene_review["openConflictCount"]
-    targets = documentation_text_targets(state, document)
+    targets = documentation_text_targets(state, document) if include_targets else {}
     hashes = {key: documentation_content_hash(documentation_target_state(state, targets[key]), key, value)
-              for key, value in documentation_hash_values(targets).items()}
-    if document_type == "product_specification_sheet":
+              for key, value in documentation_hash_values(targets).items()} if include_hashes else {}
+    if include_hashes and document_type == "product_specification_sheet":
         # Structural operations depend on the entire row/settings/value collection.
         hashes["@sheet"] = documentation_content_hash(state, "@sheet", {
             "slots": document["slots"], "sheet": document["sheet"], "sourceRevision": state["sourceRevision"],
@@ -19055,7 +19088,7 @@ def _documentation_editor_read(document, loaded, baseline):
             for item in page.get("documentationObjects", {}).values()):
         return {"documentationRichText": documentation_rich_text_enabled(), "richTextFields": [], "objectBinding": object_binding, "pageSetupOptions": setup_options}
     snapshot = _documentation_snapshot_payload({**loaded, "document": document}, document["documentType"],
-                                                identity_document=baseline)
+                                                identity_document=baseline, include_hashes=False)
     requested = [{"targetId": key} for key, target in snapshot["targets"].items() if target.get("richField") is not None]
     fields = (documentation_read_targets(snapshot["state"], snapshot["targets"], requested, limit=None, internal=True)["targets"]
               if requested else [])
@@ -19466,10 +19499,12 @@ def specification_sheet_render_artifact(
 
 
 @app.post("/api/specification-sheet/{assembly_number}/pdf")
+@documentation_request_work
 def specification_sheet_export(assembly_number: str, mode: str = "review"):
     try:
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
         document, _loaded_scene = _specification_sheet_build_document_with_scene(
+            editor_read=False,
             assembly_data=assembly_data,
             catalog=catalog,
         )
@@ -19580,11 +19615,13 @@ MAX_RETURNED_SPECIFICATION_SHEET_BYTES = 25 * 1024 * 1024
 
 
 @app.post("/api/specification-sheet/{assembly_number}/fillable-pdf")
+@documentation_request_work
 def specification_sheet_fillable_export(assembly_number: str):
     """The sheet with its open slots as amber form fields, to fill in any PDF reader and give back."""
     try:
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
         document, _loaded_scene = _specification_sheet_build_document_with_scene(
+            editor_read=False,
             assembly_data=assembly_data,
             catalog=catalog,
         )
@@ -20259,6 +20296,7 @@ def parts_manual_section_bom(assembly_number: str, section_id: str):
 
 
 @app.get("/api/parts-manual/{assembly_number}/documentation-scene", response_class=_DocumentationJSONResponse)
+@documentation_request_work
 def parts_manual_documentation_scene_get(assembly_number: str):
     try:
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
@@ -20283,6 +20321,7 @@ def parts_manual_documentation_scene_get(assembly_number: str):
             PARTS_MANUAL_ROOT,
             catalog["assemblyNumber"],
             document,
+            owned=True,
         )
         document = _DocumentationDocument(document, identity_document)
     except (
@@ -20388,6 +20427,7 @@ def parts_manual_documentation_scene_command(
         if body.manualPlanRevision != loaded_plan["revision"]:
             raise PartsManualConflictError(loaded_plan["revision"])
         document, _loaded_scene = _parts_manual_build_document_with_scene(
+            editor_read=False,
             assembly_data=assembly_data,
             catalog=catalog,
             loaded_plan=loaded_plan,
@@ -20426,6 +20466,7 @@ def parts_manual_documentation_scene_command(
             PARTS_MANUAL_ROOT,
             catalog["assemblyNumber"],
             next_document,
+            owned=True,
         )
     except (
         PartsManualRepositoryError,
@@ -20456,6 +20497,7 @@ def parts_manual_documentation_scene_command(
     }
 
 
+@documentation_request_work
 def _parts_manual_documentation_history(
     assembly_number: str,
     body: DocumentationSceneHistoryBody,
@@ -20478,6 +20520,7 @@ def _parts_manual_documentation_history(
         if body.manualPlanRevision != loaded_plan["revision"]:
             raise PartsManualConflictError(loaded_plan["revision"])
         current_document, _loaded_scene = _parts_manual_build_document_with_scene(
+            editor_read=False,
             assembly_data=assembly_data, catalog=catalog, loaded_plan=loaded_plan)
         result = _documentation_scene_repository().move_history(
             catalog["assemblyNumber"],
@@ -20500,6 +20543,7 @@ def _parts_manual_documentation_history(
             PARTS_MANUAL_ROOT,
             catalog["assemblyNumber"],
             next_document,
+            owned=True,
         )
     except (
         PartsManualRepositoryError,
@@ -20555,6 +20599,7 @@ def parts_manual_documentation_scene_redo(
 
 
 @app.get("/api/parts-manual/{assembly_number}/document")
+@documentation_request_work
 def parts_manual_document(assembly_number: str):
     try:
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
@@ -20570,6 +20615,7 @@ def parts_manual_document(assembly_number: str):
                 catalog["sourceRevision"],
             )
         document, _loaded_scene = _parts_manual_build_document_with_scene(
+            editor_read=False,
             assembly_data=assembly_data,
             catalog=catalog,
             loaded_plan=loaded,
@@ -20578,6 +20624,7 @@ def parts_manual_document(assembly_number: str):
             PARTS_MANUAL_ROOT,
             catalog["assemblyNumber"],
             document,
+            owned=True,
         )
     except (
         PartsManualRepositoryError,
@@ -20684,6 +20731,7 @@ def parts_manual_page_render_get(
 
 
 @app.post("/api/parts-manual/{assembly_number}/pdf")
+@documentation_request_work
 def parts_manual_pdf_generate(assembly_number: str, body: PartsManualPdfBody, mode: str = "review"):
     try:
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
@@ -20696,6 +20744,7 @@ def parts_manual_pdf_generate(assembly_number: str, body: PartsManualPdfBody, mo
         if not loaded["sourceCurrent"] or body.sourceRevision != catalog["sourceRevision"]:
             raise PartsManualSourceConflictError(body.sourceRevision, catalog["sourceRevision"])
         document, _loaded_scene = _parts_manual_build_document_with_scene(
+            editor_read=False,
             assembly_data=assembly_data,
             catalog=catalog,
             loaded_plan=loaded,
@@ -20706,6 +20755,7 @@ def parts_manual_pdf_generate(assembly_number: str, body: PartsManualPdfBody, mo
             PARTS_MANUAL_ROOT,
             catalog["assemblyNumber"],
             document,
+            owned=True,
         )
         documentation_check_export(document, mode)
         if mode != "review":
@@ -42217,9 +42267,54 @@ class _DocumentationAgentHost:
             raise DocumentEditError("invalid_document_operation", "This document has no prose editing capability.")
         return factory()
 
+    @documentation_request_work
     def document_snapshot(self, assembly_number, document_type):
+        return self._compiled_snapshot(assembly_number, document_type, include_text=True)
+
+    @documentation_request_work
+    def object_snapshot(self, assembly_number, document_type):
+        return self._compiled_snapshot(assembly_number, document_type, include_text=False)
+
+    def _compiled_snapshot(self, assembly_number, document_type, *, include_text):
+        """Compile the tool's owned document without constructing and discarding a ribbon read."""
+        from ai_inspector.codex_runtime.policy import PilotError
+        if document_type != "product_specification_sheet" and is_library_machine(assembly_profiles.get(assembly_number)):
+            raise PilotError("library_machine_bodies", f"{assembly_number} is a library machine: only the "
+                             "Specification Sheet is offered for it.", 409)
         with DocumentationSceneRepository.transaction_lock, SpecificationSlotStore.transaction_lock:
-            return _documentation_snapshot_payload(self._text_scene(assembly_number, document_type), document_type)
+            try:
+                assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
+                if document_type == "illustrated_parts_manual":
+                    plan = _parts_manual_repository().read(catalog["assemblyNumber"], catalog["sourceRevision"],
+                        known_occurrence_ids=[row["occurrenceId"] for row in catalog["occurrences"]])
+                    if not plan["sourceCurrent"]:
+                        raise PartsManualSourceConflictError(plan["plan"]["sourceRevision"], catalog["sourceRevision"])
+                    document, loaded = _parts_manual_build_document_with_scene(assembly_data=assembly_data,
+                        catalog=catalog, loaded_plan=plan, editor_read=False)
+                    if include_text:
+                        baseline = _documentation_identity_document(document)
+                        document = _DocumentationDocument(attach_render_artifacts(
+                            PARTS_MANUAL_ROOT, catalog["assemblyNumber"], document, owned=True), baseline)
+                else:
+                    build = {"operations_and_maintenance_manual": _operations_manual_build_document_with_scene,
+                             "work_instructions": _work_instruction_build_document_with_scene,
+                             "product_specification_sheet": _specification_sheet_build_document_with_scene}[document_type]
+                    document, loaded = build(assembly_data=assembly_data, catalog=catalog, editor_read=False)
+            except (PartsManualRepositoryError, PartsManualValidationError, DocumentationSceneError,
+                    OperationsManualEvidenceError, WorkInstructionError, AssemblyKnowledgeRepositoryError,
+                    AssemblyKnowledgeSchemaError, EvidenceCompilationError, ProcessMapNotFoundError,
+                    ProcessMapAssetError, SpecificationSheetError, ValueError) as error:
+                response = {"illustrated_parts_manual": _parts_manual_error_response,
+                    "operations_and_maintenance_manual": _operations_manual_error_response,
+                    "work_instructions": _work_instruction_error_response,
+                    "product_specification_sheet": _specification_sheet_error_response}[document_type](
+                        error, operation="documentation_scene_get")
+                message = (str(error) if document_type == "illustrated_parts_manual" and isinstance(error, ValueError)
+                    and not isinstance(error, (PartsManualRepositoryError, PartsManualValidationError, DocumentationSceneError))
+                    else self._error(response)["message"])
+                raise PilotError("documentation_unavailable", message, 409) from error
+            return _documentation_snapshot_payload({**loaded, "document": document}, document_type,
+                include_targets=include_text, include_hashes=include_text)
 
     def edit_document_text(self, assembly_number, document_type, edits, *, observed=None):
         if observed is None:
@@ -42230,7 +42325,7 @@ class _DocumentationAgentHost:
 
     def read_document_objects(self, assembly_number, document_type, page_ids):
         from ai_inspector.documentation.objects import read_objects
-        snapshot = self.document_snapshot(assembly_number, document_type)
+        snapshot = self.object_snapshot(assembly_number, document_type)
         return read_objects(snapshot, page_ids, PARTS_MANUAL_ROOT, assembly_number)
 
     def _page_setup_edit(self, assembly_number, document_type, observed, snapshot, loaded, repository, actor):
@@ -42301,6 +42396,7 @@ class _DocumentationAgentHost:
             actor=actor, payload=observed, identity_document=snapshot["identity_document"], check_candidate=check_candidate)
         return {"receipt": result["receipt"], "changed": result["changed"], **result["receipt"]["pageSetupResult"]}
 
+    @documentation_request_work
     def apply_document_edits(self, assembly_number, document_type, observed, *, actor="sage"):
         operations = observed["operations"]
         destination = documentation_operation_store(operations)
@@ -42324,7 +42420,8 @@ class _DocumentationAgentHost:
         with repository.transaction_lock:
             # Receipt lookup precedes current target resolution: a successful
             # retry remains valid even after an intervening target deletion.
-            snapshot = self.document_snapshot(assembly_number, document_type)
+            snapshot = (self.object_snapshot(assembly_number, document_type) if destination == "objects"
+                        else self.document_snapshot(assembly_number, document_type))
             _documentation_check_binding(observed, snapshot["state"])
             loaded = repository.read(assembly_number, observed["sourceRevision"], observed["manualPlanRevision"],
                                      identity_document=snapshot["identity_document"])

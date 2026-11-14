@@ -422,10 +422,10 @@ def test_real_compiler_catalog_idempotence_and_mmle_inventory(mmle_client, monke
 
     raw_inputs = []
     compiler = identity.compile_identities
-    def capture(document):
+    def capture(document, **kwargs):
         if document["documentType"] == kind and "aliasMap" not in document:
             raw_inputs.append(deepcopy(document))
-        return compiler(document)
+        return compiler(document, **kwargs)
     monkeypatch.setattr(identity, "compile_identities", capture)
     response = mmle_client.get(f"/api/{route}/MMLE-50D/documentation-scene")
     assert response.status_code == 200, response.text

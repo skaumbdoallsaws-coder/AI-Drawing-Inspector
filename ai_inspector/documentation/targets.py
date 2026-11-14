@@ -33,7 +33,7 @@ def rich_block_capabilities(document_type, block_type):
     return {"schemaVersions": [1, 2], "features": features, "listDepth": 6 if kind == "paragraph" else 0}
 
 
-def text_targets(state: Mapping[str, Any], document: Mapping[str, Any]) -> dict[str, dict]:
+def text_targets(state: Mapping[str, Any], document: Mapping[str, Any], *, include_objects=True) -> dict[str, dict]:
     """Full values, including provenance/type attributes, never a shortened string."""
     result = {}
 
@@ -76,7 +76,7 @@ def text_targets(state: Mapping[str, Any], document: Mapping[str, Any]) -> dict[
         text = rich["text"] if rich else "" if value is None else str(value)
         descriptor = {"targetId": stable, "alias": alias, "pageId": page_id,
                       "targetType": target_type, "documentType": document.get("documentType"), "storageId": storage_id, "text": text, "operation": kind,
-                      "attributes": deepcopy(attributes), "override": deepcopy(override),
+                      "attributes": attributes, "override": deepcopy(override),
                       "versionKey": alias if kind == "set_slot_value" else scene_field_key(page_id, target_type, storage_id),
                       "versionPage": page_id if kind == "replace_text" and not storage_id.startswith(("part.", "gen-")) else ""}
         if rich:
@@ -95,6 +95,8 @@ def text_targets(state: Mapping[str, Any], document: Mapping[str, Any]) -> dict[
             result[stable] = descriptor
 
     def add_objects(page):
+        if not include_objects:
+            return
         objects = (state.get("scene", {}).get("pages", {}).get(page["pageId"], {}).get("documentObjects")
                    or (page.get("documentationComposition") or {}).get("documentObjects")
                    or page.get("documentationObjects") or {})

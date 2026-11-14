@@ -113,15 +113,24 @@
       dispose() {
         if (disposed) return;
         disposed = true;
+        // Three.js shares one geometry among all sprites. dispose() does not destroy it: it frees this
+        // renderer's GPU copy and takes this renderer's listener off the shared object, which otherwise kept
+        // every closed widget's renderer and WebGL context alive. Another renderer uploads its copy again
+        // when it next draws a sprite. The shared object is released once, not once per sprite.
+        const released = new Set();
         axes.traverse(object => {
-          // Sprite geometry belongs to Three.js and is shared across widgets.
-          if (!object.isSprite) object.geometry?.dispose();
+          if (object.geometry && !released.has(object.geometry)) {
+            released.add(object.geometry);
+            object.geometry.dispose();
+          }
           if (object.material) {
             object.material.map?.dispose();
             object.material.dispose();
           }
         });
         renderer.dispose();
+        renderer.forceContextLoss?.();
+        axes.clear();
         canvas.remove();
       }
     };

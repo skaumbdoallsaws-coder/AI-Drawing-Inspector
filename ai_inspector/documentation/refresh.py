@@ -3,6 +3,7 @@ from copy import deepcopy
 
 from .commands import DocumentEditError, digest, document_id, scene_field_key
 from .identity import catalog_from, compile_identities
+from .request_work import memoized, is_identified
 
 REFRESH_RECEIPT_LIMIT = 100
 _BINDING = ("sourceRevision", "manualPlanRevision")
@@ -142,11 +143,13 @@ def validate_refresh_metadata(state):
                 invalid()
 
 
+@memoized
 def inventory(document):
     """Generated payloads and exact source evidence, independent of scene edits."""
     from .targets import text_targets
-    document = compile_identities(document)
-    catalog = catalog_from(document)
+    if not is_identified(document):
+        document = compile_identities(document)
+    catalog = catalog_from(document, compiled=True)
     state = {"documentId": document_id(catalog["documentType"], catalog["assemblyNumber"]),
              **binding(document), "scene": {"pages": {}}}
     targets = text_targets(state, document)
@@ -224,7 +227,6 @@ def derive_baselines(state, document, *, slots=False):
     result = deepcopy(state)
     if document is None or binding(state) != binding(document):
         return result
-    generated = inventory(document)
     keys = edited_targets(state, slots=slots)
     if not slots:
         keys |= {scene_field_key(page, "page_element", key) for page, value in state.get("pages", {}).items()
@@ -236,14 +238,19 @@ def derive_baselines(state, document, *, slots=False):
                                             ("balloonOverrides", "balloon"), ("leaderOverrides", "leader")):
                 keys.update(scene_field_key(page_id, target_type, key) for key in page.get(collection, {}))
     conflicted = {key for item in open_conflicts(state) for key in (item.get("targetId"), item.get("previousTargetId"))}
+    keys -= set(result.get("generatedBaseline", {})) | conflicted
+    generated = inventory(document) if keys else {}
     for key in keys:
-        if key in generated and key not in conflicted:
+        if key in generated:
             result.setdefault("generatedBaseline", {}).setdefault(key, deepcopy(generated[key]))
     return result
 
 
 def capture_baselines(state, document, targets):
     if document is None:
+        return
+    targets = set(targets) - set(state.get("generatedBaseline", {}))
+    if not targets:
         return
     generated = inventory(document)
     for key in targets:

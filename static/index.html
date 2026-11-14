@@ -18,9 +18,9 @@
     <script src="/static/documentation_rich_text_core.js?v=20261111-p3b-2"></script>
     <script src="/static/documentation_symbols.js?v=20261111-p3a-4"></script>
     <script src="/static/documentation_search.js?v=20261111-p3a-4"></script>
-    <script type="module" src="/static/documentation_rich_text.js?v=20261113-p5a-2"></script>
-    <link rel="stylesheet" href="/static/documentation_rich_text.css?v=20261111-p3b-2">
-    <script src="/static/cad_viewport.js"></script>
+    <script type="module" src="/static/documentation_rich_text.js?v=20261114-p5a-3"></script>
+    <link rel="stylesheet" href="/static/documentation_rich_text.css?v=20261114-p5a-3">
+    <script src="/static/cad_viewport.js?v=20261114-p5a-3"></script>
     <script>
         // Theme bootstrap — set data-theme BEFORE the stylesheet is parsed
         // so the page never paints with the wrong theme tokens. Reads
@@ -3673,7 +3673,7 @@
                 display: block;
             }
         }
-        @container documentation-ribbon (max-width: 1200px) {
+        @container documentation-ribbon (max-width: 1450px) {
             [data-documentation-ribbon-group="content"],
             [data-documentation-separator-for="content"] {
                 display: none !important;
@@ -3682,7 +3682,30 @@
                 display: block;
             }
         }
-        @container documentation-ribbon (max-width: 1040px) {
+        /* Reserve room for the existing object/format controls before Publish can be clipped. */
+        @container documentation-ribbon (max-width: 1660px) {
+            .documentation-ribbon-commandbar:has([data-documentation-ribbon-group="object"]) [data-documentation-ribbon-group="figure"],
+            .documentation-ribbon-commandbar:has([data-documentation-ribbon-group="object"]) [data-documentation-separator-for="figure"],
+            .documentation-ribbon-commandbar:has([data-documentation-ribbon-group="object"]) [data-documentation-ribbon-group="annotate"],
+            .documentation-ribbon-commandbar:has([data-documentation-ribbon-group="object"]) [data-documentation-separator-for="annotate"] { display: none !important; }
+            .documentation-ribbon-commandbar:has([data-documentation-ribbon-group="object"]) .documentation-overflow-section[data-overflow-group="figure"],
+            .documentation-ribbon-commandbar:has([data-documentation-ribbon-group="object"]) .documentation-overflow-section[data-overflow-group="annotate"] { display: block; }
+        }
+        @container documentation-ribbon (max-width: 1450px) {
+            [data-documentation-ribbon-group="object"],
+            [data-documentation-separator-for="object"],
+            [data-documentation-ribbon-group="figure"],
+            [data-documentation-ribbon-group="annotate"],
+            [data-documentation-ribbon-group="values-history"],
+            [data-documentation-separator-for="figure"],
+            [data-documentation-separator-for="annotate"],
+            [data-documentation-separator-for="values-history"] { display: none !important; }
+            .documentation-overflow-section[data-overflow-group="object"],
+            .documentation-overflow-section[data-overflow-group="figure"],
+            .documentation-overflow-section[data-overflow-group="annotate"],
+            .documentation-overflow-section[data-overflow-group="values-history"] { display: block; }
+        }
+        @container documentation-ribbon (max-width: 1450px) {
             .documentation-workflow-selector {
                 width: 232px;
                 min-width: 232px;
@@ -3697,6 +3720,29 @@
                 display: block;
             }
         }
+        /* Measured folding (_documentationFitWorkflowRibbon). The rules above fold by the ribbon's width alone;
+           the Format and Object groups come and go with the selection, so the page folds further groups
+           into More, one at a time, while the last group ends beyond the command bar. */
+        .documentation-ribbon-commandbar[data-documentation-folded~="figure"] [data-documentation-ribbon-group="figure"],
+        .documentation-ribbon-commandbar[data-documentation-folded~="figure"] [data-documentation-separator-for="figure"],
+        .documentation-ribbon-commandbar[data-documentation-folded~="annotate"] [data-documentation-ribbon-group="annotate"],
+        .documentation-ribbon-commandbar[data-documentation-folded~="annotate"] [data-documentation-separator-for="annotate"],
+        .documentation-ribbon-commandbar[data-documentation-folded~="values-history"] [data-documentation-ribbon-group="values-history"],
+        .documentation-ribbon-commandbar[data-documentation-folded~="values-history"] [data-documentation-separator-for="values-history"],
+        .documentation-ribbon-commandbar[data-documentation-folded~="content"] [data-documentation-ribbon-group="content"],
+        .documentation-ribbon-commandbar[data-documentation-folded~="content"] [data-documentation-separator-for="content"],
+        .documentation-ribbon-commandbar[data-documentation-folded~="edit"] [data-documentation-ribbon-group="edit"],
+        .documentation-ribbon-commandbar[data-documentation-folded~="edit"] [data-documentation-separator-for="edit"],
+        .documentation-ribbon-commandbar[data-documentation-folded~="object"] [data-documentation-ribbon-group="object"],
+        .documentation-ribbon-commandbar[data-documentation-folded~="object"] [data-documentation-separator-for="object"] { display: none !important; }
+        .documentation-ribbon-commandbar[data-documentation-folded~="figure"] .documentation-overflow-section[data-overflow-group="figure"],
+        .documentation-ribbon-commandbar[data-documentation-folded~="annotate"] .documentation-overflow-section[data-overflow-group="annotate"],
+        .documentation-ribbon-commandbar[data-documentation-folded~="values-history"] .documentation-overflow-section[data-overflow-group="values-history"],
+        .documentation-ribbon-commandbar[data-documentation-folded~="content"] .documentation-overflow-section[data-overflow-group="content"],
+        .documentation-ribbon-commandbar[data-documentation-folded~="edit"] .documentation-overflow-section[data-overflow-group="edit"],
+        .documentation-ribbon-commandbar[data-documentation-folded~="object"] .documentation-overflow-section[data-overflow-group="object"] { display: block; }
+        .documentation-ribbon-commandbar[data-documentation-folded] .documentation-ribbon-overflow-group { display: flex !important; }
+        .documentation-ribbon-commandbar[data-documentation-folded] [data-documentation-separator-for="overflow"] { display: block; }
         .documentation-format-control {
             min-width: 92px;
             height: 28px;
@@ -36824,21 +36870,21 @@
             return svg;
         }
 
-        function _documentationRenderDocumentObjects(page, layer) {
+        function _documentationRenderDocumentObjects(page, layer, options = {}) {
             if (!layer) return;
-            const mounted = window.DocumentationRichText?.active;
+            const mounted = !options.thumbnail && window.DocumentationRichText?.active;
             // Never detach/reparent the editor: even a synchronous detach loses DOM selection.
-            if (documentationObjectCrop && documentationObjectCrop.pageId !== page?.pageId) {
+            if (!options.thumbnail && documentationObjectCrop && documentationObjectCrop.pageId !== page?.pageId) {
                 documentationObjectCrop=null;state.partsManualDocumentationCropId=null;
             }
-            const retained = mounted?.pageId === page?.pageId ? mounted.element : documentationObjectCrop?.element || null;
+            const retained = mounted?.pageId === page?.pageId ? mounted.element : (!options.thumbnail && documentationObjectCrop?.element) || null;
             // Keyboard users keep their place: the object that had the focus has it again when its page is next
-            // drawn (the rail draws every page on this layer for its thumbnails), unless the focus went elsewhere.
+            // drawn, unless the focus went elsewhere. Thumbnails own a separate inert layer.
             const focusHolder = layer.contains(document.activeElement)
                 ? document.activeElement.closest('[data-documentation-object-id]') : null;
-            if (focusHolder && focusHolder !== retained) {
+            if (!options.thumbnail && focusHolder && focusHolder !== retained) {
                 documentationObjectFocusKeep = focusHolder.dataset.documentationObjectId;
-            } else if (document.activeElement !== document.body) documentationObjectFocusKeep = null;
+            } else if (!options.thumbnail && document.activeElement !== document.body) documentationObjectFocusKeep = null;
             for (const child of [...layer.childNodes]) if (child !== retained) child.remove();
             const objects = page?.documentationObjects || {};
             const publicationPage = _documentationPublicationLayout().page
@@ -36872,7 +36918,7 @@
                         DocumentationRichText.render(element, richField.richText, style);
                     } else element.textContent = value.content || '';
                     if (value.isRichText || richField?.isRichText) {
-                        if (window.DocumentationRichText?.status?.ok === false
+                        if (!options.thumbnail && window.DocumentationRichText?.status?.ok === false
                             && !document.querySelector('.documentation-rich-readonly')) {
                             _documentationRichNotice(DocumentationRichText.status.reason);
                         }
@@ -36941,7 +36987,7 @@
                 if (beforeRetained) layer.insertBefore(element, retained);
                 else layer.appendChild(element);
             });
-            const refocus = documentationObjectFocusKeep ? layer.querySelector(
+            const refocus = !options.thumbnail && documentationObjectFocusKeep ? layer.querySelector(
                 '[data-documentation-object-id="' + CSS.escape(documentationObjectFocusKeep) + '"]') : null;
             if (refocus && refocus !== retained) {
                 documentationObjectFocusKeep = null;
@@ -38347,6 +38393,7 @@
             const label = workspace.querySelector('.documentation-busy span');
             if (label) label.textContent = message;
             _documentationSyncWorkflowRibbon();
+            if (!busy) _documentationQueueRailThumbnails();
         }
 
         function _documentationRecordGenerationEvent(type, detail = {}) {
@@ -39661,11 +39708,6 @@
 
         let documentationRichReadCache = null;
         let documentationRichFields = new Map();
-        window.addEventListener('documentation-rich-ready', () => {
-            if (_documentationPayload()?.richTextFields?.some(field => field.isRichText)) {
-                _documentationRenderPublicationPage(_documentationActivePage());
-            }
-        });
         function _documentationRichField(pageId, objectId, payload = _documentationPayload()) {
             if (payload !== documentationRichReadCache) {
                 documentationRichReadCache = payload;
@@ -39977,6 +40019,7 @@
             } finally {
                 documentationObjectInFlight=false;documentationObjectPreviewFrames=null;
                 state.partsManualDocumentationObjectBusy=false;
+                _documentationQueueRailThumbnails();
                 if(stillHere()) {
                     _documentationRefreshSelectionToolbar();
                     const ribbon=document.getElementById('contextRibbon');
@@ -40109,6 +40152,7 @@
             documentationObjectCrop=null;state.partsManualDocumentationCropId=null;
             _documentationRenderPublicationPage(_documentationActivePage());
             _documentationSelectTarget(mode.target,{silent:true});
+            _documentationQueueRailThumbnails();
             if(operations.length)_documentationObjectBatch(operations,{binding:mode.binding,label:'Picture cropped.'});
         }
 
@@ -40995,7 +41039,7 @@
                 }
             }
             if (options.busy !== false) _documentationSetBusy(true, 'Preparing figure...');
-            _documentationRenderPageRail();
+            _documentationSelectRailPage();
             _documentationRenderPublicationPage(page);
             _documentationSizePageCanvas(
                 document.querySelector('#documentationWorkspace .documentation-canvas-stage'),
@@ -41020,11 +41064,14 @@
                 _documentationSetStatus(error.message, 'error');
             } finally {
                 if (options.busy !== false) _documentationSetBusy(false);
-                _documentationRenderPageRail();
+                _documentationSelectRailPage();
             }
         }
 
         function _documentationInvalidatePageThumbnail(pageId = null) {
+            for (const item of documentationRail?.list.querySelectorAll('button.documentation-page-item') || []) {
+                if (!pageId || item.dataset.pageId === String(pageId)) item._thumbnailBuilt = null;
+            }
             const cache = state.partsManualDocumentationThumbnailCache || {};
             if (!pageId) {
                 state.partsManualDocumentationThumbnailCache = {};
@@ -41227,10 +41274,22 @@
         }
 
         function _documentationBuildPageThumbnail(page) {
-            _documentationRenderPublicationPage(page, { thumbnail: true });
             const source = document.getElementById('documentationPublicationSurface');
             if (!source) return null;
             const clone = source.cloneNode(true);
+            for (const element of [clone, ...clone.querySelectorAll('[id]')]) {
+                if (element.id) element.dataset.publicationElement = element.id;
+                element.removeAttribute('id');
+            }
+            clone.querySelector('.documentation-page-illustration')?.replaceChildren();
+            const scratch = document.createElement('div');
+            scratch.inert = true; scratch.setAttribute('aria-hidden', 'true');
+            scratch.style.cssText = 'position:absolute;left:-100000px;top:0;visibility:hidden;pointer-events:none;';
+            scratch.appendChild(clone);
+            document.getElementById('documentationWorkspace').appendChild(scratch);
+            clone.style.transform = 'none';
+            try { _documentationRenderPublicationPage(page, { thumbnail: true, surface: clone }); }
+            finally { scratch.remove(); }
             clone.removeAttribute('id');
             clone.classList.add('documentation-thumbnail-page');
             clone.setAttribute('aria-hidden', 'true');
@@ -41251,10 +41310,11 @@
                 illustration.replaceChildren();
             }
             if (illustration && illustration.style.display !== 'none') {
-                const liveImage = _documentationLiveThumbnailImage(page);
                 const storedImage = page.renderRequest?.image?.status === 'ready'
                     ? String(page.renderRequest.image.url || '').trim()
                     : '';
+                const liveImage = (!storedImage || state.partsManualDocumentationLiveEditPageId === page.pageId)
+                    ? _documentationLiveThumbnailImage(page) : null;
                 const imageUrl = liveImage || storedImage;
                 if (imageUrl) {
                     const image = document.createElement('img');
@@ -41286,19 +41346,90 @@
 
         function _documentationScalePageRailThumbnails() {
             const pageSize = _documentationPageSize();
-            document.querySelectorAll(
+            const hosts = [...document.querySelectorAll(
                 '#documentationPageList .documentation-page-thumbnail'
-            ).forEach(host => {
+            )].map(host => ({ host, width: host.clientWidth }));
+            hosts.forEach(({ host, width }) => {
                 host.style.setProperty(
                     '--documentation-page-aspect',
                     `${pageSize.width} / ${pageSize.height}`
                 );
                 const preview = host.querySelector('.documentation-thumbnail-page');
-                if (!preview || !host.clientWidth) return;
+                if (!preview || !width) return;
                 preview.style.setProperty('--documentation-page-width', `${pageSize.width}px`);
                 preview.style.setProperty('--documentation-page-height', `${pageSize.height}px`);
-                preview.style.transform = `scale(${host.clientWidth / pageSize.width})`;
+                preview.style.transform = `scale(${width / pageSize.width})`;
             });
+        }
+
+        let documentationRail = null;
+
+        function _documentationDisposePageRail() {
+            if (!documentationRail) return;
+            documentationRail.observer.disconnect();
+            if (documentationRail.idle !== null) {
+                if (window.cancelIdleCallback) cancelIdleCallback(documentationRail.idle);
+                else clearTimeout(documentationRail.idle);
+            }
+            documentationRail = null;
+        }
+
+        function _documentationThumbnailKey(page) {
+            const payload = _documentationPayload(), model = payload?.document || {};
+            const common = {};
+            for (const key of ['product', 'documentNumber', 'pageCount', 'revision', 'statusLabel',
+                'title', 'releaseDate', 'sheet', 'slots', 'releaseGate', 'theme', 'pageMasters', 'publicationLayout']) common[key] = model[key];
+            const live = page.pageId === state.partsManualDocumentationPageId && page.renderRequest
+                && (page.renderRequest.image?.status !== 'ready' || state.partsManualDocumentationLiveEditPageId === page.pageId);
+            // Full compiled page, presentation metadata, validated rich fields and the displayed figure pose.
+            // Exclude only the document-wide capture revision: unrelated text edits retain this picture.
+            return JSON.stringify([_documentationApiBase(), page, common,
+                payload?.richTextFields?.filter(field => field.pageId === page.pageId).map(field =>
+                    [field.targetId, field.legacyTargetId, field.text, field.isRichText, field.richText,
+                        field.richTextError, field.richTextStyle]),
+                live ? [state.assyCamera?.position.toArray(), state.assyCamera?.quaternion.toArray(),
+                    (state.partsManualCallouts || []).map(row => row._liveRoute)] : null],
+                (key, value) => key === 'documentRevision' ? undefined : value);
+        }
+
+        function _documentationQueueRailThumbnails() {
+            const rail = documentationRail;
+            if (!rail || rail.idle !== null || !rail.list.isConnected) return;
+            const schedule = window.requestIdleCallback || (work => setTimeout(work, 0));
+            rail.idle = schedule(() => {
+                rail.idle = null;
+                if (documentationRail !== rail || !rail.list.isConnected) return;
+                if (window.DocumentationRichText?.active || documentationObjectCrop || documentationObjectInFlight
+                    || state.partsManualDocumentationPageElementDrag || state.partsManualDocumentationResizeDrag
+                    || state.partsManualDocumentationCalloutDrag || state.partsManualDocumentationDrag
+                    || state.partsManualDocumentationObjectDrag
+                    || document.querySelector('#documentationPublicationSurface [contenteditable="true"]')
+                    || state.partsManualDocumentationSageWork?.active
+                    || document.getElementById('documentationWorkspace')?.classList.contains('busy')) return;
+                const item = [...rail.list.querySelectorAll('button.documentation-page-item')]
+                    .find(button => button._thumbnailNear && button._thumbnailKey !== button._thumbnailBuilt);
+                if (!item) return;
+                const preview = _documentationBuildPageThumbnail(item._thumbnailPage);
+                if (preview) {
+                    const host = item.querySelector('.documentation-page-thumbnail');
+                    host.querySelector('.documentation-thumbnail-page')?.remove();
+                    host.prepend(preview); host.classList.add('has-preview');
+                    item._thumbnailBuilt = item._thumbnailKey;
+                    _documentationScalePageRailThumbnails();
+                }
+                _documentationQueueRailThumbnails(); // At most one nearby page per idle slice.
+            }, { timeout: 1000 });
+        }
+
+        function _documentationSelectRailPage() {
+            const list = document.getElementById('documentationPageList');
+            if (!list) return;
+            for (const item of list.querySelectorAll('button.documentation-page-item')) {
+                const active = item.dataset.pageId === String(state.partsManualDocumentationPageId);
+                if (active || item.classList.contains('active')) item._thumbnailKey = _documentationThumbnailKey(item._thumbnailPage);
+                item.classList.toggle('active', active);
+            }
+            _documentationQueueRailThumbnails();
         }
 
         function _documentationRenderPageRail(options = {}) {
@@ -41306,66 +41437,53 @@
             if (!list) return;
             const workspace = document.getElementById('documentationWorkspace');
             const generation = state.partsManualDocumentationGeneration;
-            // Thumbnails are drawn on the page itself: while a text editor or the crop mode holds the page,
-            // the rail keeps the previews it has (drawing another page would end the crop mode).
-            const editingRichText = Boolean(window.DocumentationRichText?.active || documentationObjectCrop);
-            const previews = editingRichText ? new Map([...list.querySelectorAll('.documentation-page-item')]
-                .map(item => [item.dataset.pageId, item.querySelector('.documentation-thumbnail-page')])) : null;
-            const lightweight = options.lightweight === true || editingRichText
-                || Boolean(state.partsManualDocumentationSageWork?.active);
             const visiblePages = _documentationPages();
-            const activePage = _documentationActivePage();
-            list.innerHTML = '';
+            if (documentationRail?.list !== list) {
+                _documentationDisposePageRail();
+                const observer = new IntersectionObserver(entries => {
+                    entries.forEach(entry => { entry.target._thumbnailNear = entry.isIntersecting; });
+                    _documentationQueueRailThumbnails();
+                }, { root: list, rootMargin: '300px 0px' });
+                documentationRail = { list, observer, idle: null };
+            }
             if (workspace) {
                 workspace.classList.toggle('documentation-empty', visiblePages.length === 0);
                 workspace.dataset.generationState = generation?.status || 'none';
                 workspace.dataset.visiblePageCount = String(visiblePages.length);
-                workspace.dataset.generationTotal = String(
-                    generation?.totalPageCount ?? _documentationAllPages().length
-                );
+                workspace.dataset.generationTotal = String(generation?.totalPageCount ?? _documentationAllPages().length);
             }
+            const existing = new Map([...list.querySelectorAll('button.documentation-page-item')]
+                .map(item => [item.dataset.pageId, item]));
+            let previous = null;
             visiblePages.forEach(page => {
-                const button = document.createElement('button');
-                button.type = 'button';
-                button.className = 'documentation-page-item'
-                    + (page.pageId === state.partsManualDocumentationPageId ? ' active' : '')
-                    + (String(page.pageId) === generation?.lastRevealedPageId
-                        ? ' documentation-page-entering'
-                        : '');
-                button.dataset.pageId = String(page.pageId);
-                button.title = page.title;
-                const thumbnail = document.createElement('span');
-                thumbnail.className = 'documentation-page-thumbnail';
-                const number = document.createElement('span');
-                number.className = 'documentation-page-number';
-                number.textContent = String(page.pageNumber);
-                const preview = editingRichText ? previews.get(String(page.pageId))?.cloneNode(true)
-                    : lightweight ? null : _documentationBuildPageThumbnail(page);
-                if (preview) {
-                    thumbnail.classList.add('has-preview');
-                    thumbnail.appendChild(preview);
+                let button = existing.get(String(page.pageId));
+                existing.delete(String(page.pageId));
+                if (!button) {
+                    button = document.createElement('button'); button.type = 'button';
+                    button.className = 'documentation-page-item'; button.dataset.pageId = String(page.pageId);
+                    button.innerHTML = '<span class="documentation-page-thumbnail"><span class="documentation-page-number"></span></span><span><strong></strong><span></span></span>';
+                    button.addEventListener('click', () => _documentationActivatePage(button.dataset.pageId));
+                    documentationRail.observer.observe(button);
                 }
-                thumbnail.appendChild(number);
-                const detail = document.createElement('span');
-                const title = document.createElement('strong');
-                title.textContent = page.title;
-                const meta = document.createElement('span');
-                const scope = page.pageType === 'assembly_overview'
-                    ? 'Group composition'
-                    : page.pageType === 'manual_section'
-                        ? 'Component composition'
-                        : page.renderRequest
-                            ? 'Figure composition'
-                            : _partsManualDocumentPageLabel(page);
-                const rendered = page.renderRequest?.image?.status === 'ready';
-                meta.textContent = `${page.figureNumber ? `Figure ${page.figureNumber} | ` : ''}${scope}${rendered ? ' | Captured' : ''}`;
-                detail.appendChild(title);
-                detail.appendChild(meta);
-                button.appendChild(thumbnail);
-                button.appendChild(detail);
-                button.addEventListener('click', () => _documentationActivatePage(page.pageId));
-                list.appendChild(button);
+                button.classList.toggle('active', page.pageId === state.partsManualDocumentationPageId);
+                button.classList.toggle('documentation-page-entering', String(page.pageId) === generation?.lastRevealedPageId);
+                button.title = page.title;
+                button.querySelector('.documentation-page-number').textContent = String(page.pageNumber);
+                button.lastElementChild.querySelector('strong').textContent = page.title;
+                const scope = page.pageType === 'assembly_overview' ? 'Group composition'
+                    : page.pageType === 'manual_section' ? 'Component composition'
+                    : page.renderRequest ? 'Figure composition' : _partsManualDocumentPageLabel(page);
+                button.lastElementChild.querySelector('span').textContent =
+                    (page.figureNumber ? 'Figure ' + page.figureNumber + ' | ' : '') + scope
+                    + (page.renderRequest?.image?.status === 'ready' ? ' | Captured' : '');
+                button._thumbnailPage = page;
+                button._thumbnailKey = _documentationThumbnailKey(page);
+                const expected = previous ? previous.nextSibling : list.firstChild;
+                if (expected !== button) list.insertBefore(button, expected);
+                previous = button;
             });
+            existing.forEach(item => { documentationRail.observer.unobserve(item); item.remove(); });
+            list.querySelector('.documentation-page-generating')?.remove();
             if (generation?.status === 'running' && generation.nextPageId) {
                 const nextPage = _documentationAllPages().find(
                     page => String(page.pageId) === generation.nextPageId
@@ -41392,8 +41510,9 @@
                     list.appendChild(placeholder);
                 }
             }
-            if (activePage && !lightweight) _documentationRenderPublicationPage(activePage);
+
             requestAnimationFrame(_documentationScalePageRailThumbnails);
+            if (!options.lightweight) _documentationQueueRailThumbnails();
         }
 
         function _documentationUpdateToolbar() {
@@ -42259,6 +42378,7 @@
                 const drag = state.partsManualDocumentationPageElementDrag;
                 if (!drag || drag.pointerId !== event.pointerId) return;
                 state.partsManualDocumentationPageElementDrag = null;
+                queueMicrotask(_documentationQueueRailThumbnails);
                 if (drag.objectGesture) {
                     if (event.type === 'pointercancel') { _documentationRenderPublicationPage(_documentationActivePage());return; }
                     if (drag.moved && drag.preview) {
@@ -42313,6 +42433,7 @@
                 const drag = state.partsManualDocumentationResizeDrag;
                 if (!drag || drag.pointerId !== event.pointerId) return;
                 state.partsManualDocumentationResizeDrag = null;
+                queueMicrotask(_documentationQueueRailThumbnails);
                 if(drag.objectGesture) {
                     if(event.type==='pointercancel' || !drag.moved || !drag.preview) {
                         _documentationRenderPublicationPage(_documentationActivePage());return;
@@ -42382,6 +42503,7 @@
                 event.preventDefault();
                 event.stopPropagation();
                 state.partsManualDocumentationCalloutDrag = null;
+                queueMicrotask(_documentationQueueRailThumbnails);
                 if (state.assyControls) state.assyControls.enabled = drag.controlsEnabled !== false;
                 if (!drag.moved) {
                     _documentationRefreshLiveCallouts();
@@ -42545,6 +42667,7 @@
                 const drag = state.partsManualDocumentationDrag;
                 if (!drag || drag.pointerId !== event.pointerId) return;
                 state.partsManualDocumentationDrag = null;
+                queueMicrotask(_documentationQueueRailThumbnails);
                 _documentationShowSnapGuides();
                 if (state.assyControls) state.assyControls.enabled = drag.controlsEnabled !== false;
                 canvas.releasePointerCapture?.(event.pointerId);
@@ -42597,6 +42720,24 @@
                     return;
                 }
                 if (event.key === 'Escape') {
+                    if (documentationObjectCrop || window.DocumentationRichText?.active) return;
+                    // An open menu, list or dialog owns Escape: it closes and returns the focus to its
+                    // opener. This handler runs first (capture phase); acting here as well would redraw
+                    // the ribbon under that menu and drop the keyboard focus.
+                    const from = event.target instanceof Element ? event.target : null;
+                    if (from?.closest('[data-ribbon-dropdown], [role="menu"], [role="listbox"], [role="dialog"], [aria-expanded="true"]')) return;
+                    if (_documentationObjectSelections().length) {
+                        event.preventDefault();
+                        // An object's focus means "selected" (its focus event selects it), so the focus
+                        // leaves the object with the selection and goes to the page; Tab reaches the
+                        // objects again from there. Left behind, it would hold an unselected object on
+                        // which Enter and the arrow keys do nothing.
+                        if (document.activeElement?.closest?.('#documentationPublicationSurface [data-documentation-object-id]')) {
+                            documentationObjectFocusKeep = null;
+                            document.querySelector('#documentationWorkspace .documentation-canvas-stage')?.focus({ preventScroll: true });
+                        }
+                        _documentationSelectTarget(null, { silent: true }); return;
+                    }
                     const overview = _documentationRenderablePages().find(
                         page => page.pageType === 'assembly_overview'
                     );
@@ -42710,8 +42851,8 @@
             return layout.pageTypes?.[page?.pageType] || {};
         }
 
-        function _documentationRenderCoverChrome(page, regions, documentModel) {
-            const chrome = document.getElementById('documentationCoverChrome');
+        function _documentationRenderCoverChrome(page, regions, documentModel, options = {}) {
+            const chrome = _documentationRenderElement(options, 'documentationCoverChrome');
             if (!chrome) return;
             const isCover = ['cover', 'operations_cover'].includes(page?.pageType);
             chrome.classList.toggle('visible', isCover);
@@ -42805,19 +42946,21 @@
             if (!(scale > 0)) return;
             const context = _documentationFitPublicationText.context
                 ||= document.createElement('canvas').getContext('2d');
+            const jobs = [];
             const fit = (element, base) => {
                 if (!element || element.isContentEditable) return;
+                jobs.push({ element, base });
+            };
+            const measure = ({ element, base }) => {
                 const style = getComputedStyle(element);
                 const width = element.getBoundingClientRect().width / scale;
                 if (!(width > 0)) return;
                 const weight = Number(style.fontWeight) >= 600 ? 700 : style.fontWeight;
-                element.style.fontWeight = String(weight);
                 context.font = style.fontStyle + ' ' + weight + ' ' + base + 'px ' + style.fontFamily;
                 const inner = width - parseFloat(style.paddingLeft || 0) - parseFloat(style.paddingRight || 0)
                     - parseFloat(style.borderLeftWidth || 0) - parseFloat(style.borderRightWidth || 0);
                 const measured = context.measureText(element.textContent || '').width;
-                element.style.fontSize = DocumentationPublicationCore.fitFontSize(base, inner - 2, measured) + 'px';
-                element.style.lineHeight = '1.374';
+                return { element, weight, size: DocumentationPublicationCore.fitFontSize(base, inner - 2, measured) };
             };
             surface.querySelectorAll('.documentation-page-bom').forEach(table => {
                 const rows = [...table.tBodies[0]?.rows || []];
@@ -42845,6 +42988,14 @@
                     fit(node, Number(override.style?.fontSize) || base);
                 }
             }
+            // Row geometry first, then every read, then every font write. The fixed
+            // columns and publication frames do not depend on the fitted font size.
+            const fitted = jobs.map(measure).filter(Boolean);
+            fitted.forEach(({ element, weight, size }) => {
+                element.style.fontWeight = String(weight);
+                element.style.fontSize = size + 'px';
+                element.style.lineHeight = '1.374';
+            });
         }
 
         function _documentationBuildBom(rows, page = null) {
@@ -43954,19 +44105,26 @@
             return element;
         }
 
+        function _documentationRenderElement(options, id) {
+            return options.surface
+                ? (id === 'documentationPublicationSurface' ? options.surface
+                    : options.surface.querySelector('[data-publication-element="' + id + '"]'))
+                : document.getElementById(id);
+        }
+
         function _documentationRenderOperationsPage(page, options = {}) {
-            const surface = document.getElementById('documentationPublicationSurface');
-            const header = document.getElementById('documentationPageHeader');
-            const illustration = document.getElementById('documentationIllustrationFrame');
-            const sidecar = document.getElementById('documentationPageSidecar');
-            const staticContent = document.getElementById('documentationPageStaticContent');
-            const footer = document.getElementById('documentationPageFooter');
-            const objectLayer = document.getElementById('documentationObjectLayer');
+            const surface = _documentationRenderElement(options, 'documentationPublicationSurface');
+            const header = _documentationRenderElement(options, 'documentationPageHeader');
+            const illustration = _documentationRenderElement(options, 'documentationIllustrationFrame');
+            const sidecar = _documentationRenderElement(options, 'documentationPageSidecar');
+            const staticContent = _documentationRenderElement(options, 'documentationPageStaticContent');
+            const footer = _documentationRenderElement(options, 'documentationPageFooter');
+            const objectLayer = _documentationRenderElement(options, 'documentationObjectLayer');
             if (!surface || !header || !illustration || !sidecar || !staticContent
                 || !footer || !objectLayer || !page) return;
             _documentationApplyTheme(surface);
-            if (options.thumbnail) _documentationClearPagePhase(page.pageId);
-            _documentationApplyRevealPhase(surface, page);
+            if (options.thumbnail) surface.removeAttribute('data-reveal-phase');
+            else _documentationApplyRevealPhase(surface, page);
             const layout = _documentationPublicationLayout();
             const pageSize = layout.page || { width: 960, height: 540 };
             const specification = _documentationIsSpecificationSheet();
@@ -43988,7 +44146,7 @@
             const documentModel = _documentationPayload()?.document || {};
             const product = documentModel.product?.name || 'Product';
             const documentStatus = String(documentModel.statusLabel || 'DRAFT');
-            _documentationRenderCoverChrome(page, pageTypeLayout, documentModel);
+            _documentationRenderCoverChrome(page, pageTypeLayout, documentModel, options);
             const headerMeta = header.querySelector('.documentation-page-header-meta');
             const headerTitle = header.querySelector('.documentation-page-header-title');
             if (headerMeta) {
@@ -44114,7 +44272,7 @@
                     ? `${documentModel.documentNumber || 'Document number not specified'} | REVIEW`
                     : `Page ${page.pageNumber} of ${documentModel.pageCount || ''}`;
             }
-            _documentationRenderDocumentObjects(page, objectLayer);
+            _documentationRenderDocumentObjects(page, objectLayer, options);
             _documentationRenderAcceptedCapture(page, illustration, options);
             if (!options.thumbnail) _documentationEnsurePageElementResizeHandles();
             if (specification && !options.thumbnail) _specSheetAfterRender();
@@ -44124,14 +44282,14 @@
             const mounted = window.DocumentationRichText?.active;
             // Thumbnail/capture callers must not borrow a live editor's page surface.
             if (mounted && (options.thumbnail || page?.pageId !== mounted.pageId)) return;
-            queueMicrotask(_documentationSyncReview);
-            const surface = document.getElementById('documentationPublicationSurface');
-            const header = document.getElementById('documentationPageHeader');
-            const illustration = document.getElementById('documentationIllustrationFrame');
-            const sidecar = document.getElementById('documentationPageSidecar');
-            const staticContent = document.getElementById('documentationPageStaticContent');
-            const footer = document.getElementById('documentationPageFooter');
-            const objectLayer = document.getElementById('documentationObjectLayer');
+            if (!options.thumbnail) queueMicrotask(_documentationSyncReview);
+            const surface = _documentationRenderElement(options, 'documentationPublicationSurface');
+            const header = _documentationRenderElement(options, 'documentationPageHeader');
+            const illustration = _documentationRenderElement(options, 'documentationIllustrationFrame');
+            const sidecar = _documentationRenderElement(options, 'documentationPageSidecar');
+            const staticContent = _documentationRenderElement(options, 'documentationPageStaticContent');
+            const footer = _documentationRenderElement(options, 'documentationPageFooter');
+            const objectLayer = _documentationRenderElement(options, 'documentationObjectLayer');
             if (!surface || !header || !illustration || !sidecar || !staticContent
                 || !footer || !objectLayer || !page) return;
             if (_documentationIsFlowDocument()) {
@@ -44146,8 +44304,8 @@
             surface.style.width = '792px';
             surface.style.height = '612px';
             _documentationApplyTheme(surface);
-            if (options.thumbnail) _documentationClearPagePhase(page.pageId);
-            _documentationApplyRevealPhase(surface, page);
+            if (options.thumbnail) surface.removeAttribute('data-reveal-phase');
+            else _documentationApplyRevealPhase(surface, page);
             const layout = _documentationPublicationLayout();
             const regions = _documentationPageRegions(page);
             const shared = layout.shared || DOCUMENTATION_FALLBACK_PUBLICATION_LAYOUT.shared;
@@ -44166,7 +44324,7 @@
             const product = _documentationPayload()?.document?.product?.name || 'Product';
             const documentModel = _documentationPayload()?.document || {};
             const figure = String(page.figureNumber || '').trim();
-            _documentationRenderCoverChrome(page, regions, documentModel);
+            _documentationRenderCoverChrome(page, regions, documentModel, options);
             const headerMeta = header.querySelector('.documentation-page-header-meta');
             const headerTitle = header.querySelector('.documentation-page-header-title');
             if (headerMeta) {
@@ -44445,7 +44603,7 @@
                 }
                 if (right) right.textContent = `Page ${page.pageNumber} of ${documentModel.pageCount || ''}`;
             }
-            _documentationRenderDocumentObjects(page, objectLayer);
+            _documentationRenderDocumentObjects(page, objectLayer, options);
             _documentationFitPublicationText(surface, page);
             _documentationRenderAcceptedCapture(page, illustration, options);
             if (!options.thumbnail) _documentationEnsurePageElementResizeHandles();
@@ -44882,6 +45040,7 @@
         }
 
         function _closeDocumentationWorkspace() {
+            _documentationDisposePageRail();
             window.DocumentationRichText?.dispose();
             window.DocumentationSearch?.close();
             documentationRichReadCache = null;
@@ -45483,6 +45642,7 @@
                 });
                 resizeObserver.observe(stage);
                 state.partsManualDocumentationCleanup = () => {
+                    _documentationDisposePageRail();
                     window.DocumentationRichText?.dispose();
                     documentationRichReadCache = null;
                     documentationRichFields.clear();
@@ -46894,6 +47054,7 @@
             button.title = source.title || sourceLabel;
             button.setAttribute('aria-label', button.title);
             button.disabled = Boolean(source.disabled);
+            button._documentationSource = source;
             button.addEventListener('click', async event => {
                 if (source.disabled) return;
                 const opener = event.detail === 0 ? button.closest('[data-ribbon-dropdown]')?._documentationOpener : null;
@@ -46952,7 +47113,7 @@
             menu.setAttribute('data-ribbon-dropdown', 'true');
             const content = document.createElement('div');
             content.className = 'documentation-menu-items';
-            ['arrange', 'content', 'brand', 'workspace', 'edit'].forEach(key => {
+            ['arrange', 'content', 'brand', 'workspace', 'edit', 'figure', 'annotate', 'object', 'values-history'].forEach(key => {
                 const entry = groups.get(key);
                 if (entry) content.appendChild(
                     _documentationOverflowSection(key, entry.label, entry.group)
@@ -46969,6 +47130,13 @@
                     value.setAttribute('aria-expanded', 'false');
                 });
                 if (opening) {
+                    menu.querySelectorAll('.documentation-menu-item').forEach(item => {
+                        const source = item._documentationSource;
+                        if (!source) return;
+                        item.disabled = source.disabled;
+                        item.classList.toggle('active', source.classList.contains('active'));
+                        if (source.hasAttribute('aria-pressed')) item.setAttribute('aria-pressed', source.getAttribute('aria-pressed'));
+                    });
                     menu.style.display = 'block';
                     trigger.setAttribute('aria-expanded', 'true');
                 }
@@ -47855,6 +48023,33 @@
             );
         }
 
+        // The container rules fold ribbon groups by the ribbon's width alone. The Format and Object groups
+        // come and go with the selection and their width depends on what is selected, so this measured pass
+        // folds further groups into More, in this order, until the last group (Publish, More) ends inside
+        // the command bar. Only a group that More can show is folded.
+        const DOCUMENTATION_RIBBON_FOLD_ORDER = ['figure', 'annotate', 'values-history', 'content', 'edit', 'object'];
+        let documentationRibbonFitObserver = null;
+        let documentationRibbonFitWidth = -1;
+        function _documentationFitWorkflowRibbon() {
+            const bar = document.querySelector('#contextRibbon .documentation-ribbon-commandbar');
+            if (!bar || !bar.querySelector('.documentation-ribbon-overflow-group')) return;
+            const overflows = () => {
+                const shown = Array.from(bar.children).filter(child => child.getClientRects().length);
+                const last = shown[shown.length - 1];
+                return Boolean(last) && last.getBoundingClientRect().right > bar.getBoundingClientRect().right + 0.5;
+            };
+            const folded = [];
+            bar.removeAttribute('data-documentation-folded');
+            for (const key of DOCUMENTATION_RIBBON_FOLD_ORDER) {
+                if (!overflows()) break;
+                const group = bar.querySelector('[data-documentation-ribbon-group="' + key + '"]');
+                if (!group || !group.getClientRects().length
+                    || !bar.querySelector('.documentation-overflow-section[data-overflow-group="' + key + '"]')) continue;
+                folded.push(key);
+                bar.setAttribute('data-documentation-folded', folded.join(' '));
+            }
+        }
+
         function _renderDocumentationWorkflowRibbon(ribbon) {
             ribbon.innerHTML = '';
             ribbon.classList.add('documentation-workflow-ribbon');
@@ -47867,6 +48062,20 @@
             shell.appendChild(commands);
             ribbon.appendChild(shell);
             _documentationSyncWorkflowRibbon();
+            _documentationFitWorkflowRibbon();
+            if (window.ResizeObserver) {
+                // One observer for the ribbon that is shown: the fit runs again when its width changes. The
+                // observer also reports once right after observe(); that report finds the width just fitted.
+                documentationRibbonFitObserver ||= new ResizeObserver(entries => {
+                    const width = entries[entries.length - 1].target.getBoundingClientRect().width;
+                    if (Math.abs(width - documentationRibbonFitWidth) <= 0.5) return;
+                    documentationRibbonFitWidth = width;
+                    _documentationFitWorkflowRibbon();
+                });
+                documentationRibbonFitWidth = shell.getBoundingClientRect().width;
+                documentationRibbonFitObserver.disconnect();
+                documentationRibbonFitObserver.observe(shell);
+            }
         }
 
         // Sage's check_lighting_coverage (docs/facility-lighting-plan.md, "Sage shows the overlay"): its done step
@@ -49594,12 +49803,8 @@
                 state.threeRenderer.dispose();
                 state.threeRenderer = null;
             }
-            // Dispose assembly renderer when leaving assembly tab
-            if (state.assyRenderer) {
-                _disposeViewerDisplayPass('assembly');
-                state.assyRenderer.dispose();
-                state.assyRenderer = null;
-            }
+            // The same owner releases a tab switch and a Documentation remount.
+            _disposeAssembly3DMount();
 
             // Retain the facility session before replacing its viewport host.
             if (typeof _trainFacilityLayoutAuthoringApp !== 'undefined'
@@ -61972,11 +62177,7 @@
                 cancelAnimationFrame(state._assyCameraAnimId);
                 state._assyCameraAnimId = null;
             }
-            if (state.assyRenderer) {
-                _disposeViewerDisplayPass('assembly');
-                try { state.assyRenderer.dispose(); } catch (_) {}
-                state.assyRenderer = null;
-            }
+            _disposeAssembly3DMount();
             state.assyScene = null;
             state.assyCamera = null;
             state.assyLabelRenderer = null;
@@ -68680,7 +68881,78 @@
             setTimeout(() => { if (ov.isConnected) ov.remove(); }, 420);
         }
 
+        // Three.js leaves one 'dispose' listener per renderer on every geometry, material and texture that
+        // renderer has drawn, and renderer.dispose() does not take them off. The loaded model is cached and
+        // shared by every mount, so each closed viewer's renderer and WebGL context stayed reachable from the
+        // cache for the life of the page. dispose() on a resource frees its GPU copies and detaches those
+        // listeners; the resource stays usable and the next renderer uploads its own copy, as a new context
+        // must anyway. Nothing of the cached model is destroyed.
+        function _releaseSceneGpuResources(scene) {
+            const released = new Set();
+            const release = resource => {
+                if (!resource || released.has(resource) || typeof resource.dispose !== 'function') return;
+                released.add(resource);
+                try { resource.dispose(); } catch (_) {}
+            };
+            const textures = holder => Object.values(holder || {}).forEach(value => {
+                if (value?.isTexture) release(value);
+                else if (value?.value?.isTexture) release(value.value);
+            });
+            scene.traverse?.(object => {
+                release(object.geometry);
+                _materialList(object.material).forEach(material => {
+                    textures(material); textures(material.uniforms); release(material);
+                });
+                if (object.isInstancedMesh) release(object);
+            });
+        }
+
+        function _disposeAssembly3DMount() {
+            state._assyMountToken = (state._assyMountToken || 0) + 1;
+            if (state.assyAnimationId) cancelAnimationFrame(state.assyAnimationId);
+            state.assyAnimationId = null;
+            if (state._assyCameraAnimId) cancelAnimationFrame(state._assyCameraAnimId);
+            state._assyCameraAnimId = null;
+            state._assyMountDispose?.();
+            state._assyMountDispose = null;
+            state.assyControls?.dispose?.();
+            state._assyGizmo?.dispose(); state._assyGizmo = null;
+            _partsManualDisposeDocumentationTechnicalPass();
+            _disposeViewerDisplayPass('assembly');
+            const scene = state.assyScene, renderer = state.assyRenderer;
+            if (scene) {
+                _releaseSceneGpuResources(scene);
+                window.__themedScenes?.delete(scene);
+                scene.userData?._cadViewportBackgroundTexture?.dispose();
+                if (scene.userData) scene.userData._cadViewportBackgroundTexture = null;
+                scene.background = null;
+            }
+            if (renderer) {
+                window.__themedRenderers?.delete(renderer);
+                renderer.dispose(); renderer.forceContextLoss?.(); renderer.domElement.remove();
+            }
+            state.assyLabelRenderer?.domElement.remove();
+            state.assyScene = state.assyCamera = state.assyRenderer = state.assyLabelRenderer = state.assyControls = null;
+            // Live clones share the cached GLTF's geometry/materials; never dispose that cache on remount.
+            state.assyLiveScene = state.assyPartMeshMap = state.assyLights = null;
+        }
+
+        function _assemblyMountIsCovered(container) {
+            if (!container.isConnected || document.hidden) return true;
+            const workspace = document.getElementById('documentationWorkspace');
+            if (!workspace) return false;
+            const page = _documentationActivePage();
+            const illustration = document.getElementById('documentationIllustrationFrame');
+            if (!page?.renderRequest || !illustration?.contains(container)) return true;
+            // A ready accepted picture covers the live viewer. Capture/live-edit paths remove it.
+            return !!illustration.querySelector('img.documentation-accepted-capture.ready')
+                && state.partsManualDocumentationLiveEditPageId !== page.pageId
+                && state.partsManualDocumentationGeneration?.status !== 'running'
+                && !_documentationFigureCaptureTakeoverIsActive(page);
+        }
+
         function _initAssembly3DScene(container, assemblyNumber, opts) {
+            _disposeAssembly3DMount();
             // opts (optional) lets the Training guided viewer load a specific
             // subassembly GLB into an isolated, node-keyed cache and run its own
             // post-load wiring, without touching the shared root-assembly cache.
@@ -68773,7 +69045,9 @@
 
             // Animation loop
             function animate(time) {
+                if (_mountToken !== state._assyMountToken) return;
                 state.assyAnimationId = requestAnimationFrame(animate);
+                if (_assemblyMountIsCovered(container)) { state._lastMotionTime = time; return; }
                 // Kinematic motion update
                 if (state.motionPlaying && state.motionSetupDone) {
                     const delta = time - (state._lastMotionTime || time);
@@ -68840,6 +69114,8 @@
                 }
             });
             resizeObserver.observe(container);
+            let refitTimer = null;
+            state._assyMountDispose = () => { resizeObserver.disconnect(); clearTimeout(refitTimer); };
 
             // Toolbar (Fit, Front, Top, Right, Iso)
             _createAssemblySettingsPanel(container);
@@ -68897,7 +69173,8 @@
                         // Scene is built and framed — finish the loader to 100% and fade out.
                         _assyHideLoadingOverlay(container);
                         // Delayed refit: ensures container has valid dimensions after layout
-                        setTimeout(() => {
+                        refitTimer = setTimeout(() => {
+                            if (_mountToken !== state._assyMountToken) return;
                             const w = container.clientWidth;
                             const h = container.clientHeight;
                             if (w > 0 && h > 0) {
@@ -80289,6 +80566,9 @@
         }
 
         function _createOrbitControls(camera, domElement) {
+            const lifetime = new AbortController();
+            const listen = (target, name, listener, options = {}) => target.addEventListener(name, listener,
+                { ...options, signal: lifetime.signal });
             // Minimal orbit controls: left-drag=orbit, right-drag=pan, scroll=zoom
             const ctrl = {
                 target: new THREE.Vector3(),
@@ -80323,7 +80603,7 @@
                 ctrl._spherical.phi = Math.acos(Math.max(-1, Math.min(1, offset.y / ctrl._spherical.radius)));
             }
 
-            domElement.addEventListener('mousedown', (e) => {
+            listen(domElement, 'mousedown', (e) => {
                 if (ctrl._walkthroughActive) return;
                 _updateSphericalFromCamera();
                 if (e.button === 0) {
@@ -80337,9 +80617,9 @@
                 e.preventDefault();
             });
 
-            domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+            listen(domElement, 'contextmenu', (e) => e.preventDefault());
 
-            window.addEventListener('mousemove', (e) => {
+            listen(window, 'mousemove', (e) => {
                 if (ctrl._walkthroughActive) return;
                 const dx = e.clientX - ctrl._prevMouse.x;
                 const dy = e.clientY - ctrl._prevMouse.y;
@@ -80366,12 +80646,12 @@
                 }
             });
 
-            window.addEventListener('mouseup', (e) => {
+            listen(window, 'mouseup', (e) => {
                 ctrl._isDragging = false;
                 ctrl._isPanning = false;
             });
 
-            domElement.addEventListener('wheel', (e) => {
+            listen(domElement, 'wheel', (e) => {
                 if (ctrl._walkthroughActive) {
                     e.preventDefault();
                     return;
@@ -80404,6 +80684,7 @@
                 ctrl._needsUpdate = true;
             }, { passive: false });
 
+            ctrl.dispose = () => lifetime.abort();
             return ctrl;
         }
 

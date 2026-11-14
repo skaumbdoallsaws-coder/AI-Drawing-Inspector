@@ -1615,11 +1615,11 @@ def legacy_document_revision(document: Mapping[str, Any]) -> str:
     return revision
 
 
-def with_figure_revisions(document: Mapping[str, Any]) -> Dict[str, Any]:
+def with_figure_revisions(document: Mapping[str, Any], *, owned=False) -> Dict[str, Any]:
     """Pure schema-1 read migration; a generated schema-2 write uses the new hash."""
     if document.get("schemaVersion") not in {1, 2, WORK_INSTRUCTION_SCHEMA_VERSION}:
         raise WorkInstructionError("unsupported work-instruction document schema")
-    result = copy.deepcopy(dict(document))
+    result = document if owned else copy.deepcopy(dict(document))
     result["schemaVersion"] = WORK_INSTRUCTION_SCHEMA_VERSION
     for page in result.get("pages") or []:
         request = page.get("renderRequest")
@@ -2117,9 +2117,10 @@ def build_work_instruction_document(
     document, documentation_scene = bind_document(document, documentation_scene)
     _apply_scene(document["pages"], documentation_scene)
     sync_identity_overrides(document)
-    document = project_document(document, documentation_scene)
-    document = with_figure_revisions(document)
+    document = project_document(document, documentation_scene, owned=True)
+    document = with_figure_revisions(document, owned=True)
     revision_payload = copy.deepcopy(document)
     revision_payload.pop("documentRevision", None)
     document["documentRevision"] = _stable_revision(revision_payload)
-    return document
+    from ai_inspector.documentation.request_work import mark_identified
+    return mark_identified(document)

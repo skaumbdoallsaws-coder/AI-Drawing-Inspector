@@ -64,6 +64,7 @@ for (const version of ['legacy', 'modern']) test(`${version} triad follows world
     setClearColor() {} setPixelRatio() {} setSize() {}
     render(scene, camera) { this.scene = scene; this.camera = camera; this.renders = (this.renders || 0) + 1; }
     dispose() { this.disposed = true; }
+    forceContextLoss() { this.contextLosses = (this.contextLosses || 0) + 1; }
   }
   const THREE = { ...runtime, WebGLRenderer: Renderer };
   const f = documentFixture(), container = { ownerDocument: f.document, appendChild() {} };
@@ -88,7 +89,14 @@ for (const version of ['legacy', 'modern']) test(`${version} triad follows world
   assert.deepEqual(axes.children.filter(n => n.isLine).map(n => n.material.color.getHex()), [0xff4444, 0x44ff44, 0x4488ff]);
   let disposed = 0;
   axes.traverse(n => { for (const r of [n.geometry, n.material, n.material?.map]) r?.addEventListener('dispose', () => disposed++); });
+  // Supervisor (P5a-3): a renderer leaves a 'dispose' listener on the geometry Three.js shares among all
+  // sprites; a closed widget must take its own off, or the shared object keeps its WebGL context alive.
+  const sprites = axes.children.filter(n => n.isSprite), spriteGeometries = new Set(sprites.map(n => n.geometry));
+  let spriteReleases = 0;
+  spriteGeometries.forEach(geometry => geometry.addEventListener('dispose', () => spriteReleases++));
   gizmo.dispose(); gizmo.dispose();
-  assert.equal(disposed, 14); assert.equal(renderer.disposed, true); assert.equal(gizmo.canvas.removed, true);
+  assert.equal(sprites.length, 3); assert.equal(spriteReleases, spriteGeometries.size);
+  assert.equal(disposed, 17); assert.equal(renderer.disposed, true); assert.equal(gizmo.canvas.removed, true);
+  assert.equal(renderer.contextLosses, 1); assert.equal(axes.children.length, 0);
   const renders = renderer.renders; gizmo.update(camera); assert.equal(renderer.renders, renders);
 });

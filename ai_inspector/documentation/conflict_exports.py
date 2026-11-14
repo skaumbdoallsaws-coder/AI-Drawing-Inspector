@@ -6,13 +6,13 @@ from .refresh import exposure, open_conflicts
 CONFLICT_MARKER = "Open manual edit conflict"
 
 
-def project_review(document, *states):
+def project_review(document, *states, owned=False):
     reviews = [exposure(state or {}) for state in states]
     conflicts = {c.get("conflictId", c["targetId"]): c for review in reviews for c in open_conflicts(review)}
     orphans = {o["orphanId"]: o for review in reviews for o in review["orphans"]}
     if not conflicts and not orphans:
         return document
-    result = deepcopy(document)
+    result = document if owned else deepcopy(document)
     result.update(conflicts=list(conflicts.values()), orphans=list(orphans.values()), openConflictCount=len(conflicts))
     def mark(owner, keys):
         matches = [c for c in conflicts.values() if c["targetId"] in keys]

@@ -1526,6 +1526,7 @@ def build_operations_manual_document(
     document, documentation_scene = bind_document(document, documentation_scene)
     _apply_scene(document["pages"], documentation_scene)
     sync_identity_overrides(document)
-    document = project_document(document, documentation_scene)
+    document = project_document(document, documentation_scene, owned=True)
     document["documentRevision"] = _stable_revision(document)
-    return document
+    from ai_inspector.documentation.request_work import mark_identified
+    return mark_identified(document)

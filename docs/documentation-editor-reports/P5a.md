@@ -612,3 +612,310 @@ Not run in this slice: the stage `memory_cycles` at full size (above), and the d
 - The whole phase at full size in one run with twenty memory cycles and the 40-minute limit (run 12 took 41
   minutes without the memory stage and with the profile stage, which a gate run does not have).
 - The nine smoke phases, the complete suites, the wide suite and the baselines on the P5a-3 code.
+
+## P5a-3
+
+### CHANGED
+
+This is a source/static-check handoff, not an after-performance result. The supervisor's P5a-2 numbers above remain the measured before values. No schema, tool inventory, stored-format, renderer-version, baseline or export-drawing change was made.
+
+| Item | Functions/files changed, and expected saving | Left / verification |
+| --- | --- | --- |
+| A1: page rail | In static/index.html, _documentationRenderPageRail reconciles existing named, tabbable buttons; _documentationSelectRailPage changes the active mark without rebuilding the rail. _documentationQueueRailThumbnails uses IntersectionObserver (300 px near-view margin) and one page per idle callback. _documentationBuildPageThumbnail renders in a separate inert, hidden surface, never on the live page. | No eager offscreen population. Editing, crop, busy state and drags defer work; completion resumes it. Expected to remove the all-page draw from opening and both all-page draws from activation (23.9 s and 4.1 s respectively in the supplied profiles). Browser timings remain unmeasured here. |
+| A2: fitting | _documentationFitPublicationText sets row geometry, collects every computed style/box and canvas text measure, then writes every font size/weight/line height. _documentationScalePageRailThumbnails likewise reads widths before writing transforms. | Same formula, fonts and fixed column/frame widths. Expected to remove per-cell forced layouts (17 s of the supplied open profile); the new Node old/new comparison checks identical fitted styles. |
+| A3: covered viewer | _initAssembly3DScene.animate returns before motion, label, gizmo and scene rendering when _assemblyMountIsCovered says the mount is detached, hidden, on a text page, or covered by its ready accepted capture. Live editing, generation and capture takeover retain their render path. | One current RAF checks visibility; visible Assembly animation is unchanged. Expected to remove the covered viewer's render work (7 s of the supplied open profile). |
+| A4: reads | request_work.py bounds pure catalogue/inventory/scene-read reuse to the request. identity.catalog_from and refresh.inventory reuse completed identities. provenance.project_document builds effective text targets once and omits authored fields from its otherwise-needed source-only scan. _documentation_editor_read omits its discarded duplicate hash map. The four scene-read paths consume their privately owned compiler/artifact results. | Baseline and scene-applied compilations remain distinct. Exact old/new canonical response tests cover generated parts/operations with and without authored objects, all four MMLE types, and rich-text flag on/off. They are written, not run. |
+| A5: writes/history/object batches | Repository apply_command/apply_batch/undo_change/move_history share request work. _saved_result runs the existing read projection on the committed candidate instead of reopening/parsing it; move_history passes its locked pre-image into undo_change. The host's _compiled_snapshot/object_snapshot no longer calls a whole scene route or builds a discarded ribbon/text read for an object batch. Command/history pre-image builders request editor_read=False. | One disk JSON projection and reuse of identical inventories/catalogues; distinct generated/current/candidate values still have distinct work. The atomic writer, process mutex, validation, hashes, receipts and rollback-byte reads are retained. Counters and exact store/answer comparisons cover commands, undo, redo, object batches and replay. |
+| A6: post-command read | Audited _documentationReadAfterMutation, rich save, table remount and _documentationObjectBatch. The existing helper already uses a complete response when it contains richTextFields. | No GET removed: normal command/history answers lack the fresh rich-field read, and table/object answers are receipts/bindings rather than the full document. Reusing them would leave field hashes stale. APIs were not expanded. |
+| A7: PDF route | The four document GETs and PDF routes (including fillable specification) skip a discarded editor read and use the same request-local derivations/owned artifact attachment. | No PDF/DOCX builder changed. The pre-export GET and POST still compile independently for freshness; figure descriptors/readiness remain checked. The existing operations export cache builds PDF and DOCX on its first miss, explaining work absent on later hits; no second cache added. Profiling/byte proof is NOT RUN below. |
+| A8: bundle / word check | documentation_rich_text.js starts the pinned Tiptap import only on first ready access, with one shared success/failure promise. The P4b word reader caches styles, clipping ancestors and block identities, reuses one Range, and reads fully visible ASCII runs together. | Clipped and non-ASCII text retains the old per-code-point visibility algorithm. Same pages, words, NFKC, exceptions, accepted-capture waits and comparisons. New Node tests compare the old/new reader on wrapping, inline joins, case, clips, Unicode and excluded overlays. |
+| B1: mount leak | _disposeAssembly3DMount is the common remount/tab-disposal owner: token invalidation, RAF/camera-RAF cancellation, resize observer and delayed refit cleanup, orbit-listener abort, technical/display pass cleanup, gizmo/renderer context loss, background texture disposal, and theme-registry removal. cad_viewport.js also releases the gizmo context and axes' label references. | Cached GLTF geometry/materials remain owned by their cache. The old animation callback also checks its mount token before scheduling another frame. Full-size context/heap measurements must prove the leak closed. |
+| B2: ribbon | Existing More proxies now include Figure, Annotate, Object and Values history; marks/disabled state refresh when More opens. Container queries collapse Content/Edit and these groups at <=1450 px; at <=1660 px an Object group sends Figure/Annotate to More. | Same controls and handlers, no new menu. Verify all three selection/edit states at 1366 and 1720 CSS px. A harness that directly locates a now-collapsed source button must use its existing More action; the supervisor-owned scale harness is otherwise untouched. |
+| B3: toolbar | documentation_rich_text.css removes the 106 px height cap and internal clipping from .documentation-rich-controls. | All wrapped rows can show; the existing attached strip and page overlap remain. |
+| B4: Escape | The older capture-phase onKeyDown clears authored selection before its overview navigation branch; it defers crop/editor Escape to their owners. | Added only the requested trusted-key check to documentation_editor_scale_smoke.py: selected object, page before/after, selection cleared. With no selection, overview navigation is unchanged. |
+
+Thumbnail validity: the key contains the whole compiled page, API/document identity, theme/page masters/paper, product/publication labels, specification slots/sheet/release gate, and that page's validated rich text/style/error fields. It includes the active live camera pose and callout routes when the live view is used. Stored picture status, URL, sha and figure revision are in the page. Only document-wide documentRevision and request bindings are excluded: unchanged capture bytes/figure identity and unchanged drawn text do not need a new picture after an unrelated edit. Captures, page edits, style changes, paper changes and live-pose invalidation change the key. Closing the workspace releases the observer and pending work.
+
+Copy/authority audit:
+
+- compile_identities/bind_document still copy at the source-input boundary. The four builders receive that private document before owned=True provenance/review projection. Public project_document/project_slots/project_review still copy by default.
+- Server build/command/history/PDF paths pass only freshly compiled documents to owned=True artifact attachment. Public artifact helpers still copy by default. Work-instruction with_figure_revisions preserves its public default copy and the separate revision-hash copy. Nothing mutates a shared compiled-document cache; none was added.
+- Request reuse has a 32-entry cap and ends in finally. Keys cover complete input values; scene reads also re-stat the file (device/inode/size/mtime_ns/ctime_ns) before reuse. Atomic replacement invalidates a pre-image read, including a replacement by another process. Cached results are private and copied on return. Changed inputs miss; invalid non-JSON inputs reach the original validators.
+- The old implementation is loaded only by tests from commit 4669cd06834010b945f83dea84cac24795fab985 with hidden read-only git show. No old server startup, checkout, environment/session load or real store is used. Tests compare canonical response bytes and actual stored bytes; mutation-isolation checks remain explicit.
+
+Pins: test_assembly_display_styles now follows the shared disposer while retaining the rendering-priority assertions. The refresh capture spy forwards the new private ownership keyword. cad_viewport.test.cjs retains its original resource-disposal count and also checks context loss/empty axes. The existing lightweight-rail pin remains valid. Static URLs changed to ?v=20261114-p5a-3 for documentation_rich_text.js, documentation_rich_text.css and cad_viewport.js. Baselines, exporter algorithms, the scale fixtures/probes and the nine other smoke phase bodies are untouched.
+
+### TESTS
+
+Static checks passed: in-memory Python compilation of all 19 changed/new Python files; node --check for the four changed/new standalone JavaScript test/product files; parsing all four classic inline scripts in index.html; git diff --check. All 26 changed/new files use LF, server.py retains its UTF-8 BOM, and every added server.py/index.html line is ASCII. No pytest, Node behavioral suite, browser, export, benchmark or profiler was run in this sandbox.
+
+### NOT RUN
+
+Use the supervisor's Python environment and hidden launcher (pythonw tools/run_hidden.pyw <python-or-node> ... on Windows). These commands are the payloads to that launcher:
+
+~~~text
+python -m pytest -q tests/test_documentation_performance.py tests/test_documentation_recovery.py tests/test_documentation_server_reads.py tests/test_documentation_transactions.py tests/test_documentation_change_undo.py tests/test_documentation_refresh.py tests/test_documentation_provenance.py tests/test_documentation_objects.py tests/test_documentation_rich_text.py tests/test_parts_manual_ui_contract.py tests/test_assembly_display_styles.py
+node --test tests/documentation_performance.test.cjs tests/cad_viewport.test.cjs tests/documentation_rich_text.test.cjs tests/documentation_tables.test.cjs tests/documentation_conflicts.test.cjs tests/documentation_objects.test.cjs tests/documentation_page_setup.test.cjs tests/documentation_publication.test.cjs tests/documentation_search.test.cjs tests/documentation_scale_probe.test.cjs
+python -m pytest -q tests -k "documentation or parts_manual or operations_manual or work_instruction or specification_sheet"
+python -m pytest -q tests
+python tools/documentation_baseline.py --check
+python tools/documentation_baseline.py --local --check
+python tools/benchmark_documentation_editor.py --pages 1 50 100 --runs 5 --out .runtime/de/p5a-3-server.json
+python tests/smoke_documentation_editor.py --phase P5a
+python tests/smoke_documentation_editor.py --phase all
+~~~
+
+For the P5a gate set DOC_SMOKE_SLOW=4, leave the rich-text flag under the harness's control, and unset DOC_SMOKE_P5A_PAGES / ONLY / CYCLES / MINUTES / GENERATED and DOC_SMOKE_PROFILE. This keeps full sizes, all stages, twenty memory cycles and the forty-minute gate. Repeat the supervisor's profile run separately with DOC_SMOKE_PROFILE=1; it is not the timing gate. Existing known suite failures remain for the supervisor to classify against the gate above.
+
+To profile the benchmark worker itself (not its waiting parent), run each command through the hidden launcher. Fixtures live only in TemporaryDirectory; profiles go to the evidence folder:
+
+~~~text
+python -c "import os,tempfile,cProfile; from pathlib import Path; os.environ['INSPECTORPRO_DOCUMENTATION_RICH_TEXT']='1'; from tools.documentation_benchmark_support import prepare; from tools.benchmark_documentation_editor import sample; d=tempfile.TemporaryDirectory(prefix='p5a3-'); root=Path(d.name); prepare(root,'parts',100); Path('.runtime/de').mkdir(parents=True,exist_ok=True); p=cProfile.Profile(); p.runcall(sample,root); p.dump_stats('.runtime/de/p5a-3-parts.prof'); d.cleanup()"
+python -c "import os,tempfile,cProfile; from pathlib import Path; os.environ['INSPECTORPRO_DOCUMENTATION_RICH_TEXT']='1'; from tools.documentation_benchmark_support import prepare; from tools.benchmark_documentation_editor import sample; d=tempfile.TemporaryDirectory(prefix='p5a3-'); root=Path(d.name); prepare(root,'operations',50); Path('.runtime/de').mkdir(parents=True,exist_ok=True); p=cProfile.Profile(); p.runcall(sample,root); p.dump_stats('.runtime/de/p5a-3-operations.prof'); d.cleanup()"
+~~~
+
+### DEVIATIONS
+
+- No after numbers or runtime pass claims. Profiling, memory, geometry, clipping and byte-equivalence execution need the supervisor's environment.
+- A4/A5 remove repeated derivations of identical inputs, not every separate compilation: generated identity baselines, scene-applied output and a changed candidate still need their own compiler state. Per-state reuse and disk-read counters are covered; the new whole-route counts must be measured. Source-isolation copies and receipt/migration defenses were deliberately retained.
+- A6 retains reads whose response is incomplete. A7 retains the independent pre-export GET/POST and the existing export cache, rather than introducing cross-request compiler/capture authority.
+- No changes to the product-owner findings in C, the baseline files, benchmark fixtures, phase budgets or phase instrumentation. The only scale-harness edit is B4; the P4b word-reader optimization changes no assertion.
+
+### OPEN QUESTIONS
+
+- Do the full-size context census and forced-GC measurement now return to the before-cycle counts, and does the complete phase fit forty minutes? No full-size memory result exists yet.
+- What are the new open/save/undo/nudge/PDF medians and p95s, and which repeated compiler/copy costs remain dominant? The supplied budgets are unchanged.
+- Do the responsive More placements pass all viewport/selection states, and do all old/new response/store comparisons plus both unchanged baselines pass? These are gates, not assumed results.
+
+## P5a-3 supervisor gate (Claude, 2026-11-14)
+
+### What I ran and what it showed
+
+The delivered change (26 files) was read as a diff and then run: the Node suites, the documentation suites,
+the server benchmark, the phase at full size, the nine smoke phases, the wide suite and both baseline checks.
+Codex ran static checks only, as agreed.
+
+The speed work holds. On the 100-page parts manual an open went from 35.5 s to 10.1 s, a save from 17.4 s to
+7.1 s, a page change from 5.1 s to 0.84 s (table below). Two budgets are still missed: open 100 pages (5 s)
+and save (1 s). No budget is changed; both stay written findings (below).
+
+Four defects in the delivered change were found by running it and are corrected here: the viewer's WebGL
+contexts were still not released (finding 1 of the P5a-2 gate), Escape with an object selected left the focus
+on the unselected object, the new Escape rule also took Escape away from an open menu, and the ribbon was
+still cut with an object selected at 1720 x 1080 (finding 2). One shortcut in the server was corrected by
+reading. Each is described under "What I changed in the product".
+
+The phase's complete runs in this gate (full size, wait factor 4, 1720 x 1080, twenty memory cycles):
+
+| Run | Code | Machine | Result |
+| --- | --- | --- | --- |
+| 13 | As delivered, with correction 1 below (correction 2 went in while it ran) | quiet | 191/201 in 38 min: 143 live canvas contexts after twenty cycles (63 before), the menu focus check, and the text measurements that could not run after it |
+| 14 | Corrections 1 to 4 | quiet | 201/201 in 27 min: the first complete pass of the phase |
+| 15 | Final (corrections 1 to 6) | busy | 196/198 in 43.5 min: the 40-minute limit (2595 s), and the last stage, which the limit cut off |
+
+Run 15 is the final code on a machine I could not make quiet: at each of four readings between 06:20 and
+10:00 the user's file-sync service was using between two thirds of a processor core and nearly two cores,
+and memory was paging (1151 pages a second when measured). Every measured action took about 1.7 times as
+long as in run 14, the server's own work included (PDF of 100 pages 33.4 s against 19.1 s; that code is the
+same in both runs). The stage the limit cut off (`overflow_findings`) was
+then run alone at full size on the final code: 12/13, the one failure being `p5a_all_stages`, which marks a
+run of chosen stages. So every check of the phase has passed on the final code except the limit itself.
+Still owed: one complete run of the final code inside the 40 minutes on a quiet machine. It is the first
+step of the P5b gate.
+
+### Measurements (full size, wait factor 4, 1720 x 1080, device scale 1)
+
+The fixtures are those of the P5a-2 gate. Five samples per action (three per PDF, 250 keys per typing row);
+median / p95. "Before" is run 12 of the P5a-2 gate.
+
+| Action | Before (run 12, quiet) | After (run 14, quiet) | Final code (run 15, busy) | Budget (plan) |
+| --- | --- | --- | --- | --- |
+| Open, MMLE-50D parts manual (18 pages) | 6.5 / 6.6 s | 4.5 / 5.2 s | 6.3 / 10.7 s | - |
+| Open, parts manual 50 pages | 16.9 / 17.4 s | 6.8 / 7.1 s | 11.0 / 12.9 s | - |
+| Open, parts manual 100 pages | 35.5 / 37.7 s | 10.1 / 11.1 s | 19.2 / 21.6 s | 5 s: missed |
+| Open, operations manual 50 pages | 8.1 / 8.8 s | 4.7 / 6.1 s | 6.9 / 9.8 s | - |
+| Page change, 100-page parts manual | 5.1 / 6.0 s | 0.84 / 0.86 s | 0.93 / 0.98 s | - |
+| Selection of an object | 37 / 58 ms | 16 / 29 ms | 39 / 46 ms | 150 ms: met |
+| Typing in a text box | 14 / 22 ms | 14 / 17 ms | 17 / 35 ms | 100 ms: met |
+| Typing in a table cell | 14 / 22 ms | 14 / 18 ms | 20 / 31 ms | 100 ms: met |
+| Escape (cancel an edit), 100 pages | 2.4 / 2.7 s | 86 / 139 ms | 170 / 341 ms | - |
+| Save a text edit with Done, 100 pages | 17.4 / 18.2 s | 7.1 / 7.4 s | 13.0 / 16.0 s | 1 s: missed |
+| Undo, 100 pages | 15.9 / 17.1 s | 5.6 / 6.3 s | 12.3 / 13.7 s | - |
+| Redo, 100 pages | 16.8 / 17.7 s | 5.9 / 6.4 s | 10.3 / 11.0 s | - |
+| Refresh, 100 pages | 13.5 / 13.9 s | 3.0 / 3.2 s | 5.5 / 6.2 s | - |
+| Object nudge, operations manual 50 pages | 4.5 / 4.6 s | 2.1 / 2.5 s | 4.2 / 4.3 s | - |
+| PDF, parts manual 100 pages | 25.0 / 26.2 s | 19.1 / 20.6 s | 33.4 / 37.4 s | 30 s: met on the quiet machine, missed on the busy one |
+| PDF, operations manual 50 pages | 3.0 / 19.0 s | 1.3 / 15.9 s | 2.8 / 27.6 s | 30 s: met (the first export is the slow one) |
+
+Between run 14 and run 15 the product changed in one place: the ribbon fit (corrections 5 and 6), which runs
+in every ribbon render and so in every selection. The scaling stage now times it: 1.5 to 1.9 ms per pass at
+1720 x 1080 with a text object selected (two folds), 0.06 ms at 1366 x 768 (none), on the busy machine.
+
+Memory, twenty open/close cycles of the Documentation workspace at full size: 9 live canvas contexts before
+and 9 after in run 14, 8 and 8 in run 15 (run 13: 63 before, 143 after). Retained heap growth 2.3 MB and
+2.2 MB (limit 100 MB). Editor cycles: twenty, one editor alive at a time, the same document and window
+listeners before and after.
+
+Server benchmark (`python tools/benchmark_documentation_editor.py --pages 1 50 100 --runs 5`, generated
+fixtures, median / p95), to read against the P5a-1 table above:
+
+| Document | Pages | Open | Save | Undo | Reload | PDF | Peak memory |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Operations manual | 5 | 0.11 / 0.11 s | 0.03 / 0.03 s | 0.03 / 0.03 s | 0.02 / 0.02 s | 0.49 / 0.57 s | 117 MiB |
+| Operations manual | 50 | 0.27 / 0.29 s | 0.23 / 0.23 s | 0.24 / 0.33 s | 0.17 / 0.19 s | 14.9 / 16.2 s | 129 MiB |
+| Operations manual | 99 | 0.43 / 0.45 s | 0.44 / 0.45 s | 0.47 / 0.47 s | 0.33 / 0.34 s | 31.3 / 32.4 s | 140 MiB |
+| Parts manual | 6 | 0.04 / 0.06 s | 0.05 / 0.06 s | 0.04 / 0.05 s | 0.03 / 0.04 s | 0.70 / 0.91 s | 103 MiB |
+| Parts manual | 50 | 0.60 / 0.75 s | 0.77 / 0.80 s | 0.78 / 0.81 s | 0.64 / 0.66 s | 9.8 / 10.4 s | 161 MiB |
+| Parts manual | 100 | 1.43 / 1.47 s | 1.70 / 1.81 s | 1.80 / 2.00 s | 1.42 / 1.57 s | 22.6 / 23.3 s | 218 MiB |
+
+A save on the 50-page parts manual now meets the 1 s budget (0.80 s at p95; P5a-1: 1.45 s). On 100 pages it
+is 1.81 s (P5a-1: 3.17 s): still missed. Undo on 100 pages went from 4.19 s to 2.00 s.
+
+The PDF column is slower than in the P5a-1 table, and the operations manual of 99 pages is over its 30 s
+budget in this run (32.4 s at p95; P5a-1: 23.8 s). That is the machine, not this slice. The slice does not
+touch the PDF code, and the commit before it (4669cd0, exported to a scratch folder) was run alternately with
+the new code on 50 pages in the same hour: operations PDF 14.8 and 15.4 s on the old code, 14.8 and 15.1 s
+on the new (P5a-1 measured 11.3 s). The same alternation shows the gain of this slice by itself: a save on
+the 50-page parts manual 1.85 and 1.68 s on the old code, 0.81 and 1.02 s on the new; undo 2.34 and 2.44 s
+against 0.82 and 1.03 s. (The last new-code run overlapped a test run of mine.) As P5a-1 already found, the
+PDF budget holds on a quiet machine only.
+
+### Budgets still missed (written findings; no budget is changed)
+
+1. Open, 100-page parts manual: 10.1 s against 5 s (before: 35.5 s). The phase's "open" is two loads (the
+   workspace opens and the phase presses Refresh). The server's share is about 1.5 s a load (benchmark); the
+   rest is the browser drawing the page, the rail's 100 buttons and the first previews.
+2. Save a text edit with Done, 100-page parts manual: 7.1 s against 1 s (before: 17.4 s). The server alone
+   misses the budget: 1.81 s at p95 on the benchmark's lighter 100 pages, and the phase's fixture is about
+   twice as heavy (1398 list rows, 94 figures). The page then reads the document again and draws it.
+3. Undo and redo follow the save (5.6 s and 5.9 s); the plan sets no budget for them.
+
+Where a save still goes (one save on the benchmark's 100-page parts manual under cProfile: 5.0 s profiled,
+1.76 s unprofiled, 10.4 M calls): the write itself (`apply_command`) 2.7 s, the compile of the answer
+(`build_manual_document`) 2.4 s. `copy.deepcopy` is 2.8 s of the 5.0 s (2.8 M calls). The scene is read
+twice (`_read_scene`, 2.2 s), the identity catalogue is compiled twice (`compile_identities`, 1.2 s) and
+32 893 values are hashed (0.6 s). At the P5a-2 gate one save on the heavier fixture made 33.0 M calls, 8.9 M
+of them in `copy.deepcopy`, with 17 identity compiles.
+
+What is left is one compile and one copy of the whole document per write and per answer. Taking that away
+needs a compile of the changed page only, or an answer that carries the changed page only. That is a design
+change with its own proofs (the same bytes on every page that did not change), not a tuning step, and it is
+in no slice of this plan. It goes to the product owner with the list at the end of P5b.
+
+### What I changed in the product
+
+1. `ai_inspector/documentation/provenance.py`, `project_document`. The delivered shortcut reuses the effective
+   text targets as the source targets when the scene has no generated text override, and looked for the key
+   `text` only. `text_targets` takes a generated element's text from `text` and from `richText`; a scene with
+   only a rich-text override would have shown the edited text as the source text. Both keys are looked at.
+2. `static/index.html`, Escape with an object selected (delivered B4). The selection was cleared but the
+   keyboard focus stayed on the object. An object's focus means "selected" (its focus event selects it), so
+   the page held an unselected object with the focus, on which Enter and the arrow keys did nothing. The focus
+   now leaves with the selection and goes to the page (`.documentation-canvas-stage`); Tab reaches the
+   objects again from there.
+3. `static/index.html` and `static/cad_viewport.js`, the viewer's contexts (delivered B1). The common disposer
+   was right and still released nothing: run 13 counted 143 live contexts after twenty cycles. A heap snapshot
+   of the test browser showed why. three.js r128 puts one `dispose` listener per renderer on every geometry,
+   material and texture that renderer has drawn; the model is cached and shared by every mount
+   (`state.partsManualBaseMeshPositions`, the cached GLTF), and the orientation gizmo's sprites share one
+   geometry; so every closed renderer stayed reachable from the cache. `_releaseSceneGpuResources(scene)` now
+   runs in `_disposeAssembly3DMount` before the renderer goes: it calls `dispose()` once on each geometry,
+   material, texture (uniforms included) and instanced mesh of the scene, which frees the GPU copies and
+   detaches those listeners. Nothing of the cached model is destroyed; the next renderer uploads its own
+   copy, as a new context must anyway. The gizmo disposes its shared sprite geometry once.
+4. `static/index.html`, Escape in an open menu (delivered B4). The capture-phase key handler runs before the
+   menu's own; with an object selected it cleared the selection, which redraws the ribbon under the open
+   menu, and the keyboard focus was lost (run 13, `p5a_light_menu_focus_0`). An event from inside an open
+   menu, list or dialog (`[data-ribbon-dropdown], [role="menu"], [role="listbox"], [role="dialog"],
+   [aria-expanded="true"]`) is now left to its owner. One behaviour change follows: Escape in an open menu on
+   a parts-manual page no longer also goes to the overview page; it closes the menu.
+5. `static/index.html`, the ribbon with an object selected (delivered B2). The container rules fold groups by
+   the ribbon's width alone. The Format group (font, size, bold, italic, colour) and the Object group come
+   and go with the selection. With a text box selected on the operations manual at 1720 x 1080 the rules
+   folded Figure into More and the rest still did not fit: Delete, Publish, Preview, the DOCX export and More
+   itself lay past the ribbon's end (ten controls cut), so the folded commands could not be reached at all.
+   Smoke phase P3b stopped there (153 checks passed, then a press on Capture All found nothing to press). The
+   phase's scaling stage had not seen it: it measured the ribbon with nothing selected and with the text
+   editor open, not with an object selected. `_documentationFitWorkflowRibbon` now runs after every ribbon
+   render and when the ribbon's width changes: while the last group ends beyond the command bar it folds one
+   more group into More, in the order Figure, Annotate, Values, Content, Edit, Object
+   (`data-documentation-folded`). The delivered rules stay as the first step. Only a group that More can show
+   is folded; the Format group and Publish never are.
+6. The same function: the fit runs once per render. A ResizeObserver reports once right after `observe()`;
+   that report repeated the fit the render had just done, so it is ignored when the width is the fitted one.
+
+Everything else in the delivered change was read and kept: the request-local reuse
+(`ai_inspector/documentation/request_work.py`), `owned=True` on privately built documents, the rail that keeps
+its buttons and builds previews in idle time, the batched text fit, the covered 3D viewer that stops drawing,
+the lazy Tiptap import, the toolbar without its height cap, and the faster word reader of P4b.
+
+### What I changed in the harness and the tests
+
+- `tests/documentation_editor_scale_smoke.py`: `escape_selected_object_stays_on_page` also records where the
+  focus went; new check `escape_open_menu_keeps_selection`; the two panel checks that press with the pointer
+  wait two animation frames before they read the focus (Tiptap focuses on the next frame; the check failed
+  once for that reason alone); new checks `p5a_scale_<scale>_<size>_selected_controls` (an object selected,
+  no editor open: nothing cut, the Format and Object groups present, Publish on the ribbon, and More there
+  whenever a group is folded), which also record the cost of one fit (`fitMs`). On the delivered code the new
+  check fails at 1720 x 1080 at every device scale (ten controls cut); it passes with correction 5.
+- `tests/smoke_documentation_editor.py`: `ribbon_click()`. A command that is folded is pressed on its More
+  entry, with the pointer, as a user would; a folded dropdown is skipped because More lists its items
+  directly. Before, a Playwright click scrolled the clipped ribbon to reach a button past its end, which is
+  how the earlier gates passed with a cut ribbon. The ribbon presses of the nine phases that can meet a fold
+  (Capture All, Undo, Redo, Find, the View menu, and the two `press` helpers of P4a and P4b) go through it.
+- The same file, phase P4b, `<name>_generated_bounds`. The check read a preview from every item of the page
+  rail at once. The rail now builds a preview only for an item near its view, in idle time, and keeps the old
+  one until then; right after the switch to A4 the check found 18 of 32 items without a preview and 7 with
+  the Letter preview (55 of 128 blocks). It now brings each item into the rail's view and measures it once
+  its preview is the one for the current page. What it proves is unchanged: 128 of 128 blocks inside the page.
+- `tests/test_parts_manual_ui_contract.py`: the pin "no preview work while Sage is working" follows the rule
+  from the rail's render function to the idle queue.
+- `tests/cad_viewport.test.cjs` and `tests/documentation_performance.test.cjs`: the disposer's order and the
+  gizmo's sprite geometry; two tests for the measured fit (a fake command bar; the stylesheet rules for every
+  group the fit may fold; the once-per-render guard).
+- `tests/test_documentation_performance.py`: the tests that compare with the old implementation skip when
+  commit 4669cd0 is not in the repository (a shallow clone), and say so.
+
+### Findings in the product (for the product owner)
+
+1. With a text object selected at 1720 x 1080, Undo, Redo and Find are in More (the Edit group is the fifth to
+   fold). Ctrl+Z, Ctrl+Y and Ctrl+F work as before. A wider window or no selection shows them on the ribbon.
+2. A More entry copies its command's disabled state when More opens; a command that becomes available while
+   More is open stays grey until More is opened again. Older behaviour; recorded.
+3. After a paper change the rail's previews of pages far from the rail's view stay as they were (the old
+   paper) until they are scrolled near. By design of the idle queue; recorded because it is visible.
+4. The font and size fields of the Format group have no More entry, so that group cannot be folded. At
+   1366 x 768 with a text object selected the ribbon fits (the Object group is in More there).
+5. Findings 1 to 4 of the P5a-2 gate are closed by this slice. Its findings 5 to 11 are unchanged.
+
+### Gates
+
+Everything below ran on the final code of this slice unless a row says otherwise.
+
+| Gate | Result |
+| --- | --- |
+| Node suites (`node --test`) | 498 passed: cad viewport 5, conflicts 20, objects 168, page setup 2, performance 10, publication 2, rich text 258, scale probe 2, search 20, tables 11; inline scripts 4/4; borrow callouts 5/5 |
+| Complete documentation suites | 2075 passed, 1 failed: `test_operations_manual_precoding_contracts.py::test_source_ids_references_and_local_hashes_are_closed` (known since the baseline before P0). P5a-2: 2050 passed and the same failure |
+| Tests that read a changed product file (89 selected tests and 5 files) | 151 passed, 11 failed: the same 11 as at the P5a-2 gate (7 of the known wide list, 4 in `tests/test_training_process_map.py`) |
+| Wide suite, four parts | 3855 passed, 68 skipped, 179 failed or errored: the 179 known since P3a-1, none new, none gone |
+| Baselines | `tools/documentation_baseline.py --check` exit 0; `--local --check` exit 0 ("Documentation baseline matches; reopened stores were unchanged.") |
+| Smoke P1a | 27/27 |
+| Smoke P1b | 46/46 |
+| Smoke P1c | 35/35 |
+| Smoke P2a | 23/23 |
+| Smoke P2b | 36/36 |
+| Smoke P3a | 194/194 |
+| Smoke P3b | 169/169 |
+| Smoke P4a | 475/475 |
+| Smoke P4b | 198/198 |
+| Smoke P5a, full size, twenty memory cycles, quiet machine (run 14: the code before corrections 5 and 6) | 201/201 in 27 min |
+| Smoke P5a, full size, twenty memory cycles, final code, busy machine (run 15) | 196/198 in 43.5 min: the 40-minute limit and the stage it cut off |
+| Smoke P5a, stage `overflow_findings` alone, full size, final code | 12/13: `p5a_all_stages` only (by construction) |
+| Smoke P5a, stage `scaling` alone, debug sizes, final code | 55/59: the four by-construction checks only; the eight `selected_controls` checks pass |
+
+The nine smoke phases, the suites, the wide suite and the baselines ran in one chain on the final code. The
+last harness addition (the recorded `fitMs`) came after the chain; the stage `scaling` and the tests that pin
+the harness files (44 passed) were run again with it.
+
+Not run in this slice: a complete run of the phase on the final code on a quiet machine (above; first step of
+the P5b gate), and the desktop smoke (`tests/smoke_documentation_editor_desktop.cjs`), which belongs to P5b.

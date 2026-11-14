@@ -44,7 +44,10 @@ def test_display_style_lifecycle_preserves_documentation_capture_authority() -> 
     viewer_render = html.index("_viewerRenderDisplayStyle('assembly', renderer, scene, camera)")
     assert documentation_render < viewer_render
     assert "const displayStyleRendered = !documentationRendered" in html
-    assert "_disposeViewerDisplayPass('assembly');\n                state.assyRenderer.dispose()" in html
+    release = html[html.index("function _disposeAssembly3DMount()"):html.index("function _assemblyMountIsCovered(")]
+    assert "_disposeViewerDisplayPass('assembly');" in release
+    assert "renderer.dispose(); renderer.forceContextLoss?.();" in release
+    assert "_disposeAssembly3DMount();" in html[html.index("function _initAssembly3DScene("):][:200]
     assert "_disposeViewerDisplayPass('part');\n                state.threeRenderer.dispose()" in html
     assert "_viewerRenderDisplayStyle(\n                            'assembly', state.assyRenderer" in html
 

@@ -44,6 +44,40 @@ def T(milliseconds):
 
 
 CAPTURE_ALL_WAIT_MS = T(240000)
+
+
+def ribbon_click(page, selector, **options):
+    """Press a Documentation ribbon command with the pointer.
+
+    Supervisor (P5a-3): the ribbon folds groups into More when they do not fit (with an object selected the
+    Figure group is folded at 1720 x 1080). A folded command is pressed on its More entry, as a user would.
+    """
+    node = page.locator(selector).first
+    if node.is_visible():
+        node.click(**options)
+        return "ribbon"
+    if node.count() and node.evaluate("button => button.classList.contains('documentation-ribbon-menu-trigger')"):
+        return "more-menu"  # More lists a folded dropdown's items directly.
+    # A More entry copies the command's state when More opens: wait for the command as a click would.
+    page.wait_for_function("selector => { const e = document.querySelector(selector); return !!e && !e.disabled; }",
+                           arg=selector, timeout=options.get("timeout") or T(30000))
+    page.locator("#documentationOverflowMenuRibbon").click(timeout=T(15000))
+    page.wait_for_function(
+        "() => document.querySelector('#documentationOverflowMenuRibbon')?.getAttribute('aria-expanded') === 'true'",
+        timeout=T(15000))
+    found = page.evaluate("""selector => {
+        const source = document.querySelector(selector);
+        const entry = [...document.querySelectorAll('.documentation-ribbon-overflow-menu .documentation-menu-item')]
+            .find(item => item._documentationSource === source && item.getClientRects().length);
+        document.querySelectorAll('[data-smoke-more-entry]').forEach(item => item.removeAttribute('data-smoke-more-entry'));
+        if (entry) entry.setAttribute('data-smoke-more-entry', '1');
+        return Boolean(entry);
+    }""", selector)
+    if not found:
+        page.locator("#documentationOverflowMenuRibbon").click(timeout=T(15000))
+        raise RuntimeError("Ribbon command is neither on the ribbon nor in More: " + selector)
+    page.locator('[data-smoke-more-entry="1"]').click(**options)
+    return "more"
 RICH_PROOF_TEXT = "Alpha beta gamma"
 RICH_PROOF_PASTE = "\nline two\n\n  \U0001f642 e\u0301\tend  "
 ROOT_NAMES = {"PARTS_MANUAL_ROOT": "p", "OPERATIONS_MANUAL_ROOT": "o", "SPECIFICATION_SHEET_ROOT": "s",
@@ -463,7 +497,7 @@ def run_p1b(page, request, server, output, report, record, begin_edit, tool, fre
     def capture_all(kind):
         start = len(renders)
         # Capture/export are not navigations; their completion is awaited below, so never block on the click.
-        page.locator("#documentationCaptureAllRibbon").click(no_wait_after=True)
+        ribbon_click(page, "#documentationCaptureAllRibbon", no_wait_after=True)
         page.wait_for_function("""() => {
             const payload = window.__compareDbg.state.partsManualDocumentation;
             const figures = (payload?.document?.pages || []).filter(p => p.renderRequest);
@@ -588,9 +622,9 @@ def run_p1b(page, request, server, output, report, record, begin_edit, tool, fre
         exported["pdf"]["documentRevision"] == exported["docx"]["documentRevision"] == changed["documentRevision"]
         and bool(word))  # Cover status is a known P4 DOCX gap.
     page.locator(f'.documentation-page-item[data-page-id="{cover}"]').click()
-    page.locator("#documentationViewMenuRibbon").click()
+    ribbon_click(page, "#documentationViewMenuRibbon")
     with page.expect_response(lambda r: r.request.method == "POST" and "documentation-scene/commands" in r.url, timeout=T(120000)) as view:
-        page.locator("#documentationViewRightRibbon").click()
+        ribbon_click(page, "#documentationViewRightRibbon")
     record("p1b_real_figure_change_saved", view.value.ok)
     figure_changed = state(wi)["document"]
     pending = [p["pageId"] for p in figure_changed["pages"] if p.get("renderRequest") and
@@ -758,7 +792,7 @@ def run_p1c(page, request, server, output, report, record, begin_edit, tool, fre
 
     page.get_by_role("button", name="Close review", exact=True).click()
     # Real capture path, as P1b: no fixture raster or forged publication status.
-    page.locator("#documentationCaptureAllRibbon").click(no_wait_after=True)
+    ribbon_click(page, "#documentationCaptureAllRibbon", no_wait_after=True)
     page.wait_for_function("""() => {
         const figures = (window.__compareDbg.state.partsManualDocumentation?.document?.pages || []).filter(p => p.renderRequest);
         return figures.length && figures.every(p => p.renderRequest.image?.status === 'ready')
@@ -830,7 +864,7 @@ def run_p1c(page, request, server, output, report, record, begin_edit, tool, fre
     screenshot("resolved")
     with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/undo"),
                               timeout=T(120000)) as undone:
-        page.locator("#documentationUndoRibbon").click()
+        ribbon_click(page, "#documentationUndoRibbon")
     record("p1c_browser_undo_succeeded", undone.value.ok)
     page.locator(f'[data-conflict-id="{cid}"]').wait_for()
     reopened_conflict = review()["conflicts"][0]
@@ -838,7 +872,7 @@ def run_p1c(page, request, server, output, report, record, begin_edit, tool, fre
            and all(reopened_conflict[side] == conflict[side] for side in ("B", "C", "N")))
     with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/redo"),
                               timeout=T(120000)) as redone:
-        page.locator("#documentationRedoRibbon").click()
+        ribbon_click(page, "#documentationRedoRibbon")
     record("p1c_browser_redo_succeeded", redone.value.ok)
     page.wait_for_function("() => document.querySelector('#documentationConflictCount')?.textContent === '0 conflicts'")
     record("p1c_redo_same_stored_result", stored_result() == browser_result)
@@ -1171,7 +1205,7 @@ def run_p2a(page, request, server, output, report, record, begin_edit, tool, fre
     committed = field(scene())["richText"]
     for direction, expected in (("undo", unchanged), ("redo", committed)):
         with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/" + direction), timeout=T(120000)) as moved:
-            page.locator("#documentation" + direction.title() + "Ribbon").click()
+            ribbon_click(page, "#documentation" + direction.title() + "Ribbon")
         moved.value.finished()
         if not moved.value.ok:
             raise RuntimeError(moved.value.text()[:1000])
@@ -2146,7 +2180,7 @@ def run_p3a_editor(page, h, page_id, prior_keys, output, report, record, tool):
     editor.press("Escape")
     for direction, wanted in (("undo", initial), ("redo", expected)):
         with page.expect_response(lambda response: response.request.method == "POST" and response.url.endswith("/documentation-scene/" + direction), timeout=T(120000)) as moved:
-            page.locator("#documentation" + direction.title() + "Ribbon").click()
+            ribbon_click(page, "#documentation" + direction.title() + "Ribbon")
         moved.value.finished(); assert moved.value.ok, moved.value.text()[:1000]
         h.idle()
         record("p3a2_document_" + direction, canonical_bytes(h.field(h.scene(), key)["richText"]) == canonical_bytes(wanted))
@@ -2234,7 +2268,7 @@ def run_p3a_narrative(h, output, report, record, tool):
                    max(1, len(pair[1].get("text", pair[1].get("caption", "")))))
 
     def capture():
-        page.locator("#documentationCaptureAllRibbon").click(no_wait_after=True)
+        ribbon_click(page, "#documentationCaptureAllRibbon", no_wait_after=True)
         page.wait_for_function("""() => {
             const figures = (window.__compareDbg.state.partsManualDocumentation?.document?.pages || []).filter(p => p.renderRequest);
             return figures.length && figures.every(p => p.renderRequest.image?.status === 'ready')
@@ -2370,7 +2404,7 @@ def run_p3a_narrative(h, output, report, record, tool):
     for direction, aliases, expected in (("undo", list(reversed(after)), before), ("redo", list(after), after)):
         for alias in aliases:
             with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/" + direction), timeout=T(120000)) as response:
-                page.locator("#documentation" + direction.title() + "Ribbon").click()
+                ribbon_click(page, "#documentation" + direction.title() + "Ribbon")
             response.value.finished(); assert response.value.ok, response.value.text()[:1000]
             h.idle()
             record("p3a3_" + direction + "_" + alias, canonical_bytes(override(ops, alias)) == canonical_bytes(expected[alias]))
@@ -2444,7 +2478,7 @@ def run_p3a_search(h, output, report, record, tool):
             "operation": "replace_rich_text", "targetId": stable, "expectedContentHash": full["contentHash"], "richText": value}]})
     assert seeded.get("ok"), seeded
     page = h.open_document(kind, page_id, pointer_refresh=True)
-    page.locator("#documentationFindRibbon").click()
+    ribbon_click(page, "#documentationFindRibbon")
     panel = page.get_by_role("region", name="Find and Replace")
     # section with an accessible name is a region; use only visible pointer/input controls.
     # Supervisor: the list is bounded, and Replace all refuses an incomplete list.
@@ -2487,7 +2521,7 @@ def run_p3a_search(h, output, report, record, tool):
            and leaves[0]["marks"] == [{"type": "bold"}] and leaves[-1]["marks"] == [{"type": "italic"}])
     panel.get_by_role("button", name="Close find", exact=True).click()
     with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith('/documentation-scene/undo'), timeout=T(120000)) as response:
-        page.locator("#documentationUndoRibbon").click()
+        ribbon_click(page, "#documentationUndoRibbon")
     response.value.finished(); h.idle()
     restored = h.scene(kind)
     record("p3a4_group_one_undo", h.field(restored, alias)["richText"] == before_rich["richText"]
@@ -2519,7 +2553,7 @@ def run_p3a_search(h, output, report, record, tool):
     record("p3a4_symbol_stored_with_marks", symbol_field["text"].endswith("\u00b1") and
            symbol_field["richText"]["doc"]["content"][0]["content"][-1]["marks"] == [{"type": "italic"}])
     # Captures from part 3 are reusable after text-only edits; capture any newly materialized figure.
-    page.locator("#documentationCaptureAllRibbon").click(no_wait_after=True)
+    ribbon_click(page, "#documentationCaptureAllRibbon", no_wait_after=True)
     page.wait_for_function("""() => {
         const pages = window.__compareDbg.state.partsManualDocumentation?.document?.pages || [];
         return pages.filter(p => p.renderRequest).every(p => p.renderRequest.image?.status === 'ready')
@@ -2757,7 +2791,7 @@ def run_p3b(page, request, server, output, report, record, begin_edit, tool, fre
            and spare[identity["rows"][1]["cellIds"][1]] > 4 and spare[identity["rows"][2]["cellIds"][3]] > 4,
            {"rowHeights": heights, "lines": {cid: len(lines) for cid, lines in measured["lines"].items()},
             "spare": spare})
-    page.locator("#documentationCaptureAllRibbon").click(no_wait_after=True)
+    ribbon_click(page, "#documentationCaptureAllRibbon", no_wait_after=True)
     page.wait_for_function("""() => {
         const figures = (window.__compareDbg.state.partsManualDocumentation?.document?.pages || []).filter(p => p.renderRequest);
         return figures.length && figures.every(p => p.renderRequest.image?.status === 'ready')
@@ -2780,13 +2814,13 @@ def run_p3b(page, request, server, output, report, record, begin_edit, tool, fre
     editor.press("Escape")
     page.wait_for_function("() => DocumentationRichText.mountedCount === 0")
     with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/undo"), timeout=T(120000)) as response:
-        page.locator("#documentationUndoRibbon").click()
+        ribbon_click(page, "#documentationUndoRibbon")
     response.value.finished()
     assert response.value.ok, response.value.text()[:1000]
     h.idle()
     record("p3b_one_undo_exact_preimage", canonical_bytes(stored()) == canonical_bytes(before_last))
     with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/redo"), timeout=T(120000)) as response:
-        page.locator("#documentationRedoRibbon").click()
+        ribbon_click(page, "#documentationRedoRibbon")
     response.value.finished()
     assert response.value.ok, response.value.text()[:1000]
     h.idle()
@@ -2808,7 +2842,7 @@ def run_p3b(page, request, server, output, report, record, begin_edit, tool, fre
         "pdf": compare_pdf(plain_artifacts["pdf"], plain_snapshot, page_id, key, output / "p3b-plain-pdf.png"),
         "docx": compare_docx(plain_artifacts["docx"], key, plain_plan.layout.content)}
     with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/undo"), timeout=T(120000)) as response:
-        page.locator("#documentationUndoRibbon").click()
+        ribbon_click(page, "#documentationUndoRibbon")
     response.value.finished(); assert response.value.ok, response.value.text()[:1000]
     h.idle()
     record("p3b_plain_style_undo", canonical_bytes(stored()) == canonical_bytes(value))
@@ -3103,7 +3137,7 @@ def run_p3b_editor(page, request, server, output, report, record, begin_edit, to
     editor().press("Escape")
     def history(which):
         with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/" + which), timeout=T(120000)) as response:
-            page.locator("#documentation" + which.title() + "Ribbon").click()
+            ribbon_click(page, "#documentation" + which.title() + "Ribbon")
         response.value.finished(); assert response.value.ok, response.value.text()
         h.idle()
     history("undo")
@@ -3113,7 +3147,7 @@ def run_p3b_editor(page, request, server, output, report, record, begin_edit, to
     history("undo")  # Restore the authored table for export and the final Sage interoperability proof.
     measured, snapshot, plan = measure_table_canvas(h, kind, key, page_id, output, record, "p3b2-final")
     h.screenshot("final-table")
-    page.locator("#documentationCaptureAllRibbon").click(no_wait_after=True)
+    ribbon_click(page, "#documentationCaptureAllRibbon", no_wait_after=True)
     page.wait_for_function("""() => {
         const figures=(window.__compareDbg.state.partsManualDocumentation?.document?.pages||[]).filter(p=>p.renderRequest);
         return figures.length && figures.every(p=>p.renderRequest.image?.status==='ready')
@@ -3357,7 +3391,7 @@ def run_p4a(page, request, server, output, report, record, begin_edit, tool, fre
         page = h.open_document(kind, page_id, pointer_refresh=True)
         record(prefix+"_reload", canonical_bytes(h.scene(kind)["scene"]["pages"][page_id]) == canonical_bytes(final))
         measure("reopened")
-        page.locator("#documentationCaptureAllRibbon").click(no_wait_after=True)
+        ribbon_click(page, "#documentationCaptureAllRibbon", no_wait_after=True)
         page.wait_for_function("""() => {
             const figures = (window.__compareDbg.state.partsManualDocumentation?.document?.pages || []).filter(p => p.renderRequest);
             return figures.every(p => p.renderRequest.image?.status === 'ready') && !document.querySelector('#documentationWorkspace.busy');
@@ -3404,7 +3438,7 @@ def run_p4a(page, request, server, output, report, record, begin_edit, tool, fre
                                                     COLORS[ORIENTED[6][1]])) <= 6)
         for index, expected in enumerate(reversed(previous_states)):
             with page.expect_response(lambda r:r.request.method == "POST" and r.url.endswith("/documentation-scene/undo"),timeout=T(120000)) as undone:
-                page.locator("#documentationUndoRibbon").click()
+                ribbon_click(page, "#documentationUndoRibbon")
             undone.value.finished()
             assert undone.value.ok, undone.value.text()
             h.idle()
@@ -3467,6 +3501,9 @@ def run_p4a_controls(page, request, server, output, report, record, begin_edit, 
     def press(selector):
         node = page.locator(selector).first
         spot = free_point(node) if node.count() else None
+        if not spot and node.count() and not node.is_visible() and selector.endswith("Ribbon"):
+            ribbon_click(page, selector)  # Supervisor: folded into More (P5a-3).
+            return True
         if not spot:
             record("p4a2_missing_"+selector,False)
             return False
@@ -3824,6 +3861,9 @@ def run_p4b(page, request, server, output, report, record, begin_edit, tool, fre
             return False
     def press(selector):
         node = page.locator(selector).first
+        if node.count() and not node.is_visible() and not node.is_disabled() and selector.endswith("Ribbon"):
+            ribbon_click(page, selector)  # Supervisor: folded into More (P5a-3).
+            return
         if not node.count() or not node.is_visible() or node.is_disabled():
             raise RuntimeError("Control unavailable: " + selector)
         node.scroll_into_view_if_needed(timeout=T(10000))
@@ -3889,14 +3929,29 @@ def run_p4b(page, request, server, output, report, record, begin_edit, tool, fre
                and measured["selected"]=="documentationPageSetup-"+selected, measured)
         if all_blocks:
             # Rail previews are the real page renderer's clones, one for every compiled page.
-            blocks = page.locator('#documentationPageList .documentation-page-item').evaluate_all("""items=>items.map(item=>{
-                const root=item.querySelector('.documentation-thumbnail-page');
-                if(!root)return {pageId:item.dataset.pageId,missing:true};
-                const r=root.getBoundingClientRect(), scale=r.width/parseFloat(root.style.width);
-                return {pageId:item.dataset.pageId,blocks:[...root.querySelectorAll('.documentation-operations-block')].map(n=>{
-                    const b=n.getBoundingClientRect();return {id:n.dataset.documentationEditTarget,
-                        x:(b.left-r.left)/scale,y:(b.top-r.top)/scale,width:b.width/scale,height:b.height/scale};})};
-            })""")
+            # Supervisor (P5a-3): the rail builds a preview only for an item near its view, in idle time, and
+            # keeps the old one until then. Each item is brought into the rail's view and measured once its
+            # preview is the one for the current page (the item's key).
+            blocks = page.evaluate("""async limit => {
+                const list = document.getElementById('documentationPageList');
+                const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+                const results = [];
+                for (const item of list.querySelectorAll('.documentation-page-item')) {
+                    item.scrollIntoView({block: 'center'});
+                    const current = () => !!item._thumbnailKey && item._thumbnailBuilt === item._thumbnailKey
+                        && !!item.querySelector('.documentation-thumbnail-page');
+                    for (const end = performance.now() + limit; performance.now() < end && !current();) await frame();
+                    const root = item.querySelector('.documentation-thumbnail-page');
+                    if (!current()) { results.push({pageId: item.dataset.pageId, missing: true, stale: !!root}); continue; }
+                    await frame();
+                    const r = root.getBoundingClientRect(), scale = r.width / parseFloat(root.style.width);
+                    results.push({pageId: item.dataset.pageId, blocks: [...root.querySelectorAll('.documentation-operations-block')].map(n => {
+                        const b = n.getBoundingClientRect(); return {id: n.dataset.documentationEditTarget,
+                            x: (b.left-r.left)/scale, y: (b.top-r.top)/scale, width: b.width/scale, height: b.height/scale}; })});
+                }
+                list.querySelector('.documentation-page-item.active')?.scrollIntoView({block: 'nearest'});
+                return results;
+            }""", T(20000))
             expected_count=sum(len(p.get("layoutBlocks",[])) for p in current["document"]["pages"])
             actual_count=sum(len(p.get("blocks",[])) for p in blocks)
             bad=[dict(pageId=p["pageId"],**b) for p in blocks for b in p.get("blocks",[])
@@ -4236,15 +4291,36 @@ P4B_WORD_UI_SELECTORS = [
 
 P4B_SURFACE_WORDS_JS = r"""({ui, exceptions, capture}) => {
     const root = document.querySelector('#documentationPublicationSurface');
-    const scale = root.getBoundingClientRect().width / parseFloat(root.style.width);
+    const rootBox = root.getBoundingClientRect();
+    const scale = rootBox.width / parseFloat(root.style.width);
+    // This read-only pass never changes layout. Share ancestry reads across all glyphs on the page.
+    const styles = new Map(), rects = new Map(), clips = new Map(), blockKeys = new Map();
+    const styleOf = element => { if (!styles.has(element)) styles.set(element, getComputedStyle(element)); return styles.get(element); };
+    const boxOf = element => { if (!rects.has(element)) rects.set(element, element.getBoundingClientRect()); return rects.get(element); };
+    const clipOf = element => {
+        if (element === root) return {clip: rootBox, hidden: false};
+        if (clips.has(element)) return clips.get(element);
+        const inherited = clipOf(element.parentElement), css = styleOf(element);
+        let clip = inherited.clip;
+        if (/(hidden|clip|auto|scroll)/.test(css.overflowX + css.overflowY)) {
+            const box = boxOf(element);
+            clip = {left: Math.max(clip.left,box.left), top: Math.max(clip.top,box.top),
+                right: Math.min(clip.right,box.right), bottom: Math.min(clip.bottom,box.bottom)};
+        }
+        const result = {clip, hidden: inherited.hidden || css.display === 'none' || Number(css.opacity) === 0};
+        clips.set(element,result); return result;
+    };
+    const range = document.createRange();
     const excluded = ui.join(','), counts = {}, fragments = [];
     const live = root.querySelector('#assy-3d-container');
     const boxes = new Map();
     const blockKey = element => {
+        if (blockKeys.has(element)) return blockKeys.get(element);
         let n=element;
         while(n!==root && n.tagName.toLowerCase()!=='text' &&
-            !['block','grid','flex','table-cell','list-item'].includes(getComputedStyle(n).display)) n=n.parentElement;
-        if(!boxes.has(n))boxes.set(n,boxes.size);return boxes.get(n);
+            !['block','grid','flex','table-cell','list-item'].includes(styleOf(n).display)) n=n.parentElement;
+        if(!boxes.has(n))boxes.set(n,boxes.size);
+        blockKeys.set(element,boxes.get(n)); return boxes.get(n);
     };
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let node;
@@ -4252,22 +4328,24 @@ P4B_SURFACE_WORDS_JS = r"""({ui, exceptions, capture}) => {
         const element = node.parentElement;
         if (!element || element.closest(excluded)) continue;
         if (live?.contains(element) && capture.liveCovered && capture.contract) continue;
-        const style = getComputedStyle(element);
+        const style = styleOf(element);
         if (style.visibility !== 'visible' || style.display === 'none') continue;
-        let ancestor = element, clip = root.getBoundingClientRect(), hidden = false;
-        while (ancestor && ancestor !== root) {
-            const css = getComputedStyle(ancestor), box = ancestor.getBoundingClientRect();
-            if (css.display === 'none' || Number(css.opacity) === 0) { hidden = true; break; }
-            if (/(hidden|clip|auto|scroll)/.test(css.overflowX + css.overflowY)) {
-                clip = {left:Math.max(clip.left,box.left),top:Math.max(clip.top,box.top),
-                    right:Math.min(clip.right,box.right),bottom:Math.min(clip.bottom,box.bottom)};
-            }
-            ancestor = ancestor.parentElement;
-        }
+        const {clip, hidden} = clipOf(element);
         if (hidden) continue;
         let text = '', first = null, previous = null, offset = 0;
-        for (const character of node.textContent) {
-            const range = document.createRange();
+        const value = node.textContent;
+        range.selectNodeContents(node);
+        const runRects = [...range.getClientRects()];
+        // Printable ASCII in a fully visible run has no zero-width glyphs. A clipped run, or any
+        // non-ASCII text, still takes the exact per-code-point visibility test used before P5a-3.
+        const whole = /^[\x20-\x7e\t\r\n]*$/.test(value) && runRects.length && runRects.every(r =>
+            r.width && r.height && r.left >= clip.left && r.top >= clip.top && r.right <= clip.right && r.bottom <= clip.bottom);
+        if (whole && value.trim()) {
+            text = value.replace(/\s/gu, ' ');
+            const start = value.search(/\S/u), end = value.search(/\S\s*$/u);
+            range.setStart(node,start); range.setEnd(node,start+1); first = range.getBoundingClientRect();
+            range.setStart(node,end); range.setEnd(node,end+1); previous = range.getBoundingClientRect();
+        } else for (const character of value) {
             range.setStart(node,offset); offset += character.length; range.setEnd(node,offset);
             const r = range.getBoundingClientRect();
             if (/\s/u.test(character)) { text += ' '; continue; }
@@ -4334,7 +4412,7 @@ def run_p4b_words(page, request, server, output, report, record, begin_edit, too
             page = h.open_document(kind, descriptors[0]["pageId"], pointer_refresh=True)
             # Reuse captures retained by part 2. Capture All only fills this publication's missing revisions.
             if any(p.get("renderRequest") and p["renderRequest"].get("image",{}).get("status") != "ready" for p in payload["document"]["pages"]):
-                page.locator('#documentationCaptureAllRibbon').click(timeout=T(10000))
+                ribbon_click(page, '#documentationCaptureAllRibbon', timeout=T(10000))
                 page.wait_for_function("""() => !document.querySelector('#documentationWorkspace.busy') &&
                     window.__compareDbg.state.partsManualDocumentation.document.pages.filter(p=>p.renderRequest)
                     .every(p=>p.renderRequest.image?.status==='ready')""", timeout=T(240000))
@@ -4720,7 +4798,7 @@ def main():
             open_workspace()
             with page.expect_response(lambda response: response.request.method == "POST" and "/undo" in response.url,
                                       timeout=T(120000)) as first_undo:
-                page.locator("#documentationUndoRibbon").click()
+                ribbon_click(page, "#documentationUndoRibbon")
             # The reopen reloads the page: let the (large) response body finish first, or Chromium aborts it.
             first_undo.value.finished()
             open_workspace()
@@ -4729,7 +4807,7 @@ def main():
                 and page.locator(f'#documentationPublicationSurface [data-documentation-edit-target="{other_alias}"]:visible').first.inner_text() == targets[1]["text"])
             with page.expect_response(lambda response: response.request.method == "POST" and "/undo" in response.url,
                                       timeout=T(120000)) as second_undo:
-                page.locator("#documentationUndoRibbon").click()
+                ribbon_click(page, "#documentationUndoRibbon")
             second_undo.value.finished()
             undone = get_scene()
             write_json(output / "undone.json", undone)

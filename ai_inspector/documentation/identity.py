@@ -12,6 +12,7 @@ import re
 import uuid
 
 from .commands import DocumentEditError, digest, document_id, scene_field_key
+from .request_work import memoized, is_identified, mark_identified
 
 IDENTITY_VERSION = 1
 VERSIONS = {"illustrated_parts_manual": 6, "operations_and_maintenance_manual": 3,
@@ -63,9 +64,10 @@ def _number(document):
     return (document.get("product") or {}).get("assemblyNumber") or document.get("assemblyNumber") or ""
 
 
-def catalog_from(document):
+@memoized
+def catalog_from(document, *, compiled=False):
     """Return the generated catalogue explicitly; process cache is never authority."""
-    compiled = compile_identities(document)
+    compiled = document if compiled or is_identified(document) else compile_identities(document)
     return {key: deepcopy(compiled[key]) for key in ("aliasMap", "aliasRevision", "identities")} | {
         "identityBaselineAvailable": compiled.get("identityBaselineAvailable", True),
         **_binding(compiled), "documentType": compiled["documentType"], "assemblyNumber": _number(compiled)}
@@ -250,7 +252,7 @@ def compile_identities(document):
     _CATALOGS.move_to_end(key)
     while len(_CATALOGS) > 32:
         _CATALOGS.popitem(last=False)
-    return result
+    return mark_identified(result)
 
 
 def alias_entry(document, page, alias):
@@ -477,7 +479,7 @@ def project_scene(document, scene):
 
 def bind_document(document, scene):
     result = compile_identities(document)
-    catalog = catalog_from(result)
+    catalog = catalog_from(result, compiled=True)
     migrated = migrate_scene(scene or {}, catalog)
     # Replay only via the store owner's existing pure reducers.
     from ai_inspector.parts_manual.documentation import replay_documentation_commands

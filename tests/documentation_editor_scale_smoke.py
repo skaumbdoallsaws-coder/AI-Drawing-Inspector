@@ -329,6 +329,33 @@ def run(page, browser, request, server, output, report, record, handlers, *, T, 
             wait("() => !window.__compareDbg.state.partsManualDocumentationSelection")
             return measure("selection", objectId=plain_id)
         series("selection", selection, budget=150)
+        # Supervisor: an open ribbon menu owns Escape. With the object selected, Escape closes the menu,
+        # the focus returns to its trigger, the selection and the page stay.
+        menu_trigger = page.locator('#contextRibbon .documentation-ribbon-menu-trigger:visible:not(:disabled)').first
+        menu_trigger.click()
+        wait("() => !!document.querySelector('#contextRibbon .documentation-ribbon-menu-trigger[aria-expanded=\"true\"]')")
+        menu_trigger.focus(); page.keyboard.press("Escape")
+        wait("() => !document.querySelector('#contextRibbon .documentation-ribbon-menu-trigger[aria-expanded=\"true\"]')")
+        after_menu = page.evaluate("() => ({trigger: document.activeElement?.classList.contains('documentation-ribbon-menu-trigger') === true,"
+            " connected: document.activeElement?.isConnected === true,"
+            " selection: window.__compareDbg.state.partsManualDocumentationSelection?.targetId || null,"
+            " pageId: window.__compareDbg.state.partsManualDocumentationPageId})")
+        record("escape_open_menu_keeps_selection", after_menu["trigger"] and after_menu["connected"]
+            and after_menu["selection"] == plain_id and after_menu["pageId"] == middle["pageId"], after_menu)
+        # The object takes the focus again, as after a click on it.
+        page.locator(SURFACE + ' [data-documentation-object-id="' + plain_id + '"]').focus()
+        wait("id => window.__compareDbg.state.partsManualDocumentationSelection?.targetId === id", plain_id)
+        # P5a-3 B4: the capture-phase Escape handler must clear an authored selection, not navigate up.
+        selected_before_escape = page.evaluate("() => ({pageId:window.__compareDbg.state.partsManualDocumentationPageId, selection:window.__compareDbg.state.partsManualDocumentationSelection?.targetId})")
+        page.keyboard.press("Escape")
+        wait("() => !window.__compareDbg.state.partsManualDocumentationSelection")
+        escaped_page = page.evaluate("() => window.__compareDbg.state.partsManualDocumentationPageId")
+        # Supervisor: the focus leaves the object with the selection (an object's focus selects it).
+        escaped_focus = page.evaluate("() => ({onObject: !!document.activeElement?.closest?.('[data-documentation-object-id]'),"
+            " onPage: document.activeElement?.classList.contains('documentation-canvas-stage') === true})")
+        record("escape_selected_object_stays_on_page", selected_before_escape["selection"] == plain_id
+            and escaped_page == middle["pageId"] and not escaped_focus["onObject"],
+            {"before": selected_before_escape, "afterPageId": escaped_page, "focus": escaped_focus})
         # Five Escape attempts demonstrate the real shortcut rather than silently
         # timing a different action under the requested name.
         escapes = []
@@ -732,9 +759,15 @@ def run(page, browser, request, server, output, report, record, handlers, *, T, 
                 # Supervisor: opened with the pointer from the text, the focus goes back into the text (also
                 # after the Table panel's own field held it); opened from the keyboard, it returns to the
                 # panel's button.
+                # Supervisor: the editor takes the focus back on the next animation frame (Tiptap's focus
+                # command), so the focus is read two frames after the panel closed.
+                page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+                focus_at = page.evaluate("() => { const a = document.activeElement; return {tag: a?.tagName || null,"
+                    " id: a?.id || null, className: String(a?.className || '').slice(0, 80), text: (a?.textContent || '').slice(0, 40),"
+                    " editors: document.querySelectorAll('.documentation-rich-editor [contenteditable=\"true\"]').length}; }")
                 record(theme + '_' + action.lower() + '_pointer_focus', page.evaluate(
                     "() => document.querySelector('.documentation-rich-editor [contenteditable=\"true\"]')?.contains(document.activeElement)"
-                    " || document.activeElement?.isContentEditable === true"))
+                    " || document.activeElement?.isContentEditable === true"), focus_at)
                 toggle.focus(); page.keyboard.press('Enter')
                 wait('s=>!!document.querySelector(s)&&!document.querySelector(s).hidden', selector)
                 page.keyboard.press('Escape')
@@ -830,6 +863,37 @@ def run(page, browser, request, server, output, report, record, handlers, *, T, 
                     record(name+'_editing_controls', edit_boxes['count']>0 and not edit_boxes['failures'], edit_boxes)
                     other.keyboard.press('Escape')
                     other.wait_for_function('() => P5aProbe.mounted()===0',timeout=T(30000))
+                    # Supervisor (P5a-3): the object selected and no editor open. The ribbon then also shows the
+                    # Format group (font, size, bold, italic, colour): its widest state. Nothing may be cut,
+                    # Publish stays on the ribbon, and More is there whenever a group is folded away.
+                    other.evaluate('() => document.activeElement?.blur?.()')
+                    other.locator(SURFACE+' [data-documentation-object-id="'+oid+'"]').focus()
+                    other.wait_for_function('id=>window.__compareDbg.state.partsManualDocumentationSelection?.targetId===id',arg=oid,timeout=T(20000))
+                    other.evaluate('() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+                    selected_boxes = other.evaluate('() => P5aProbe.clipping()')
+                    ribbon_state = other.evaluate("""() => {
+                        const shown = id => { const e = document.getElementById(id); return !!e && e.getClientRects().length > 0; };
+                        const bar = document.querySelector('#contextRibbon .documentation-ribbon-commandbar');
+                        const groups = [...bar.querySelectorAll('[data-documentation-ribbon-group]')]
+                            .filter(g => !g.classList.contains('documentation-ribbon-overflow-group'));
+                        return {format: groups.some(g => g.dataset.documentationRibbonGroup === 'format' && g.getClientRects().length > 0),
+                            object: groups.some(g => g.dataset.documentationRibbonGroup === 'object'),
+                            publish: shown('documentationPublishRibbon'), more: shown('documentationOverflowMenuRibbon'),
+                            measuredFold: bar.getAttribute('data-documentation-folded') || '',
+                            hiddenGroups: groups.filter(g => !g.getClientRects().length).map(g => g.dataset.documentationRibbonGroup)};
+                    }""")
+                    # What one fit costs (it runs in every ribbon render, so in every selection): the mean of
+                    # twenty passes in this state, which has the most folds. Recorded, not judged.
+                    ribbon_state['fitMs'] = other.evaluate("""() => {
+                        if (typeof _documentationFitWorkflowRibbon !== 'function') return null;
+                        const start = performance.now();
+                        for (let i = 0; i < 20; i++) _documentationFitWorkflowRibbon();
+                        return Math.round((performance.now() - start) / 20 * 100) / 100;
+                    }""")
+                    other.screenshot(path=str(output/('p5a-'+name+'-selected-controls.png')),timeout=T(20000))
+                    record(name+'_selected_controls', selected_boxes['count']>0 and not selected_boxes['failures']
+                        and ribbon_state['format'] and ribbon_state['object'] and ribbon_state['publish']
+                        and (ribbon_state['more'] or not ribbon_state['hiddenGroups']), {**selected_boxes, 'ribbon': ribbon_state})
                 except Exception as error:
                     record(name, False, str(error))
                 finally:

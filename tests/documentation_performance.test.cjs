@@ -112,12 +112,17 @@ test('disposing a mount releases its loop, observers, controls, registries and b
     const window = {__themedScenes: new Set([scene]), __themedRenderers: new Set([renderer])};
     const sandbox = vm.createContext({state, window, cancelAnimationFrame: id => calls.push(id),
         _partsManualDisposeDocumentationTechnicalPass: () => calls.push('technical'),
-        _disposeViewerDisplayPass: () => calls.push('display')});
+        _disposeViewerDisplayPass: () => calls.push('display'),
+        _disposeCadFinishRuntime: target => calls.push(target === state ? 'finish' : 'finish-other')});
     vm.runInContext(fn(html, '_materialList'), sandbox);
     vm.runInContext(fn(html, '_releaseSceneGpuResources'), sandbox);
     vm.runInContext(fn(html, '_disposeAssembly3DMount'), sandbox);
     sandbox._disposeAssembly3DMount();
-    assert.deepEqual(calls, [10,11,'observer','controls','gizmo','technical','display',
+    // Supervisor (P5b): where the page has a CAD finish runtime (finish textures and environments of the Assembly
+    // viewer), the one disposer releases it with the viewer's state, after the display pass and before the scene
+    // and the renderer go.
+    const finish = html.includes('        function _disposeCadFinishRuntime(') ? ['finish'] : [];
+    assert.deepEqual(calls, [10,11,'observer','controls','gizmo','technical','display',...finish,
         'geometry','map','material','uniformMap','shader','instanced',
         'background','renderer','context','canvas','labels']);
     assert.equal(window.__themedScenes.size, 0); assert.equal(window.__themedRenderers.size, 0);

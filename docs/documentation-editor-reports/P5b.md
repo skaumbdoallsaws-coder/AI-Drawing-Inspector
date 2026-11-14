@@ -378,5 +378,74 @@ facility" failed on the branch only (its sandbox lacked _disposeAssembly3DMount)
 the supervisor's stub now records 'assembly-release' and the case passes.
 
 Not rerun for this slice: the nine browser smoke phases (only the desktop bridge
-reaches the changed close guard) and the P5a scale phase. One full P5a run of the
-final code inside 40 minutes on a quiet machine is still owed from P5a-3.
+reaches the changed close guard). The full P5a run owed from P5a-3 ran in the
+port rehearsal below (199 of 199 in 27 minutes).
+
+## P5b-2 port rehearsal (supervisor)
+
+The user's real checkout is at the branch base 2ea742f with uncommitted work of
+the user's: 18 modified tracked files (CAD finish and appearance runtime, part
+tools, facility appearance library; 8 of them also changed by this branch) and
+144 untracked new files (cad_*.js, part_gradient/lighting/spotlights.py, a
+vendored GLTFLoader, documents). The port must keep all of it. The real checkout
+was only read (git status with --no-optional-locks, file reads); nothing was
+written to it.
+
+Plan (port_doc_editor.py plan, read-only), branch tip a68d2d8, 31 commits:
+
+| Kind | Files | Meaning |
+| --- | --- | --- |
+| take | 142 | new in the branch, or unchanged by the user: the branch version |
+| take, line endings | 9 | unchanged by the user, working copy differs only in CRLF: the branch version |
+| take, earlier copy | 1 | docs/documentation-editor-capability-matrix.md: the user's untracked copy is this branch's first version; it is backed up and replaced |
+| identical | 1 | docs/documentation-editor-audit-and-strategy.md |
+| clean three-way merge | 6 | assembly_appearance.py, documentation_pilot.py, documentation_tools.py, progress.py, server.py, tests/test_assembly_appearance.py |
+| resolved conflict | 2 | static/index.html: the user's _disposeCadFinishRuntime(state) joins the one Assembly mount disposer _disposeAssembly3DMount (after the display pass, before the scene and renderer go, the user's own order); tests/test_assembly_display_styles.py: both sides' assertions |
+| stop | 0 | |
+
+Rehearsal copies (all outside the real checkout):
+
+- rs0: prepare-snapshot copy of the real checkout as it is (no port).
+- rs2: the same copy with the port applied by the same script.
+- rg: a detached git checkout of the branch tip with the user's 18 modified files
+  (merged, from rs2) and 144 untracked files on top: the exact post-port state,
+  where tests that read earlier commits through git can run.
+
+| Check | Without the port (rs0) | With the port |
+| --- | --- | --- |
+| User's own tests (assembly appearance, display styles, signs and scenes, codex part tools, facility appearance library) | 140 passed, 1 failed | 141 passed, the same 1 failed (test_manifests_are_complete_and_every_file_matches_its_recorded_hash, a hash in the user's library manifest) |
+| tests/test_assembly_library_panel.js | 16 of 16 | 16 of 16 |
+| Desktop Python tests | 433 passed + the known 1 | 443 passed + the known 1 |
+| Desktop Node tests | 851 pass, 14 fail (13 known + application-close.test.cjs, timing: 3 of 3 alone) | 877 pass, the known 13 |
+| Wide suite | 101 failure IDs | the same 101 IDs, 15 more passing tests |
+| Documentation suites (rg) | | 2075 passed + the known 1; Node files 9 of 9 |
+| Desktop smoke (snapshot of rg) | | 45 of 45, 219 s |
+| Browser smoke P1a (rg) | | 27 of 27 |
+| Browser smoke P5a (rg), full size, DOC_SMOKE_SLOW=4 | | 199 of 199 in 27 min (limit 40 min); 20 memory cycles, rendering contexts 9 -> 9 with the user's CAD finish release inside the mount disposer |
+
+The P5a run is also the full P5a run of the final code that P5a-3 left owed; it
+finished inside 40 minutes while the user's OneDrive sync used about one core.
+Its budgets are as at P5a-3: open of 100 pages p95 11.0 s (budget 5 s, missed),
+save p95 7.4 s (budget 1 s, missed; server p95 3.2 s), PDF of 100 pages p95
+20.3 s (30 s, met), selection p95 33 ms (150 ms, met), typing p95 17 ms. The two
+misses stay written findings for the user (an incremental compile is a design
+decision).
+
+The documentation suites first ran in rs2, which has no .git: 237 tests that load
+an earlier committed module through git show (or list tracked files) failed
+there for that reason alone, plus the known 1. In rg they pass.
+
+The rehearsal found one defect, fixed in a68d2d8: the mount dispose test
+(tests/documentation_performance.test.cjs) ran the merged disposer in a sandbox
+without the user's _disposeCadFinishRuntime and failed with a ReferenceError.
+The sandbox now has it, and where the page defines it the test requires its
+release in that position (mutation-checked on the merged page).
+
+The first desktop smoke of rg failed only its network checks: the page asked for
+the user's untracked new files (static/cad_*.js, the vendored GLTFLoader.js) that
+rg did not have yet. They exist in the real checkout. With them, 45 of 45.
+
+Note for the user's own testing: the browser smokes copy tracked files into their
+isolated server, so until the user's new files are committed, a browser smoke run
+from the real checkout will miss them. The rehearsal put them in rg's index for its
+smokes only.

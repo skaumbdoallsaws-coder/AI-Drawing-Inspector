@@ -582,6 +582,40 @@ class FacilityReadGateway:
             arguments=arguments, turn_id=self.turn_id)
 
 
+# Properties that tell the shapes of an operation union apart, outermost first: facility operations use "op",
+# document edits use "operation" and then "action" (modify_table).
+_UNION_DISCRIMINATORS = ("op", "operation", "action")
+
+
+def _branch_constant(branch, key):
+    """The fixed value a union branch requires for one property: a const, or an enum of exactly one value."""
+    prop = (branch.get("properties") or {}).get(key) or {}
+    if "const" in prop:
+        return prop["const"]
+    enum = prop.get("enum")
+    return enum[0] if isinstance(enum, list) and len(enum) == 1 else None
+
+
+def _union_branches(error):
+    """Narrow a failed oneOf/anyOf of object shapes to the branches the instance names through its discriminators.
+    Returns (branch indices or None when nothing narrows, finding when a required discriminator names no branch)."""
+    branches = error.schema.get(error.validator, [])
+    indices, narrowed = set(range(len(branches))), False
+    for key in _UNION_DISCRIMINATORS:
+        values = {i: _branch_constant(branches[i], key) for i in indices}
+        if all(value is None for value in values.values()):
+            continue
+        named = {i for i, value in values.items() if value is not None and value == error.instance.get(key)}
+        if named:
+            indices, narrowed = named, True
+        elif all(value is not None for value in values.values()):
+            supported = list(dict.fromkeys(str(value) for value in values.values()))
+            return None, {"path": "/" + "/".join(str(p) for p in [*error.absolute_path, key]),
+                          "message": "Use the required '" + key + "' discriminator. Supported "
+                          + ("operations" if key == "op" else "values") + ": " + ", ".join(supported)}
+    return (indices if narrowed else None), None
+
+
 def argument_errors(validator, arguments):
     """Return useful bounded diagnostics for the requested operation, not every union branch."""
     from itertools import islice
@@ -589,17 +623,12 @@ def argument_errors(validator, arguments):
     grouped = {}
     for error in islice(validator.iter_errors(arguments), 12):
         relevant = [error]
-        if error.validator == "oneOf" and isinstance(error.instance, dict) and error.context:
-            op = error.instance.get("op")
-            branches = error.schema.get("oneOf", [])
-            operation_names = [branch.get("properties", {}).get("op", {}).get("const") for branch in branches]
-            if operation_names and all(operation_names) and op not in operation_names:
-                findings.append({"path": "/" + "/".join(str(p) for p in error.absolute_path) + "/op",
-                    "message": "Use the required 'op' discriminator. Supported operations: " + ", ".join(operation_names)})
+        if error.validator in ("oneOf", "anyOf") and isinstance(error.instance, dict) and error.context:
+            indices, finding = _union_branches(error)
+            if finding:
+                findings.append(finding)
                 continue
-            indices = {i for i, branch in enumerate(branches)
-                       if branch.get("properties", {}).get("op", {}).get("const") == op}
-            matches = [e for e in error.context if e.schema_path and e.schema_path[0] in indices]
+            matches = [e for e in error.context if e.schema_path and e.schema_path[0] in (indices or ())]
             if matches:
                 relevant = matches
         for item in relevant:

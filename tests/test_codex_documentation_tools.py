@@ -869,3 +869,34 @@ def test_document_page_table_structure_option_is_additive_and_read_only():
     assert spec.get("read_only", True) is True  # read tools carry no flag: the default is read-only
     assert spec["input_schema"]["properties"]["tableStructureOnly"] == {"type": "boolean"}
     assert "tableStructureOnly" not in spec["input_schema"].get("required", [])
+
+
+def test_edit_schema_findings_name_the_wrong_field_of_the_requested_operation():
+    # Live P5b run (2026-11-14): Sage's apply_document_edits calls failed ten times with only "... is not valid under
+    # any of the given schemas", because the findings narrowed op-keyed unions only. Document edits are keyed by
+    # "operation" (and modify_table by "action"); the findings must come from the requested branch.
+    from ai_inspector.codex_runtime.documentation_tools import _document_text_tool_specs
+    from ai_inspector.codex_runtime.facility_tools import argument_errors
+    schema = next(s for s in _document_text_tool_specs() if s["name"] == "apply_document_edits")["input_schema"]
+    validator = Draft202012Validator(schema)
+    base = {"documentId": "illustrated_parts_manual:MMLE-50D", "expectedRevision": 3, "requestId": "req-1"}
+    common = {"targetId": "document-object-1", "expectedContentHash": "a" * 64}
+
+    def findings(operation):
+        return argument_errors(validator, {**base, "operations": [{**common, **operation}]})
+
+    missing = findings({"operation": "replace_range", "start": 0, "end": 6, "text": "Nested"})
+    assert missing == [{"path": "/operations/0", "message": "Required properties missing: expectedText"}]
+    extra = findings({"operation": "replace_range", "start": 0, "end": 6, "expectedText": "Nested", "text": "N",
+                      "nodeId": "rt-1"})
+    assert len(extra) == 1 and "'nodeId' was unexpected" in extra[0]["message"]
+    rich = findings({"operation": "replace_rich_text", "richText": {"format": "prosemirror", "schemaVersion": 3, "doc": {}}})
+    assert rich == [{"path": "/operations/0/richText/format", "message": "'prosemirror' is not one of ['tiptap']"}]
+    unknown = findings({"operation": "edit_list_item", "text": "x"})
+    assert unknown[0]["path"] == "/operations/0/operation"
+    assert "Use the required 'operation' discriminator" in unknown[0]["message"] and "replace_range" in unknown[0]["message"]
+    action = findings({"operation": "modify_table", "tableId": "rt-t", "action": "insert_row", "rowId": "rt-r"})
+    assert action == [{"path": "/operations/0", "message": "Required properties missing: position"}]
+    bad_action = findings({"operation": "modify_table", "tableId": "rt-t", "action": "add_row"})
+    assert bad_action[0]["path"] == "/operations/0/action" and "insert_row" in bad_action[0]["message"]
+    assert not findings({"operation": "replace_range", "start": 0, "end": 6, "expectedText": "Nested", "text": "N"})

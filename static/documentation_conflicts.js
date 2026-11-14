@@ -376,6 +376,7 @@
     // A named undo can arrive through Sage rather than a workspace button.
     // Observe only an actively reviewed workspace (pane open), and never interrupt inline editing.
     // Each poll recompiles the document on the server, so a closed pane never polls.
+    let caughtUp = null; // server scene revision the page was last reloaded for: never twice for one revision
     root.setInterval?.(async () => {
         if (!watched || polling || pending || !data || !pane?.isConnected || pane.hidden || doc.hidden
             || doc.querySelector('#documentationWorkspace.busy')
@@ -385,7 +386,14 @@
         try {
             const latest = await request(endpoint(c) + '/conflicts?limit=1');
             if (!current(c) || data !== previous || pending) return;
-            if (latest.revision !== previous.revision || latest.sceneEditRevision !== previous.sceneEditRevision) {
+            // The review's own copy can be newer than the page: a second change that lands while the page
+            // reloads for the first is already in the review loaded right after. So the server is compared
+            // with what the page shows as well.
+            const shown = context()?.payload?.scene?.editRevision;
+            const behind = Number.isInteger(shown) && Number.isInteger(latest.sceneEditRevision)
+                && latest.sceneEditRevision !== shown && caughtUp !== latest.sceneEditRevision;
+            if (behind || latest.revision !== previous.revision || latest.sceneEditRevision !== previous.sceneEditRevision) {
+                caughtUp = latest.sceneEditRevision;
                 await host.reload();
                 await load();
             }

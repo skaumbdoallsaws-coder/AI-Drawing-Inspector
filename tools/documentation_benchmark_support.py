@@ -14,9 +14,9 @@ NUMBER = "BENCH"
 KINDS = {"parts": "illustrated_parts_manual", "operations": "operations_and_maintenance_manual"}
 
 
-def profile(count):
+def profile(count, assembly_number=NUMBER):
     parts = [f"part-{i:05d}" for i in range(count)]
-    return {"identity": {"assemblyNumber": NUMBER, "description": "Benchmark fixture", "revision": "A"},
+    return {"identity": {"assemblyNumber": assembly_number, "description": "Benchmark fixture", "revision": "A"},
         "statistics": {"totalComponents": count, "uniquePartCount": count, "totalMates": 0},
         "components": [{"name": name + "-1", "type": "Part", "level": 1,
             "activeConfiguration": "Default", "partDataKey": name + ".sldprt",
@@ -62,7 +62,7 @@ def fixtures():
          "PARTS_MANUAL_DEFAULT_END_CONDITION": PARTS_MANUAL_DEFAULT_END_CONDITION})
 
 
-def capture(root, document, png, helpers):
+def capture(root, document, png, helpers, assembly_number=NUMBER):
     if document["documentType"] == KINDS["parts"]:
         from ai_inspector.parts_manual.artifacts import store_render_artifact, attach_render_artifacts
         for page in document["pages"]:
@@ -89,25 +89,25 @@ def capture(root, document, png, helpers):
                         for child in v.values(): place(child)
                 place(value)
                 balloons.append(value)
-            store_render_artifact(root, NUMBER, document, page["pageId"], png, balloons=balloons)
-        return attach_render_artifacts(root, NUMBER, document)
+            store_render_artifact(root, assembly_number, document, page["pageId"], png, balloons=balloons)
+        return attach_render_artifacts(root, assembly_number, document)
     from ai_inspector.operations_manual.artifacts import store_draft_render_artifact, attach_draft_render_artifacts
     for page in document["pages"]:
         if page.get("renderRequest"):
-            store_draft_render_artifact(root, NUMBER, document, page["pageId"], png,
+            store_draft_render_artifact(root, assembly_number, document, page["pageId"], png,
                 source_revision=document["sourceRevision"], manual_plan_revision=document["manualPlanRevision"])
-    return attach_draft_render_artifacts(root, NUMBER, document)
+    return attach_draft_render_artifacts(root, assembly_number, document)
 
 
-def attached(root, document):
+def attached(root, document, assembly_number=NUMBER):
     if document["documentType"] == KINDS["parts"]:
         from ai_inspector.parts_manual.artifacts import attach_render_artifacts
-        return attach_render_artifacts(root, NUMBER, document)
+        return attach_render_artifacts(root, assembly_number, document)
     from ai_inspector.operations_manual.artifacts import attach_draft_render_artifacts
-    return attach_draft_render_artifacts(root, NUMBER, document)
+    return attach_draft_render_artifacts(root, assembly_number, document)
 
 
-def prepare(root, kind, requested):
+def prepare(root, kind, requested, assembly_number=NUMBER):
     from ai_inspector.parts_manual import build_occurrence_catalog, PartsManualRepository
     from ai_inspector.parts_manual.documentation import DocumentationSceneRepository
     from ai_inspector.documentation.rich_text import from_plain
@@ -119,15 +119,15 @@ def prepare(root, kind, requested):
     if kind == "operations":
         capacity = _contents_capacity(geometry(KINDS[kind], None))
         while n + 2 + (n+2+capacity-1)//capacity < requested: n += 1
-    data = profile(n*20 if kind == "parts" else 1)
-    catalog = build_occurrence_catalog(NUMBER, data)
+    data = profile(n*20 if kind == "parts" else 1, assembly_number)
+    catalog = build_occurrence_catalog(assembly_number, data)
     inputs = {"kind": kind, "profile": data, "catalog": catalog, "sections": n, "requestedPages": requested}
     if kind == "parts":
         plans = PartsManualRepository(root)
-        loaded = plans.read(NUMBER, catalog["sourceRevision"])
+        loaded = plans.read(assembly_number, catalog["sourceRevision"])
         rows = catalog["occurrences"]
         for i in range(n):
-            loaded = plans.create_section(NUMBER, catalog["sourceRevision"], base_revision=loaded["revision"],
+            loaded = plans.create_section(assembly_number, catalog["sourceRevision"], base_revision=loaded["revision"],
                 name=f"Mounting group {i+1}", occurrence_ids=[r["occurrenceId"] for r in rows[i*20:(i+1)*20]], catalog=rows)
         inputs.update(plan=loaded["plan"], planRevision=loaded["revision"])
     else:
@@ -136,7 +136,7 @@ def prepare(root, kind, requested):
         # about this manual). Generated statements, no sources: the benchmark publishes nothing.
         claims = [{"claimId": claim_id, "statement": statement, "sourceIds": [], "status": "benchmark_fixture"}
                   for claim_id, statement in (
-                      ("CLM-IDENTITY-001", "Benchmark fixture assembly BENCH, revision A."),
+                      ("CLM-IDENTITY-001", f"Benchmark fixture assembly {assembly_number}, revision A."),
                       ("CLM-USE-001", "Generated publication for timing the documentation editor."),
                       ("CLM-CAD-001", "Generated CAD occurrence list of the benchmark fixture."))]
         for filename, value in {"source-register.json": {"sources": []}, "evidence-register.json": {"claims": claims},
@@ -155,11 +155,11 @@ def prepare(root, kind, requested):
     baseline = compile_document(root, inputs)
     inputs["planRevision"] = baseline["manualPlanRevision"]
     repo = DocumentationSceneRepository(root, KINDS[kind])
-    binding = (NUMBER, baseline["sourceRevision"], baseline["manualPlanRevision"])
+    binding = (assembly_number, baseline["sourceRevision"], baseline["manualPlanRevision"])
     loaded = repo.read(*binding, identity_document=baseline)
     helpers = fixtures(); png = helpers["_png"](2400, 1800)
     key = hashlib.sha256(png).hexdigest()
-    image_path = root / NUMBER.lower() / "documentation-assets" / (key + ".png")
+    image_path = root / assembly_number.lower() / "documentation-assets" / (key + ".png")
     image_path.parent.mkdir(parents=True, exist_ok=True); image_path.write_bytes(png)
     for page in baseline["pages"]:
         if page["pageNumber"] % 10: continue
@@ -178,7 +178,7 @@ def prepare(root, kind, requested):
                 "source": "user", "frame": {"x": .06 + i*.23, "y": .65, "width": .21, "height": .24},
                 "content": "", "styleOverrides": {"fontSize": 9}}
             if object_type == "image": value.update(asset={"assetId": key, "filename": "cad.png", "mimeType": "image/png",
-                "url": f"/api/parts-manual/{NUMBER}/documentation-assets/{key}"}, contentMode="contain")
+                "url": f"/api/parts-manual/{assembly_number}/documentation-assets/{key}"}, contentMode="contain")
             if object_type == "shape": value.update(shapeType="rectangle", styleOverrides={"fill": "#c7e1f2"})
             loaded = repo.apply_command(*binding, base_revision=loaded["revision"], identity_document=baseline,
                 page_targets={page["pageId"]: {}}, command={"operation": "add_object", "pageId": page["pageId"],
@@ -194,7 +194,7 @@ def prepare(root, kind, requested):
         command={"operation": "update_text", "pageId": baseline["pages"][0]["pageId"],
                  "targetType": "page_element", "targetId": "header_title", "text": "Benchmark publication"})
     document = compile_document(root, inputs, loaded["scene"], loaded["revision"])
-    capture(root, document, png, helpers)
+    capture(root, document, png, helpers, assembly_number)
     (root / "input.json").write_text(json.dumps(inputs), encoding="utf-8")
     (root / "base.json").write_text(json.dumps(baseline), encoding="utf-8")
     return inputs

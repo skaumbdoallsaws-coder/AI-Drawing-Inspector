@@ -92,7 +92,7 @@ def known_http_failure(failure):
 def classify_failures(report):
     """Keep all raw evidence, separating only the supervisor's known fixture gaps."""
     known_http, unexpected_http, known = [], [], []
-    expected = list(report.get("expectedHttpFailures", [])) if report.get("phase") in {"P2b", "P3b", "P4b"} else []
+    expected = list(report.get("expectedHttpFailures", [])) if report.get("phase") in {"P2b", "P3b", "P4b", "P5a"} else []
     for item in report["httpFailures"]:
         reason = known_http_failure(item)
         proof = next((row for row in expected if report.get("phase") == "P2b" and row.get("error") == "unsupported_export_glyph"
@@ -104,7 +104,7 @@ def classify_failures(report):
                           and row.get("checked") is True and row.get("status") == item.get("status") == 422
                           and row.get("method") == item.get("method") == "POST" and row.get("url") == item.get("url")
                           and urlsplit(item["url"]).path == "/api/documentation/operations_and_maintenance_manual/MMLE-50D/tables"), None)
-        if proof is None and report.get("phase") == "P4b":
+        if proof is None and report.get("phase") in {"P4b", "P5a"}:
             proof = next((row for row in expected if row.get("error") == "layout_overflow"
                 and row.get("checked") is True and row.get("status") == item.get("status") == 409
                 and row.get("method") == item.get("method") == "POST" and row.get("url") == item.get("url")
@@ -132,7 +132,7 @@ def classify_failures(report):
         else:
             unexpected_console.append(item)
     unexpected_network = []
-    handoffs = list(report.get("exportDownloadHandoffs", [])) if report.get("phase") in {"P4a", "P4b"} else []
+    handoffs = list(report.get("exportDownloadHandoffs", [])) if report.get("phase") in {"P4a", "P4b", "P5a"} else []
     for item in report["networkFailures"]:
         route = urlsplit(item.get("url", "")).path
         if known_network_failure(item):
@@ -227,11 +227,13 @@ def write_json(path, value):
 class IsolatedDocumentationServer:
     def __init__(self, output, phase=None):
         self.output = output
-        self.rich_text = phase in {"P2a", "P2b", "P3a", "P3b", "P4a", "P4b"}
+        self.phase = phase
+        self.rich_text = phase in {"P2a", "P2b", "P3a", "P3b", "P4a", "P4b", "P5a"}
         self.temporary = self.process = self.log = None
         self.original = {}
 
     def start(self):
+        self.started = time.monotonic()
         runtime = ROOT / ".runtime"
         runtime.mkdir(exist_ok=True)
         self.temporary = tempfile.TemporaryDirectory(prefix="de-", dir=runtime)
@@ -263,6 +265,10 @@ class IsolatedDocumentationServer:
         names.update(p.relative_to(ROOT).as_posix()
                      for p in (ROOT / "static/assets/documentation-ribbon-icons").glob("*.svg"))
         names.update(inputs["inputFiles"])
+        if self.phase == "P5a":
+            names.update({"tools/__init__.py", "tools/documentation_benchmark_support.py",
+                "tools/documentation_baseline.py", "tests/__init__.py", "tests/test_parts_manual.py",
+                "tests/documentation_editor_scale_support.py"})
         # Work instructions accept the function-ready MMLE package only in semantic-knowledge prototype mode, which
         # this ignored engineering contract defines (no credentials; its review receipt is in docs/semantic-knowledge).
         prototype_contract = "static/contracts/semantic-knowledge-prototype-v1.json"
@@ -317,12 +323,18 @@ class IsolatedDocumentationServer:
                            INSPECTORPRO_FACILITY_LAYOUT_ROOT=str(self.scratch / "f"))
         if self.rich_text:
             environment["INSPECTORPRO_DOCUMENTATION_RICH_TEXT"] = "1"
+        if self.phase == "P5a":
+            environment["INSPECTORPRO_DOC_SMOKE_PHASE"] = "P5a"
+            # Supervisor: options of the scale phase (fixture sizes, generated fixtures, a server profile).
+            for name in ("DOC_SMOKE_P5A_PAGES", "DOC_SMOKE_P5A_GENERATED", "DOC_SMOKE_PROFILE"):
+                if os.environ.get(name):
+                    environment["INSPECTORPRO_" + name] = os.environ[name]
         self.log = (self.output / "server.log").open("ab")
         self.process = subprocess.Popen([sys.executable, str(self.code / "smoke_server.py"), str(self.scratch), str(port)],
             cwd=self.code, env=environment, stdout=self.log, stderr=subprocess.STDOUT,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         opener = build_opener(ProxyHandler({}))
-        deadline = time.monotonic() + 120
+        deadline = time.monotonic() + (T(600000) / 1000 if self.phase == "P5a" else 120)
         while time.monotonic() < deadline:
             if self.process.poll() is not None:
                 raise RuntimeError("Isolated server exited; see server.log")
@@ -4373,12 +4385,34 @@ def run_p4b_words(page, request, server, output, report, record, begin_edit, too
     write_json(output/"p4b-words.json",{"pages":evidence,"exceptions":table})
     checked("budget",time.monotonic()-started<=360*max(1,SLOW),{"seconds":time.monotonic()-started,"slow":SLOW})
 
+def run_p5a(page, browser, request, server, output, report, record, handlers):
+    from tests.documentation_editor_scale_smoke import run
+    run(page, browser, request, server, output, report, record, handlers, T=T, slow=SLOW)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--phase", required=True, choices=PHASES)
     args = parser.parse_args()
     output = ROOT / ".runtime" / "de"
     output.mkdir(parents=True, exist_ok=True)
+    if args.phase == "all":
+        # Separate snapshots: earlier phases never build or load the P5a scale fixtures.
+        results = []
+        for phase in (value for value in PHASES if value != "all"):
+            with (output / ("all-" + phase + ".log")).open("wb") as log:
+                result = subprocess.run([sys.executable, str(Path(__file__).resolve()), "--phase", phase],
+                    cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            source = output / "report.json"
+            value = json.loads(source.read_text("utf-8")) if source.exists() else {"fatalError": "No report"}
+            if value.get("phase") != phase:
+                value = {"phase": phase, "passed": False, "fatalError": "Child did not write this phase report"}
+            write_json(output / ("report-" + phase + ".json"), value)
+            results.append({"phase": phase, "exitCode": result.returncode,
+                "passed": result.returncode == 0 and value.get("passed", False)})
+        write_json(output / "all-report.json", {"phases": results, "passed": all(r["passed"] for r in results)})
+        return 0 if all(r["passed"] for r in results) else 1
     report = {"phase": args.phase, "assembly": ASSEMBLY, "checks": {}, "editAttempts": [], "browserErrors": [],
               "consoleErrors": [], "networkFailures": [], "httpFailures": [], "outboundRequests": [], "passed": False,
               "knownFixtureLimitations": KNOWN_FIXTURE_LIMITATIONS, "failureScreenshots": [], "workspaceOpens": []}
@@ -4451,8 +4485,8 @@ def main():
         raise RuntimeError("Inline edit did not start after three double presses")
 
     try:
-        if args.phase not in {"P1a", "P1b", "P1c", "P2a", "P2b", "P3a", "P3b", "P4a", "P4b"}:
-            raise RuntimeError("Only P1a through P4b gates are implemented.")
+        if args.phase not in {"P1a", "P1b", "P1c", "P2a", "P2b", "P3a", "P3b", "P4a", "P4b", "P5a"}:
+            raise RuntimeError("Only P1a through P5a gates are implemented.")
         from playwright.sync_api import sync_playwright
         server.start()
         report["isolation"] = server.isolation
@@ -4544,7 +4578,9 @@ def main():
                 raise RuntimeError(f"Tool HTTP {response.status}: {response.text()[:800]}")
             return response.json()
 
-        if args.phase == "P4b":
+        if args.phase == "P5a":
+            run_p5a(page, browser, request, server, output, report, record, page_handlers)
+        elif args.phase == "P4b":
             run_p4b(page, request, server, output, report, record, begin_edit, tool, fresh_page)
             run_p4b_words(page, request, server, output, report, record, begin_edit, tool, fresh_page)
         elif args.phase == "P4a":

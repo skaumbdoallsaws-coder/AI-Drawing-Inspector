@@ -347,6 +347,7 @@ function mount(element, options) {
     const toolbar = document.createElement('span');
     toolbar.className = 'documentation-rich-controls';
     toolbar.setAttribute('aria-label', 'Rich text formatting');
+    toolbar.setAttribute('role', 'toolbar');
     function button(host, label, callback, name) {
         const result = document.createElement('button');
         result.type = 'button'; result.textContent = label;
@@ -536,7 +537,7 @@ function mount(element, options) {
             // The POST body is fully consumed before a GET or any teardown/reload.
             const fresh = await options.read();
             if (disposed) return;
-            close(false); options.apply(fresh); options.onClose?.();
+            close(false); options.apply(fresh); options.onClose?.(); options.onSaved?.();
             return fresh;
         } catch (error) {
             if (disposed) return;
@@ -866,15 +867,24 @@ function mount(element, options) {
         commands.setTextSelection(caret == null ? { from: a, to: b } : mapping().map(caret));
         return true;
     })));
+    // Where the focus was when the Symbol or Table panel was opened: in the text (a toolbar button pressed
+    // with the pointer leaves the caret there) or on the panel's button (opened from the keyboard). Escape
+    // closes the panel and puts the focus back there, also after the panel itself held it (Table's fields).
+    let panelFromText = true;
+    const notePanelOrigin = () => { panelFromText = element.contains(document.activeElement); };
+    const leavePanel = toggle => { if (panelFromText) editor.commands.focus(); else toggle.focus(); };
     const symbols = document.createElement('span');
     symbols.className = 'documentation-symbol-picker'; symbols.hidden = true;
+    symbols.setAttribute('role', 'dialog'); symbols.setAttribute('aria-label', 'Engineering symbols');
     const symbolToggle = button(toolbar, 'Symbol', () => {
+        if (symbols.hidden && (!tablePanel || tablePanel.hidden)) notePanelOrigin();
         symbols.hidden = !symbols.hidden; symbolToggle.setAttribute('aria-expanded', String(!symbols.hidden));
         const rect = symbolToggle.getBoundingClientRect();
         symbols.style.top = Math.min(rect.bottom + 4, window.innerHeight - 370) + 'px';
         symbols.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 380)) + 'px';
     });
     symbolToggle.setAttribute('aria-expanded', 'false');
+    symbolToggle.setAttribute('aria-haspopup', 'dialog');
     for (const group of window.DocumentationSymbols || []) {
         const section = document.createElement('fieldset'), legend = document.createElement('legend');
         legend.textContent = group.group; section.appendChild(legend);
@@ -1006,6 +1016,7 @@ function mount(element, options) {
         tablePanel.setAttribute('role', 'dialog'); tablePanel.setAttribute('aria-label', 'Table menu');
         tableToggle = button(toolbar, 'Table', () => {
             if (tableBusy) return;
+            if (tablePanel.hidden && symbols.hidden) notePanelOrigin();
             tablePanel.hidden = !tablePanel.hidden; symbols.hidden = true;
             symbolToggle.setAttribute('aria-expanded', 'false');
             tableToggle.setAttribute('aria-expanded', String(!tablePanel.hidden));
@@ -1016,6 +1027,7 @@ function mount(element, options) {
             if (!tablePanel.hidden) rows.focus();
         });
         tableToggle.setAttribute('aria-expanded', 'false');
+        tableToggle.setAttribute('aria-haspopup', 'dialog');
         const title = document.createElement('strong'); title.textContent = 'Insert table'; tablePanel.appendChild(title);
         function input(label, type, min, max, value) {
             const wrapper = document.createElement('label'), control = document.createElement('input');
@@ -1123,9 +1135,9 @@ function mount(element, options) {
             if (event.key === 'Escape') {
                 event.preventDefault();
                 if (tablePanel && !tablePanel.hidden) {
-                    tablePanel.hidden = true; tableToggle.setAttribute('aria-expanded', 'false'); editor.commands.focus();
+                    tablePanel.hidden = true; tableToggle.setAttribute('aria-expanded', 'false'); leavePanel(tableToggle);
                 } else if (!symbols.hidden) {
-                    symbols.hidden = true; symbolToggle.setAttribute('aria-expanded', 'false'); editor.commands.focus();
+                    symbols.hidden = true; symbolToggle.setAttribute('aria-expanded', 'false'); leavePanel(symbolToggle);
                 } else if (!saving && !tableBusy) close();
             }
             event.stopPropagation();

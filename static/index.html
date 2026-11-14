@@ -11,14 +11,14 @@
     <link rel="stylesheet" href="/static/cad_viewport.css">
     <link rel="stylesheet" href="/static/packaging_ribbon_icons.css">
     <script src="/static/documentation_commands.js?v=20261109-p1b-3"></script>
-    <script src="/static/documentation_conflicts.js?v=20261110-p2a-1"></script>
+    <script src="/static/documentation_conflicts.js?v=20261113-p5a-2"></script>
     <script src="/static/documentation_objects_core.js?v=20261111-p4a-2"></script>
     <script src="/static/documentation_publication_core.js?v=20261112-p4b-3-r2"></script>
     <script src="/static/documentation_page_setup_core.js?v=20261112-p4b-2"></script>
     <script src="/static/documentation_rich_text_core.js?v=20261111-p3b-2"></script>
     <script src="/static/documentation_symbols.js?v=20261111-p3a-4"></script>
     <script src="/static/documentation_search.js?v=20261111-p3a-4"></script>
-    <script type="module" src="/static/documentation_rich_text.js?v=20261111-p3b-2"></script>
+    <script type="module" src="/static/documentation_rich_text.js?v=20261113-p5a-2"></script>
     <link rel="stylesheet" href="/static/documentation_rich_text.css?v=20261111-p3b-2">
     <script src="/static/cad_viewport.js"></script>
     <script>
@@ -39780,6 +39780,7 @@
                     await _documentationBeginRichEdit(target, next, { caret, message });
                 },
                 apply: snapshot => { if (bound.apiBase === _documentationApiBase()) _documentationUpdatePayload(snapshot); },
+                onSaved: () => { if (bound.apiBase === _documentationApiBase()) _documentationSetStatus('Text saved.', 'success'); },
                 onClose: () => {
                     if (bound.apiBase !== _documentationApiBase()) return;
                     _documentationRenderPublicationPage(_documentationActivePage());
@@ -40223,9 +40224,22 @@
             const workspace = document.getElementById('documentationWorkspace');
             if (!workspace) return;
             workspace.querySelector('.documentation-theme-dialog')?.remove();
+            const opener = document.activeElement?.closest('[data-ribbon-dropdown]')?._documentationOpener || document.activeElement;
             const theme = JSON.parse(JSON.stringify(_documentationTheme()));
             const dialog = document.createElement('div');
             dialog.className = 'documentation-theme-dialog';
+            dialog.setAttribute('role', 'dialog');
+            dialog.setAttribute('aria-modal', 'true');
+            dialog.setAttribute('aria-label', 'Brand and Document Theme');
+            const dismiss = () => { dialog.remove(); (document.getElementById(opener?.id) || opener)?.focus(); };
+            dialog.addEventListener('keydown', event => {
+                if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); dismiss(); }
+                if (event.key === 'Tab') {
+                    const inputs = Array.from(dialog.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled)'));
+                    if (event.shiftKey && document.activeElement === inputs[0]) { event.preventDefault(); inputs.at(-1)?.focus(); }
+                    else if (!event.shiftKey && document.activeElement === inputs.at(-1)) { event.preventDefault(); inputs[0]?.focus(); }
+                }
+            });
             const card = document.createElement('div');
             card.className = 'documentation-theme-card';
             const header = document.createElement('div');
@@ -40237,7 +40251,8 @@
             close.className = 'documentation-theme-close';
             close.textContent = '\u00d7';
             close.title = 'Close';
-            close.addEventListener('click', () => dialog.remove());
+            close.setAttribute('aria-label', 'Close theme dialog');
+            close.addEventListener('click', () => dismiss());
             header.appendChild(heading);
             header.appendChild(close);
             card.appendChild(header);
@@ -40387,7 +40402,7 @@
                     : await _documentationDispatchCommand('set_theme', null, {
                         theme: draftTheme(),
                     });
-                if (ok) dialog.remove();
+                if (ok) dismiss();
             });
             save.addEventListener('click', async () => {
                 const nextTheme = draftTheme();
@@ -40401,7 +40416,7 @@
                         `${result.template.name} template v${result.template.version} saved.`,
                         'success'
                     );
-                    dialog.remove();
+                    dismiss();
                 } catch (error) {
                     _documentationSetStatus(error.message, 'error');
                 }
@@ -40411,9 +40426,10 @@
             card.appendChild(actions);
             dialog.appendChild(card);
             dialog.addEventListener('pointerdown', event => {
-                if (event.target === dialog) dialog.remove();
+                if (event.target === dialog) dismiss();
             });
             workspace.appendChild(dialog);
+            close.focus();
             try {
                 const response = await _partsManualApi('/api/documentation/templates');
                 (response.templates || []).forEach(template => {
@@ -45265,7 +45281,7 @@
                     <div class="documentation-status-left">
                         <span class="documentation-status-page">Page</span>
                         <span class="documentation-status-selection">No selection</span>
-                        <span class="documentation-status-message">Ready</span>
+                        <span class="documentation-status-message" role="status" aria-live="polite" aria-atomic="true">Ready</span>
                     </div>
                     <div class="documentation-status-center">
                         <span class="documentation-status-pill documentation-status-view">HLR</span>
@@ -45381,7 +45397,8 @@
                             _documentationObjectOrder(event.code === 'BracketLeft' ? (event.shiftKey?'back':'backward') : (event.shiftKey?'front':'forward'));return;
                         }
                         if (event.key === 'Delete' || event.key === 'Backspace') {event.preventDefault();_documentationRemoveSelectedObject();return;}
-                        if (event.key === 'Enter' && _documentationObjectSelections().length === 1 && !documentationObjectInFlight) {
+                        if (event.key === 'Enter' && !target?.closest('button, [role="menu"], [role="listbox"], [role="combobox"]')
+                            && _documentationObjectSelections().length === 1 && !documentationObjectInFlight) {
                             const selected=_documentationObjectSelections()[0],value=_documentationActivePage().documentationObjects[selected.targetId];
                             if(value.type==='text') {event.preventDefault();_documentationBeginInlineTextEdit(null,selected,_documentationObjectElement(selected.targetId));return;}
                         }
@@ -46713,7 +46730,10 @@
             text.className = 'documentation-command-label';
             text.textContent = label;
             button.appendChild(text);
-            if (handler) button.addEventListener('click', handler);
+            if (handler) {
+                button._documentationInvoke = event => handler.call(button, event);
+                button.addEventListener('click', button._documentationInvoke);
+            }
             button.disabled = Boolean(options.disabled);
             return button;
         }
@@ -46745,7 +46765,8 @@
             button.disabled = Boolean(definition.disabled);
             if (definition.active) button.setAttribute('aria-pressed', 'true');
             if (definition.handler) {
-                button.addEventListener('click', event => {
+                button._documentationInvoke = async event => {
+                    const opener = event.detail === 0 ? button.closest('[data-ribbon-dropdown]')?._documentationOpener : null;
                     event.stopPropagation();
                     document.querySelectorAll('[data-ribbon-dropdown]').forEach(menu => {
                         menu.style.display = 'none';
@@ -46753,10 +46774,38 @@
                     document.querySelectorAll('.documentation-ribbon-menu-trigger').forEach(trigger => {
                         trigger.setAttribute('aria-expanded', 'false');
                     });
-                    definition.handler();
-                });
+                    await definition.handler();
+                    if (opener && !window.DocumentationRichText?.active && !document.querySelector('.documentation-theme-dialog')) {
+                        (document.getElementById(opener.id) || opener).focus();
+                    }
+                };
+                button.addEventListener('click', button._documentationInvoke);
             }
             return button;
+        }
+
+        function _documentationMenuKeyboard(trigger, menu) {
+            menu.setAttribute('aria-label', trigger.getAttribute('aria-label') || trigger.textContent.trim());
+            menu._documentationOpener = trigger;
+            const items = () => Array.from(menu.querySelectorAll('button:not(:disabled)'))
+                .filter(item => item.getClientRects().length);
+            trigger.addEventListener('click', event => {
+                if (event.detail === 0 && menu.style.display === 'block') items()[0]?.focus();
+            });
+            const keydown = event => {
+                if (menu.style.display !== 'block') return;
+                if (event.key === 'Escape') {
+                    event.preventDefault(); event.stopPropagation();
+                    menu.style.display = 'none'; trigger.setAttribute('aria-expanded', 'false'); trigger.focus();
+                } else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+                    event.preventDefault(); event.stopPropagation();
+                    const choices = items(), index = choices.indexOf(document.activeElement);
+                    const next = event.key === 'Home' ? 0 : event.key === 'End' ? choices.length - 1
+                        : (index + (event.key === 'ArrowUp' ? -1 : 1) + choices.length) % choices.length;
+                    choices[next]?.focus();
+                }
+            };
+            menu.addEventListener('keydown', keydown); trigger.addEventListener('keydown', keydown);
         }
 
         function _documentationRibbonMenu(icon, label, title, items, options = {}) {
@@ -46797,6 +46846,7 @@
                     trigger.setAttribute('aria-expanded', 'true');
                 }
             });
+            _documentationMenuKeyboard(trigger, menu);
             wrap.appendChild(trigger);
             wrap.appendChild(menu);
             return wrap;
@@ -46844,7 +46894,9 @@
             button.title = source.title || sourceLabel;
             button.setAttribute('aria-label', button.title);
             button.disabled = Boolean(source.disabled);
-            button.addEventListener('click', event => {
+            button.addEventListener('click', async event => {
+                if (source.disabled) return;
+                const opener = event.detail === 0 ? button.closest('[data-ribbon-dropdown]')?._documentationOpener : null;
                 event.stopPropagation();
                 document.querySelectorAll('[data-ribbon-dropdown]').forEach(value => {
                     value.style.display = 'none';
@@ -46852,7 +46904,11 @@
                 document.querySelectorAll('.documentation-ribbon-menu-trigger').forEach(value => {
                     value.setAttribute('aria-expanded', 'false');
                 });
-                source.click();
+                if (source._documentationInvoke) await source._documentationInvoke(event);
+                else source.click();
+                if (opener && !window.DocumentationRichText?.active && !document.querySelector('.documentation-theme-dialog')) {
+                    (document.getElementById(opener.id) || opener).focus();
+                }
             });
             return button;
         }
@@ -46917,6 +46973,7 @@
                     trigger.setAttribute('aria-expanded', 'true');
                 }
             });
+            _documentationMenuKeyboard(trigger, menu);
             wrap.appendChild(trigger);
             wrap.appendChild(menu);
             return wrap;
@@ -47263,7 +47320,7 @@
             const core = DocumentationPageSetupCore;
             const choice = (id, label, value, selected) => ({id: 'documentationPageSetup-' + id,
                 label, active: selected, disabled: _documentationPageSetupBlocked(),  // the paper in force reads as chosen, not as unavailable
-                handler: () => { if (!selected) _documentationDispatchCommand('set_page_setup', null, {pageSetup: value}); }});
+                handler: () => { if (!selected) return _documentationDispatchCommand('set_page_setup', null, {pageSetup: value}); }});
             return [{type: 'heading', label: 'Paper'},
                 choice('design', core.designLabel(options.design), null, options.current === null),
                 ...options.presets.map(p => choice(p.id, core.label(p),

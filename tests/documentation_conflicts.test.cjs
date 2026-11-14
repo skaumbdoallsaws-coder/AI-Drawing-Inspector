@@ -188,6 +188,35 @@ test('named undo observation reloads the stored count and reopened conflict',asy
     assert.equal(h.document.getElementById('documentationConflictCount').textContent,'1 conflict');
     assert.ok(h.button('Keep mine'));
 });
+test('a second change that lands while the page reloads for the first still reaches the page',async()=>{
+    // Sage applies a change and undoes it at once. The page reloads for the first; the review loaded right
+    // after that reload is already at the second, so the review's own copy shows no further change.
+    let server=3;
+    const h=harness(async()=>response({revision:'r'+server,sceneEditRevision:server}),{scene:{editRevision:3}});
+    let reloads=0,next=null;
+    h.host.reload=async()=>{reloads++;h.context.payload.revision+='b';h.context.payload.scene.editRevision=server;
+        if(next!==null){server=next;next=null;}h.api.sync(h.host);};
+    h.api.show();await flush();
+    server=4;next=5;
+    await h.tick();await flush();
+    assert.equal(reloads,1,'the first change reloads the page');
+    assert.equal(h.context.payload.scene.editRevision,4,'the page shows the first change; the server is at the second');
+    await h.tick();await flush();
+    assert.equal(reloads,2,'the next check sees that the page is behind the server');
+    assert.equal(h.context.payload.scene.editRevision,5);
+    await h.tick();await flush();
+    assert.equal(reloads,2,'a page that shows the server revision is left alone');
+});
+test('a page that cannot catch up is reloaded once per server revision, never in a loop',async()=>{
+    const h=harness(async()=>response({revision:'r9',sceneEditRevision:9}),{scene:{editRevision:8}});
+    let reloads=0;
+    h.host.reload=async()=>{reloads++;h.context.payload.revision+='b';h.api.sync(h.host);};
+    h.api.show();await flush();
+    await h.tick();await flush();
+    assert.equal(reloads,1);
+    await h.tick();await flush();await h.tick();await flush();
+    assert.equal(reloads,1,'no second reload for the same server revision');
+});
 test('parts refresh previews both bindings before it posts their exact revisions',async()=>{
     const h=harness(async(url,body)=>body ? {success:true,refreshReceipt:{counts:{preserved:1,conflicts:1}}}
         : url.endsWith('/refresh') ? {expectedRevision:'scene',expectedPlanRevision:'plan',fromBinding:{sourceRevision:'old'},

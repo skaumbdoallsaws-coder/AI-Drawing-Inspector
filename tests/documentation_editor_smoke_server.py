@@ -125,6 +125,9 @@ def main():
     assert Path(server.LIBRARY_DIR).resolve() == code / "400S_Sorted_Library"
 
     install_source_fixture(server, scratch)
+    if os.environ.get("INSPECTORPRO_DOC_SMOKE_PHASE") == "P5a":
+        from tests.documentation_editor_scale_support import install_scale_fixtures
+        install_scale_fixtures(server, scratch)
 
     from fastapi import Request
     from fastapi.responses import JSONResponse

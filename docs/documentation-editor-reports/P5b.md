@@ -449,3 +449,122 @@ Note for the user's own testing: the browser smokes copy tracked files into thei
 isolated server, so until the user's new files are committed, a browser smoke run
 from the real checkout will miss them. The rehearsal put them in rg's index for its
 smokes only.
+
+## P5b-3 port and live desktop check (supervisor)
+
+### Port
+
+On 2026-11-14, with the user's go-ahead, port_doc_editor.py go moved the real
+checkout's branch ui-bridge-telemetry-unified-2026-05-18 from 2ea742f to 2fa95be
+by fast-forward: take 142, take with line endings 9, take earlier copy 1, clean
+merge 6, resolved 2, stop 0. The user's 18 modified files are still modified
+(same set) and their 144 untracked files are kept. Backup branch
+before-doc-editor-20261114 (2ea742f) and backup folder
+Documents\InspectorPro-Backups\2026-11-14-before-doc-editor-port (files,
+manifest.json with the undo steps, uncommitted-tracked.patch). Not pushed.
+
+A second port at 16:53 moved the branch from 2fa95be to e10e7c6 (the fix below):
+two files, neither touched by the user, same modified set afterwards. Backup
+branch before-diagnostics-fix-20261114 and backup folder
+Documents\InspectorPro-Backups\2026-11-14-before-diagnostics-fix. Not pushed.
+This section reaches the real checkout the same way, as a third small write.
+
+### Live check setup
+
+The user's actual desktop app (Electron 44.3.0, application mode, the recording
+entry of the user's own shortcut) ran from the real checkout with
+INSPECTORPRO_DOCUMENTATION_RICH_TEXT=1 and its seven document and appearance store
+roots pointed at copies in doc-editor-night\live: the MMLE-50D parts, operations
+and work-instruction stores, the assembly and part appearance stores, and empty
+specification and inspection roots. The repo .env was neither read nor changed;
+on normal launches the flag stays off.
+
+The user's real stores (1508 files) were fingerprinted (size, mtime, SHA-256)
+before the copies were made and again at the end: 0 files differ.
+
+The driver sends real mouse and keyboard input into the app window over its
+recording DevTools port. After every step it compares the stored scene on disk
+with the page's scene. Screenshots and JSON are in doc-editor-night\probe\live.
+
+### Witnessed sequence
+
+| Step | Result |
+| --- | --- |
+| Old document copy open | The copied parts manual (18 pages, a pre-P1 scene without editRevision) opened with rich text on. |
+| Edit cited text | Operations manual, Specifications, Rated capacity 1,100 lb to 1,000 lb by double press and typing. Stored evidenceStatus edited_unverified, claim CLM-SPEC-001 and source SRC-OEM-MMLE-WEB-2026 kept, page marker shown, page = store. |
+| Rich text, list, table | New text box on page-assembly-overview: H2 heading from the Style list, bullet list with a nested item, bold, an https link and a 2 x 2 table. Stored: heading, 2 bullet lists, bold, link, table, both cells; page = store. |
+| Change scratch source | NOT RUN, see below. |
+| Resolve conflict | NOT RUN (follows the source change). |
+| Save, restart | Graceful close (WM_CLOSE). Unsaved work was reported only for the Workflows goal (the known rule) with the documentation row clean, and that dialog was answered "Close without saving". After the relaunch both scene files were byte-identical, both documents reopened equal to the store, and the rich box and the cited 1,000 lb with its marker were shown. |
+| Undo, redo | After the restart: ribbon Undo and Redo, then Ctrl+Z and Ctrl+Y on the rich box. Revisions 5 to 9, each persisted, page = store, content toggled exactly. |
+| Review export | Export PDF and Export DOCX: 200. Both files found in the scratch store by their receipt hashes. Text: Rated capacity 1,000 lb, "Edited - source does not verify this value". |
+| User confirms the cited edit | "Confirm as entered by me" and its dialog: evidenceStatus entered_by_user, activeClaimIds and activeSourceIds emptied (former claim and source kept for reference), page = store. |
+| Customer PDF and DOCX | POST /pdf?mode=customer through the application session, as in the smoke: 200. Both show 1,000 lb without the edit marker. |
+| Open output | All four files opened in the app's native document preview tabs (customer DOCX text preview captured), then closed with their tab buttons. |
+
+Before the cited edit, the copied operations manual opened as an empty document
+with "documentation scene is bound to an older source or manual plan": the user's
+scene (last saved 2026-08-22, 0 pages) was bound to an older manual plan. The
+base 2ea742f behaves the same. Generate Manual rebaselined it to 33 pages
+(refresh receipt: adopted 1208, preserved 0, kept 0, conflicts 0, orphans 0).
+
+### Live Sage run (the user's normal provider)
+
+| Turn | Result |
+| --- | --- |
+| 1, read (new chat) | 28 s. Heading, both list items and both cells reported correctly; store unchanged. |
+| User edit | A "(user)" paragraph added to the box (revision 9 to 10). The user then removed the box by mistake in the live window (remove_object, actor user, revision 11); the ribbon Undo restored it with the paragraph (revision 12). |
+| 2, edit (same chat, box removed meanwhile) | Sage reported the box missing and changed nothing. Correct. |
+| 3, edit (box restored) | 13 steps, 10 refused as malformed: every apply_document_edits refusal said only "... is not valid under any of the given schemas". Nothing changed (revision 12). Defect, fixed in e10e7c6. |
+| 4, edit on e10e7c6 (new chat, after a restart) | 6 steps in 42 s. Two refusals now named the wrong field; Sage corrected the request and one batch was stored (actor sage, its requestId). Exactly one text node changed ("Nested service item - checked by Sage"), structure and node IDs identical, the user's newer paragraph kept. Ribbon Undo restored the pre-image, Redo restored Sage's result; page = store. |
+
+Retry: live, Sage read again after the user's edits and corrected its request
+after refusals. A transport-failure retry with an identical request ID cannot be
+induced in the live app without a test route; the P1a host tests cover it.
+
+### Fix e10e7c6: Sage edit diagnostics
+
+argument_errors (ai_inspector/codex_runtime/facility_tools.py) narrowed only
+oneOf unions keyed by "op". apply_document_edits is an anyOf keyed by
+"operation" (and modify_table by "action" as well), so a refused operation got
+the whole-union message and Sage could not tell which field to fix. oneOf and
+anyOf are now narrowed by op, operation, then action (const or single-value
+enum). When a required discriminator matches no branch, the finding names the
+supported values. Facility "op" findings are unchanged.
+
+New test: test_edit_schema_findings_name_the_wrong_field_of_the_requested_operation
+in tests/test_codex_documentation_tools.py. It fails on the old helper. All
+35 tests/test_codex_*.py files, before and after: 650 and 651 passed. The same 19
+failures (packaging arrangement engine unavailable in this environment, spec
+sheet tools, one progress step) fail with identical IDs on both.
+
+### Findings (not fixed here)
+
+- Safety text consistency: after the cited capacity is edited and confirmed, the
+  generated safety warning on another page still reads "Do not exceed the
+  1,100 lb rated capacity", so the customer PDF and DOCX carry both values.
+  Other mentions of the same claim are neither updated nor flagged. Product
+  decision for the user.
+- An operations manual bound to an older plan opens empty with only a status
+  line; the way back is Generate Manual, which nothing on the page points to.
+  Same on the base.
+- A page click during Generate Manual's page reveal is overridden when the
+  reveal moves on to the last page.
+- Sage still sends invalid apply_document_edits arguments at first (2 refusals
+  in turn 4); it now corrects them.
+- Known: every close from Workflows > Documentation asks "Unsaved work" for the
+  Workflows goal.
+
+### NOT RUN (live)
+
+- Change scratch source, resolve conflict. MMLE-50D's source is the prepared
+  package in the real checkout's generated/training (PROCESS_MAP_TRAINING_ROOT,
+  no override). The operations manual's binding also covers the tracked
+  evidence register in docs/operations-manual. Neither can be pointed at a
+  copy, changing them would alter the user's real data, and application mode
+  has no source-fixture route (none may be added). A direct edit of the copied
+  manual-plan.json is not a source change in the product's sense: it leaves the
+  scene stale with no refresh path. Source refresh, conflict and resolution stay
+  covered by the browser smoke P1c on persistent stores. Witnessing them live
+  needs a store-root override for the training store, a new feature outside P5b.
+- Transport-failure retry with an identical request ID (above).

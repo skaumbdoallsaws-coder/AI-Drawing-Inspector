@@ -317,10 +317,14 @@ class ReadBindings:
         self.object_requests: dict[tuple[str, str], dict] = {}
         self.page_setups: dict[str, dict] = {}
         self.page_setup_requests: dict[tuple[str, str], dict] = {}
+        self.themes: dict[str, dict] = {}
+        self.theme_requests: dict[tuple[str, str], dict] = {}
 
     def record(self, document_type: str, read: dict) -> None:
         if "pageSetupBinding" in read:
             self.page_setups[document_type] = deepcopy(read["pageSetupBinding"])
+        if "themeBinding" in read:
+            self.themes[document_type] = deepcopy(read["themeBinding"])
         for page in read.get("objectPages", []):
             self.objects[(document_type, page["pageId"])] = {**deepcopy(page),
                 "binding": {**binding(read), "sceneRevision": read["sceneRevision"]}}
@@ -400,6 +404,15 @@ class ReadBindings:
                 raise DocumentEditError("document_read_required", "Read the page setup options before changing paper.")
             observed = self.page_setup_requests.setdefault((document_type, arguments["requestId"]),
                 deepcopy(self.page_setups[document_type]))
+            if observed["documentId"] != arguments["documentId"]:
+                raise DocumentEditError("document_binding_changed", "The read belongs to another document.")
+            return {**deepcopy(observed), **deepcopy(arguments)}
+        if destination == "theme":
+            if document_type not in self.themes:
+                raise DocumentEditError("document_read_required", "Read the document theme before changing it.")
+            # A retry keeps its first pre-image, exactly like page setup.
+            observed = self.theme_requests.setdefault((document_type, arguments["requestId"]),
+                deepcopy(self.themes[document_type]))
             if observed["documentId"] != arguments["documentId"]:
                 raise DocumentEditError("document_binding_changed", "The read belongs to another document.")
             return {**deepcopy(observed), **deepcopy(arguments)}

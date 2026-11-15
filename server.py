@@ -19095,9 +19095,11 @@ def _documentation_editor_read(document, loaded, baseline):
     return {"documentationRichText": documentation_rich_text_enabled(), "richTextFields": fields, "objectBinding": object_binding, "pageSetupOptions": setup_options}
 
 
-def _documentation_page_setup_check(command, compile_candidate, root, assembly_number, *, current=None):
-    """Check under the scene lock before the final candidate journal is committed."""
-    if command.get("operation") != "set_page_setup":
+def _documentation_page_setup_check(command, compile_candidate, root, assembly_number, *, current=None,
+                                   operations=("set_page_setup",)):
+    """Check under the scene lock before the final candidate journal is committed. Sage's theme changes
+    pass their own operations: heading and body fonts measure the text boxes too."""
+    if command.get("operation") not in operations:
         return None
 
     def report_for(document, scene):
@@ -42328,14 +42330,15 @@ class _DocumentationAgentHost:
         snapshot = self.object_snapshot(assembly_number, document_type)
         return read_objects(snapshot, page_ids, PARTS_MANUAL_ROOT, assembly_number)
 
-    def _page_setup_edit(self, assembly_number, document_type, observed, snapshot, loaded, repository, actor):
-        """The scene command's candidate check, inside the receipt-bearing scene transaction."""
-        from ai_inspector.documentation.commands import content_hash
-        from ai_inspector.documentation.layout import normalize_page_setup
-        document, scene = snapshot["document"], loaded["scene"]
-        value = observed["operations"][0]["pageSetup"]
-        if value is not None:
-            value = normalize_page_setup(document_type, value)
+    @staticmethod
+    def documentation_templates():
+        """Saved company templates (the theme dialog's list), for Sage's theme read."""
+        return [template for template in documentation_templates_list()["templates"]
+                if isinstance(template.get("templateId"), str) and isinstance(template.get("name"), str)]
+
+    @staticmethod
+    def _publication_compiler(assembly_number, document_type, snapshot):
+        """How a candidate scene compiles to its publication, and that publication's render root."""
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
         if document_type == "illustrated_parts_manual":
             plan = _parts_manual_repository().read(catalog["assemblyNumber"], catalog["sourceRevision"],
@@ -42358,6 +42361,28 @@ class _DocumentationAgentHost:
                 documentation_scene=candidate, identity_document=snapshot["identity_document"],
                 documentation_scene_revision=documentation_scene_revision(candidate))
             root = SPECIFICATION_SHEET_ROOT
+        return compile_scene, root
+
+    @staticmethod
+    def _label_overflow(error, document, check):
+        """Name the page number and title of each item a candidate refused for."""
+        if error.code == "layout_overflow" and error.details.get("targets"):
+            pages = {p["pageId"]: p for p in document["pages"]}
+            pages.update({p["pageId"]: p for p in (check.document or document)["pages"]})
+            error.details["targets"] = [{**item,
+                "pageNumber": pages.get(item["pageId"], {}).get("pageNumber"),
+                "pageTitle": pages.get(item["pageId"], {}).get("title", item["pageId"])}
+                for item in error.details["targets"]]
+
+    def _page_setup_edit(self, assembly_number, document_type, observed, snapshot, loaded, repository, actor):
+        """The scene command's candidate check, inside the receipt-bearing scene transaction."""
+        from ai_inspector.documentation.commands import content_hash
+        from ai_inspector.documentation.layout import normalize_page_setup
+        document, scene = snapshot["document"], loaded["scene"]
+        value = observed["operations"][0]["pageSetup"]
+        if value is not None:
+            value = normalize_page_setup(document_type, value)
+        compile_scene, root = self._publication_compiler(assembly_number, document_type, snapshot)
         command = _documentation_prepare_scene_command(document, loaded, {
             "operation": "set_page_setup", "targetType": "document_page_setup", "targetId": "page-setup",
             "pageId": document["pages"][0]["pageId"], "pageSetup": value})
@@ -42367,13 +42392,7 @@ class _DocumentationAgentHost:
             try:
                 check(current, candidate)
             except DocumentEditError as error:
-                if error.code == "layout_overflow" and error.details.get("targets"):
-                    pages = {p["pageId"]: p for p in document["pages"]}
-                    pages.update({p["pageId"]: p for p in (check.document or document)["pages"]})
-                    error.details["targets"] = [{**item,
-                        "pageNumber": pages.get(item["pageId"], {}).get("pageNumber"),
-                        "pageTitle": pages.get(item["pageId"], {}).get("title", item["pageId"])}
-                        for item in error.details["targets"]]
+                self._label_overflow(error, document, check)
                 raise
             after = check.document
             def figures(publication):
@@ -42393,6 +42412,47 @@ class _DocumentationAgentHost:
             request_id=observed["requestId"], commands=[command], page_targets=targets,
             expected_hashes={"@page-setup": observed.get("pageSetupHash")},
             current_hashes={"@page-setup": content_hash(scene, "@page-setup", scene.get("pageSetup"))}, hashes_revision=loaded["revision"],
+            actor=actor, payload=observed, identity_document=snapshot["identity_document"], check_candidate=check_candidate)
+        return {"receipt": result["receipt"], "changed": result["changed"], **result["receipt"]["pageSetupResult"]}
+
+    def _theme_edit(self, assembly_number, document_type, observed, snapshot, loaded, repository, actor):
+        """A document-wide theme change in the same checked transaction as page setup: one command bound
+        to the read's theme hash, refused when heading or body fonts would make text stop fitting."""
+        from ai_inspector.documentation.commands import content_hash
+        from ai_inspector.documentation import theme as document_theme
+        document, scene = snapshot["document"], loaded["scene"]
+        operation = observed["operations"][0]
+        if operation["operation"] == "apply_document_template":
+            command = document_theme.template_command(scene.get("theme"), scene.get("pageMasters"),
+                self.documentation_templates(), operation["templateId"])
+        else:
+            command = {"operation": "set_theme", "theme": document_theme.merged(scene.get("theme"), operation["theme"])}
+        command = _documentation_prepare_scene_command(document, loaded, {**command,
+            "targetType": "document_theme", "targetId": "company-theme", "pageId": document["pages"][0]["pageId"]})
+        compile_scene, root = self._publication_compiler(assembly_number, document_type, snapshot)
+        check = _documentation_page_setup_check(command, compile_scene, root, assembly_number,
+            current=(scene, document), operations=("set_theme", "apply_template"))
+        def check_candidate(current, candidate):
+            try:
+                check(current, candidate)
+            except DocumentEditError as error:
+                if error.code != "layout_overflow":
+                    raise
+                self._label_overflow(error, document, check)
+                message = (f"{error.details['count']} items would not fit with this theme; nothing was changed."
+                           if error.details.get("targets") else str(error).replace("on this page setup", "with this theme"))
+                raise DocumentEditError("layout_overflow", message, **error.details) from error
+            result = {"theme": document_theme.view(candidate.get("theme"))}
+            if operation["operation"] == "apply_document_template":
+                result["templateApplied"] = operation["templateId"]
+            return result
+        targets = (_parts_manual_editable_page_targets(document) if document_type == "illustrated_parts_manual"
+                   else _operations_manual_editable_page_targets(document))
+        result = repository.apply_batch(assembly_number, observed["sourceRevision"], observed["manualPlanRevision"],
+            base_revision=observed.get("sceneRevision"), expected_revision=observed["expectedRevision"],
+            request_id=observed["requestId"], commands=[command], page_targets=targets,
+            expected_hashes={"@theme": observed.get("themeHash")},
+            current_hashes={"@theme": content_hash(scene, "@theme", scene.get("theme"))}, hashes_revision=loaded["revision"],
             actor=actor, payload=observed, identity_document=snapshot["identity_document"], check_candidate=check_candidate)
         return {"receipt": result["receipt"], "changed": result["changed"], **result["receipt"]["pageSetupResult"]}
 
@@ -42438,6 +42498,8 @@ class _DocumentationAgentHost:
             check_alias_binding(observed, snapshot["state"])
             if destination == "page_setup":
                 return self._page_setup_edit(assembly_number, document_type, observed, snapshot, loaded, repository, actor)
+            if destination == "theme":
+                return self._theme_edit(assembly_number, document_type, observed, snapshot, loaded, repository, actor)
             if destination == "objects":
                 from ai_inspector.documentation.objects import prepare_batch
                 commands, expected, current, operation_results = prepare_batch(

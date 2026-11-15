@@ -125,6 +125,11 @@ def retain_receipt(state: dict, receipt: dict) -> None:
         state["receipts"].pop(state["receiptOrder"].pop(0))
 
 
+# Document-wide theme operations: each is sent alone, bound to the read's theme hash.
+THEME_OPERATIONS = {"set_document_theme": {"operation", "theme"},
+                    "apply_document_template": {"operation", "templateId"}}
+
+
 def operation_store(operations: list[dict]) -> str:
     if not isinstance(operations, list) or not 1 <= len(operations) <= 224 or any(not isinstance(o, dict) for o in operations):
         raise DocumentEditError("invalid_document_operation", "Submit at most 200 range operations or 12 whole-field operations.")
@@ -132,6 +137,13 @@ def operation_store(operations: list[dict]) -> str:
         if len(operations) != 1 or set(operations[0]) != {"operation", "pageSetup"}:
             raise DocumentEditError("invalid_document_operation", "Page setup must be the only operation, with a pageSetup value or null.")
         return "page_setup"
+    if any(o.get("operation") in THEME_OPERATIONS for o in operations):
+        only = operations[0]
+        if len(operations) != 1 or set(only) != THEME_OPERATIONS.get(only.get("operation")):
+            raise DocumentEditError("invalid_document_operation",
+                "A theme change must be the only operation in its request: set_document_theme with a theme, "
+                "or apply_document_template with a templateId.")
+        return "theme"
     from .objects import OPERATIONS, object_batch
     if any(o.get("operation") in OPERATIONS for o in operations):
         return object_batch(operations)

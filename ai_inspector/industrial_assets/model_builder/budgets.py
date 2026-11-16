@@ -1,11 +1,11 @@
 """Pre-allocation estimates. No numpy, textures or geometry expansion here."""
 import math
 
-from .errors import require
+from .errors import ModelBuildError, TRIANGLE_LIMIT, require
 from .schema import PATTERNS
 
 MAX_COMPONENTS = 3000
-MAX_TRIANGLES = 60000
+MAX_TRIANGLES = TRIANGLE_LIMIT
 MAX_PRIMITIVES = 400
 MAX_MATERIALS = 64
 MAX_PRINTS = 8
@@ -110,6 +110,9 @@ def estimate(recipe, *, include_stats=None):
             check(p)
 
     def check(path):
+        if result["triangles"] > MAX_TRIANGLES:
+            raise ModelBuildError("budget_exceeded", path, "triangles exceeds 60000",
+                                  triangles=result["triangles"])
         checks = (("components", MAX_COMPONENTS), ("triangles", MAX_TRIANGLES),
                   ("printedPanels", MAX_PRINTS), ("printPixels", MAX_PRINT_PIXELS),
                   ("includes", 3), ("includeBytes", TOTAL_INCLUDE_BYTES))

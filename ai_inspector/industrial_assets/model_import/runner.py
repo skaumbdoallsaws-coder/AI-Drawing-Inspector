@@ -53,8 +53,8 @@ def _result(job: Path, *, require_preview: bool = False) -> dict:
         raise ModelImportError("model_worker_failed") from None
 
 
-def _launch(job, dependency_root, task, event, timeout):
-    """One process and one wall clock for either task; always kill and join on failure."""
+def _launch(job, dependency_root, task, event, timeout, *, build_error_decoder=None):
+    """One process and one wall clock for every task; always kill and join on failure."""
     if not 0 < timeout <= WALL_SECONDS:
         raise ValueError("Worker timeout must be positive and at most 70 seconds")
     if event.is_set():
@@ -92,6 +92,14 @@ def _launch(job, dependency_root, task, event, timeout):
         if code == 3:
             raise ModelImportError("model_runtime_unavailable")
         if code == 2:
+            if task == "build":
+                try:
+                    require(build_error_decoder is not None, "model_worker_failed")
+                    refusal = build_error_decoder(bounded_read(job, "error.json", 8192))
+                    require(isinstance(refusal, Exception), "model_worker_failed")
+                except (ModelImportError, OSError, ValueError, TypeError, KeyError, RecursionError):
+                    raise ModelImportError("model_worker_failed") from None
+                raise refusal
             try:
                 error = parse_json(bounded_read(job, "error.json", 8192), 8192)
                 require(isinstance(error.get("code"), str) and error["code"] in MESSAGES, "model_worker_failed")

@@ -1,4 +1,4 @@
-"""In-process kernel seam. Production worker task and publication arrive in MB1b/MB4."""
+"""In-process kernel seam shared with the limited worker; publication belongs to MB4."""
 from copy import deepcopy
 from dataclasses import dataclass
 

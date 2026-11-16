@@ -1,0 +1,20 @@
+{"name": "Carrier tag - UPS",
+ "category": "Material Handling",
+ "description": "Clip-on placard for a parcel roll cage: 360 x 200 mm, UPS printed in white on the carrier's colour, hung at cart-rail height (0.635-0.85 m). Place it on the floor right in front of the cart's face; its clash volume is the floor-to-rail strip.",
+ "tags": ["carrier tag", "cart tag", "placard", "ups", "roll cage"],
+ "size": {"width": 0.36, "depth": 0.01, "height": 0.215},
+ "sizeBasis": {"kind": "user", "note": "360 x 200 mm placard clipped to a 0.85 m cart top rail"},
+ "hangHeight": 0.635,
+ "front": ["carrier tag print"],
+ "materials": {
+  "plate": {"color": "#523420", "roughness": 0.45},
+  "clips": {"color": "#1c1e21", "roughness": 0.5}},
+ "entries": [
+  {"id": "tag", "name": "carrier tag print", "shape": "panel", "material": "plate",
+   "center": [0, 0.735, -0.0005], "size": [0.36, 0.20], "facing": "+z", "back": "#523420",
+   "print": {"background": "#523420", "items": [
+    {"rect": [0.024, 0.043, 0.976, 0.957], "stroke": "#ffffff", "lineMm": 4, "radiusMm": 9},
+    {"text": "UPS", "box": [0.10, 0.15, 0.90, 0.85], "color": "#ffffff", "weight": "bold"}]}},
+  {"id": "clips", "name": "carrier tag clips", "shape": "box", "material": "clips",
+   "center": [-0.12, 0.825, 0], "size": [0.032, 0.05, 0.01], "repeat": {"count": 2, "step": [0.24, 0, 0]}}],
+ "footprint": "box"}

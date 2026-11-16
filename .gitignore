@@ -64,6 +64,9 @@ venv/
 !static/contracts/industrial-*.json
 !static/facility_library/*.json
 !tests/fixtures/facility_layout/**/*.json
+!ai_inspector/industrial_assets/model_builder/**/*.json
+!docs/sage-model-builder-reference/**/*.json
+!tests/fixtures/model_builder/**/*.json
 
 # OS files
 .DS_Store

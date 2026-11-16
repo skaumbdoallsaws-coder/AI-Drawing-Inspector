@@ -1,0 +1,157 @@
+{
+ "baler": {
+  "file": "vertical-baler-42in.glb",
+  "bounds": {
+   "min": [
+    -0.66,
+    0.0,
+    -0.495
+   ],
+   "max": [
+    0.66,
+    2.6,
+    0.495
+   ]
+  },
+  "size": {
+   "width": 1.32,
+   "height": 2.6,
+   "depth": 0.99
+  },
+  "triangles": 1084,
+  "materials": 12,
+  "images": 2,
+  "parts": {
+   "baler frame": 144,
+   "baler body": 24,
+   "baler doors": 24,
+   "baler chamber": 60,
+   "baler handwheel": 420,
+   "baler bars": 236,
+   "baler power pack": 84,
+   "baler controls": 12,
+   "baler stop button": 64,
+   "baler start button": 12,
+   "baler warning label": 2,
+   "baler use label": 2
+  }
+ },
+ "gaylord": {
+  "file": "gaylord-on-pallet.glb",
+  "bounds": {
+   "min": [
+    -0.604,
+    0.0,
+    -0.504
+   ],
+   "max": [
+    0.604,
+    1.0322,
+    0.504
+   ]
+  },
+  "size": {
+   "width": 1.208,
+   "height": 1.0322,
+   "depth": 1.008
+  },
+  "triangles": 558,
+  "materials": 25,
+  "images": 1,
+  "parts": {
+   "gaylord carton": 48,
+   "gaylord inside": 12,
+   "gaylord edge": 64,
+   "flattened cartons": 192,
+   "gaylord label": 2,
+   "User Library-pallet 1200x1000_larguero 1000-7/0": 12,
+   "User Library-pallet 1200x1000_larguero 1200-2/0": 12,
+   "User Library-pallet 1200x1000_larguero 1000-6/0": 12,
+   "User Library-pallet 1200x1000_larguero 1200-3/0": 12,
+   "User Library-pallet 1200x1000_larguero 1000-5/0": 12,
+   "User Library-pallet 1200x1000_larguero 1000-8/0": 12,
+   "User Library-pallet 1200x1000_taco 110-1/0": 12,
+   "User Library-pallet 1200x1000_larguero 1000-1/0": 12,
+   "User Library-pallet 1200x1000_larguero 1000-4/0": 12,
+   "User Library-pallet 1200x1000_larguero 1200-1/0": 12,
+   "User Library-pallet 1200x1000_taco 110-9/0": 12,
+   "User Library-pallet 1200x1000_taco 110-11/0": 12,
+   "User Library-pallet 1200x1000_taco 110-7/0": 12,
+   "User Library-pallet 1200x1000_taco 110-6/0": 12,
+   "User Library-pallet 1200x1000_taco 110-12/0": 12,
+   "User Library-pallet 1200x1000_larguero 1000-3/0": 12,
+   "User Library-pallet 1200x1000_taco 110-8/0": 12,
+   "User Library-pallet 1200x1000_larguero 1000-2/0": 12,
+   "User Library-pallet 1200x1000_taco 110-2/0": 12,
+   "User Library-pallet 1200x1000_taco 110-10/0": 12
+  }
+ },
+ "pack-station": {
+  "file": "pack-station-printer.glb",
+  "bounds": {
+   "min": [
+    -0.915,
+    0.0,
+    -0.455
+   ],
+   "max": [
+    0.915,
+    1.87,
+    0.455
+   ]
+  },
+  "size": {
+   "width": 1.83,
+   "height": 1.87,
+   "depth": 0.91
+  },
+  "triangles": 976,
+  "materials": 15,
+  "images": 2,
+  "parts": {
+   "bench frame": 132,
+   "bench shelves": 24,
+   "bench top": 12,
+   "labels": 184,
+   "electronics black": 160,
+   "monitor screen": 2,
+   "label printer": 12,
+   "label printer lid": 24,
+   "printer light": 12,
+   "scale platform": 12,
+   "scale display": 2,
+   "shipping boxes": 156,
+   "packing tape": 180,
+   "tape gun": 24,
+   "kraft paper": 40
+  }
+ },
+ "carrier-tag": {
+  "file": "carrier-tag-ups.glb",
+  "bounds": {
+   "min": [
+    -0.18,
+    0.635,
+    -0.005
+   ],
+   "max": [
+    0.18,
+    0.85,
+    0.005
+   ]
+  },
+  "size": {
+   "width": 0.36,
+   "height": 0.215,
+   "depth": 0.01
+  },
+  "triangles": 38,
+  "materials": 3,
+  "images": 1,
+  "parts": {
+   "carrier tag plate": 12,
+   "carrier tag print": 2,
+   "carrier tag clips": 24
+  }
+ }
+}

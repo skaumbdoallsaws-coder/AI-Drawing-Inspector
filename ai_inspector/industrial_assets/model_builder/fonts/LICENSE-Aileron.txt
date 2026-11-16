@@ -1,0 +1,7 @@
+Aileron Regular (subset), by Sora Sagano / dot colon (https://dotcolon.net/fonts/aileron).
+Licence: CC0 1.0 Universal (public domain dedication), as recorded by Font Squirrel
+(https://www.fontsquirrel.com/license/aileron) and Fontsource (https://fontsource.org/fonts/aileron/about).
+These bytes are the subset Pillow 12.0.0 bundles for ImageFont.load_default(); extracted 2026-11-16 so the
+model builder's printed panels do not depend on the installed Pillow version or on system fonts.
+File: Aileron-Regular-subset.ttf  sha256: 69853909b940023570964e29cffe30da95aea8de3627736b5cd15ab30143169f  bytes: 12676
+Bold text is drawn with this font and a stroke (v1 approximation, docs/sage-model-builder-plan.md C36).

@@ -63,7 +63,7 @@ def default_material() -> dict:
             "doubleSided": False, "roughness": 1.0, "metalness": 1.0, "unlit": False}
 
 
-def read_materials(document: dict, limits, warnings: list[str]) -> list[dict]:
+def read_materials(document: dict, limits, warnings: list[str], *, extended_materials: bool = False) -> list[dict]:
     textures = sequence(document.get("textures", []), 4096)
     samplers = sequence(document.get("samplers", []), 4096)
     images = sequence(document.get("images", []), limits.images)
@@ -100,8 +100,25 @@ def read_materials(document: dict, limits, warnings: list[str]) -> list[dict]:
                     "emissive": emission, "doubleSided": double_sided,
                     "roughness": number(roughness, 0, 1), "metalness": number(metalness, 0, 1),
                     "unlit": "KHR_materials_unlit" in extensions}
-        if any(key in raw for key in ("normalTexture", "occlusionTexture", "emissiveTexture")) or "metallicRoughnessTexture" in pbr:
-            warn(warnings, "Only base colour textures are retained; other texture maps were omitted.")
+        if extended_materials:
+            from .extended_materials import read_extras
+            material.update(read_extras(raw))
+            material["emissiveTexture"] = _texture(raw.get("emissiveTexture"), textures, samplers, images, warnings)
+            # The flattened Part has one UV channel. Both maps must share its transform.
+            base, emission = material["texture"], material["emissiveTexture"]
+            if base is not None and emission is not None:
+                require(all(base[k] == emission[k] for k in ("offset", "scale", "rotation")),
+                        "gltf_texture_unsupported")
+            if texture is not None:
+                require(base is not None, "gltf_texture_unsupported")
+            if raw.get("emissiveTexture") is not None:
+                require(emission is not None, "gltf_texture_unsupported")
+        omitted_maps = ("normalTexture", "occlusionTexture") if extended_materials else (
+            "normalTexture", "occlusionTexture", "emissiveTexture")
+        if any(key in raw for key in omitted_maps) or "metallicRoughnessTexture" in pbr:
+            warn(warnings, ("Only base colour and emissive textures are retained; other texture maps were omitted."
+                            if extended_materials else
+                            "Only base colour textures are retained; other texture maps were omitted."))
         materials.append(material)
     return materials
 

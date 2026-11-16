@@ -11,9 +11,10 @@ from .validation import json_bytes, require
 GLB_BYTES = 30 * 1024 * 1024
 
 
-def write_glb(model: Model) -> bytes:
+def write_glb(model: Model, *, generator=MODEL_IMPORT_ENGINE_VERSION, grouped=False, extended_materials=False) -> bytes:
     triangle_budget(model.parts)
-    document = {"asset": {"version": "2.0", "generator": MODEL_IMPORT_ENGINE_VERSION},
+    require(isinstance(generator, str) and 0 < len(generator) <= 128, "gltf_invalid")
+    document = {"asset": {"version": "2.0", "generator": generator},
                 "scene": 0, "scenes": [{"nodes": []}], "nodes": [], "meshes": [], "materials": [],
                 "accessors": [], "bufferViews": [], "buffers": [], "images": [], "textures": [], "samplers": []}
     blob = bytearray()
@@ -69,6 +70,13 @@ def write_glb(model: Model) -> bytes:
                     "alphaCutoff": material["alphaCutoff"], "doubleSided": material["doubleSided"],
                     "emissiveFactor": [v / strength for v in material["emissive"]],
                     "extras": {"facilityAuthoredFinish": True, "facilityMaterialRole": part.name}}
+            if extended_materials:
+                from .extended_materials import write_extras
+                item["extras"].update(write_extras(material))
+                if material.get("emissiveTexture") is not None and part.uv0 is not None:
+                    item["emissiveTexture"] = {"index": texture_id(material["emissiveTexture"]), "texCoord": 0}
+                if grouped and material.get("name"):
+                    item["name"] = f"{part.name} ({material['name']})"
             if strength > 1:
                 item.setdefault("extensions", {})["KHR_materials_emissive_strength"] = {"emissiveStrength": strength}
                 extensions.add("KHR_materials_emissive_strength")
@@ -78,7 +86,8 @@ def write_glb(model: Model) -> bytes:
             material_map[key] = len(document["materials"])
             document["materials"].append(item)
         return material_map[key]
-    for part in model.parts:
+    grouped_meshes = {}
+    for part in (_group_parts(model) if grouped else model.parts):
         attributes = {"POSITION": accessor(part.positions, "VEC3", 5126, 34962, True)}
         if part.normals is not None:
             attributes["NORMAL"] = accessor(part.normals, "VEC3", 5126, 34962)
@@ -86,6 +95,15 @@ def write_glb(model: Model) -> bytes:
             attributes["TEXCOORD_0"] = accessor(part.uv0, "VEC2", 5126, 34962)
         indices = accessor(part.indices.reshape(-1), "SCALAR", 5125, 34963)
         material = material_id(part)
+        if grouped:
+            if part.name not in grouped_meshes:
+                grouped_meshes[part.name] = len(document["meshes"])
+                document["meshes"].append({"name": part.name, "primitives": []})
+                document["scenes"][0]["nodes"].append(len(document["nodes"]))
+                document["nodes"].append({"name": part.name, "mesh": grouped_meshes[part.name]})
+            document["meshes"][grouped_meshes[part.name]]["primitives"].append(
+                {"attributes": attributes, "indices": indices, "mode": 4, "material": material})
+            continue
         mesh_key = (part.name, tuple(attributes.items()), indices, material)
         if mesh_key not in mesh_ids:
             mesh_ids[mesh_key] = len(document["meshes"])
@@ -106,3 +124,30 @@ def write_glb(model: Model) -> bytes:
     require(total <= GLB_BYTES, "model_output_too_large")
     return (struct.pack("<4sII", b"glTF", 2, total) + struct.pack("<I4s", len(encoded), b"JSON") + encoded
             + struct.pack("<I4s", len(blob), b"BIN\0") + bytes(blob))
+
+
+def _group_parts(model):
+    """One primitive per (node name, material); enabled only for builder output."""
+    from collections import OrderedDict
+    from dataclasses import replace
+    groups = OrderedDict()
+    for part in model.parts:
+        groups.setdefault((part.name, json_bytes(model.materials[part.material])), []).append(part)
+    for parts in groups.values():
+        if len(parts) == 1:
+            yield parts[0]
+            continue
+        positions, normals, uvs, indices, offset = [], [], [], [], 0
+        has_normals = all(p.normals is not None for p in parts)
+        has_uv = any(p.uv0 is not None for p in parts)
+        for part in parts:
+            positions.append(part.positions)
+            indices.append(part.indices + offset)
+            offset += len(part.positions)
+            if has_normals:
+                normals.append(part.normals)
+            if has_uv:
+                uvs.append(part.uv0 if part.uv0 is not None else np.zeros((len(part.positions), 2), dtype=np.float32))
+        yield replace(parts[0], positions=np.concatenate(positions), indices=np.concatenate(indices),
+                      normals=np.concatenate(normals) if has_normals else None,
+                      uv0=np.concatenate(uvs) if has_uv else None)

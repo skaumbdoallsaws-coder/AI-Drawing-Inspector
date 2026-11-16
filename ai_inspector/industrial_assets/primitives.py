@@ -289,22 +289,26 @@ def gltf_json(payload: bytes) -> dict:
     return json.loads(payload[20:20 + length])
 
 
-def verify(payload: bytes, dimensions: dict | None = None) -> dict:
+def verify(payload: bytes, dimensions: dict | None = None, *, base_height: float = 0) -> dict:
     """The checks a model passes before it is published, as the Factory 02 generators ran them.
 
-    A valid static GLB 2.0 (the catalog's own inspector), centred on x and z with its base at y = 0, the declared
-    size when given (width along x, height y, depth z), and every material marked as an authored finish. Returns
+    A valid static GLB 2.0 (the catalog's own inspector), centred on x and z with its base at base_height (default 0),
+    the declared geometry size when given (height excludes base_height), and every material marked as an authored
+    finish. Returns
     {'dimensions', 'triangles', 'bytes'}; raises ValueError.
     """
     from .artifacts import ArtifactValidationError, inspect_glb
+    if (isinstance(base_height, bool) or not isinstance(base_height, (int, float))
+            or not math.isfinite(base_height) or not 0 <= base_height <= 3):
+        raise ValueError("base_height must be finite and between 0 and 3 meters")
     try:
         info = inspect_glb(bytes(payload))
     except ArtifactValidationError as exc:
         raise ValueError(f"Not a valid GLB: {exc}") from None
     lo, hi = info.aabb["minimum"], info.aabb["maximum"]
     size = {"width": hi["x"] - lo["x"], "height": hi["y"] - lo["y"], "depth": hi["z"] - lo["z"]}
-    if abs(lo["y"]) > SIZE_TOLERANCE:
-        raise ValueError(f"The model's base is at y = {lo['y']:.4f}, not 0")
+    if abs(lo["y"] - base_height) > SIZE_TOLERANCE:
+        raise ValueError(f"The model's base is at y = {lo['y']:.4f}, not {base_height:g}")
     if abs(lo["x"] + hi["x"]) > SIZE_TOLERANCE or abs(lo["z"] + hi["z"]) > SIZE_TOLERANCE:
         raise ValueError("The model is not centred on x and z")
     for key, value in (dimensions or {}).items():

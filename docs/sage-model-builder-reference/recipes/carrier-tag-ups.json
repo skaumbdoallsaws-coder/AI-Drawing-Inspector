@@ -10,6 +10,8 @@
   "plate": {"color": "#523420", "roughness": 0.45},
   "clips": {"color": "#1c1e21", "roughness": 0.5}},
  "entries": [
+  {"id": "plate", "name": "carrier tag plate", "shape": "box", "material": "plate",
+   "min": [-0.18, 0.635, -0.0045], "max": [0.18, 0.835, -0.003]},
   {"id": "tag", "name": "carrier tag print", "shape": "panel", "material": "plate",
    "center": [0, 0.735, -0.0005], "size": [0.36, 0.20], "facing": "+z", "back": "#523420",
    "print": {"background": "#523420", "items": [

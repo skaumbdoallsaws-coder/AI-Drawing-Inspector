@@ -1,14 +1,14 @@
 {
- "measured": "2026-11-16",
+ "measured": "2026-11-16 (re-measured after the MB1a recipe fixes)",
  "requestCap": 32768,
  "recipeCap": 24576,
  "method": "json.dumps(default separators) of the recipe; envelope = JSON-RPC tools/call with the recipe as arguments.recipe (mcp_bridge max_request_body_size 32768)",
  "recipes": {
   "baler-vertical-42.json": {
-   "recipeCompact": 5112,
-   "recipeDefault": 5713,
-   "recipeAscii": 5713,
-   "mcpEnvelope": 5903,
+   "recipeCompact": 5114,
+   "recipeDefault": 5715,
+   "recipeAscii": 5715,
+   "mcpEnvelope": 5905,
    "entriesTop": 25,
    "entriesAll": 25,
    "materials": 12,
@@ -16,10 +16,10 @@
    "descriptionChars": 207
   },
   "carrier-tag-ups.json": {
-   "recipeCompact": 1215,
-   "recipeDefault": 1324,
-   "recipeAscii": 1324,
-   "mcpEnvelope": 1514,
+   "recipeCompact": 1344,
+   "recipeDefault": 1469,
+   "recipeAscii": 1469,
+   "mcpEnvelope": 1659,
    "entriesTop": 2,
    "entriesAll": 2,
    "materials": 2,
@@ -27,10 +27,10 @@
    "descriptionChars": 242
   },
   "gaylord-on-pallet.json": {
-   "recipeCompact": 3100,
-   "recipeDefault": 3465,
-   "recipeAscii": 3465,
-   "mcpEnvelope": 3655,
+   "recipeCompact": 3262,
+   "recipeDefault": 3650,
+   "recipeAscii": 3650,
+   "mcpEnvelope": 3840,
    "entriesTop": 9,
    "entriesAll": 14,
    "materials": 7,
@@ -49,15 +49,15 @@
    "descriptionChars": 251
   },
   "pallet-plain.json": {
-   "recipeCompact": 1053,
-   "recipeDefault": 1163,
-   "recipeAscii": 1163,
-   "mcpEnvelope": 1353,
+   "recipeCompact": 1232,
+   "recipeDefault": 1365,
+   "recipeAscii": 1365,
+   "mcpEnvelope": 1555,
    "entriesTop": 3,
    "entriesAll": 3,
    "materials": 2,
    "printItems": 0,
-   "descriptionChars": 153
+   "descriptionChars": 172
   },
   "roll-cage-plain.json": {
    "recipeCompact": 2493,
@@ -71,15 +71,15 @@
    "descriptionChars": 179
   },
   "roll-cage-tag.template.json": {
-   "recipeCompact": 1262,
-   "recipeDefault": 1389,
-   "recipeAscii": 1389,
-   "mcpEnvelope": 1579,
+   "recipeCompact": 1247,
+   "recipeDefault": 1374,
+   "recipeAscii": 1374,
+   "mcpEnvelope": 1564,
    "entriesTop": 3,
    "entriesAll": 3,
    "materials": 2,
    "printItems": 2,
-   "descriptionChars": 103
+   "descriptionChars": 88
   }
  }
 }

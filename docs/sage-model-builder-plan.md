@@ -846,8 +846,10 @@ identical builds, one cancelled.
 
 C42 Gaylord parity and tracked fixtures (R3-6). E1 scores the gaylord body (gaylord carton, inside, edge, flattened
 cartons, label) against the reference body; the pallet is scored against its own frozen spec instead (1.2 x 1.0 x
-0.132 m; 3 runners, 9 blocks, 8 deck boards; part-name map: the reference's "User Library-pallet ..." parts ->
-"pallet boards" / "pallet blocks"). JSON fixtures are tracked through narrow .gitignore exceptions (the repo ignores
+0.132 m; 3 runners, 9 blocks, 3 stringer boards, 8 deck boards; part-name map: the reference's "User
+Library-pallet ..." parts -> "pallet boards" / "pallet blocks"). The gaylord body's triangle allowance is +-35%, not
+25%: the builder's straps and lips are closed boxes (D4) where the reference's were open-faced (MB1a: 410 vs 318).
+JSON fixtures are tracked through narrow .gitignore exceptions (the repo ignores
 *.json): `!ai_inspector/industrial_assets/model_builder/**/*.json`, `!docs/sage-model-builder-reference/**/*.json`,
 `!tests/fixtures/model_builder/**/*.json`. MB0 is complete only with the recipes and the baseline report committed.
 

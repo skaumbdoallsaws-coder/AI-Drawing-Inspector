@@ -11,6 +11,7 @@ MESSAGES = {
     "gltf_external_resource": "Resources must be local files inside the zip, not URLs or data URIs.",
     "gltf_extension_required": "A required glTF extension is unsupported. Export an uncompressed static glTF.",
     "gltf_feature_unsupported": "Skins, morph targets and sparse accessors are not supported yet.",
+    "gltf_texture_unsupported": "Builder textures need UV0 and matching base and emissive UV transforms.",
     "gltf_too_complex": "The model exceeds the geometry, scene graph or material limits.",
     "image_unsafe": "A model image is invalid, animated, unsupported or exceeds the image limits.",
     "model_empty": "The selected scene has no triangle geometry.",

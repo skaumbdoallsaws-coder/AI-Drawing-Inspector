@@ -129,7 +129,7 @@ def _float_array(value) -> np.ndarray:
     return np.ascontiguousarray(result)
 
 
-def flatten(document, accessors, materials, limits, quantized, warnings) -> list[Part]:
+def flatten(document, accessors, materials, limits, quantized, warnings, *, preserve_node_names=False) -> list[Part]:
     require(not document.get("skins"), "gltf_feature_unsupported")
     meshes = _meshes(document, accessors, limits)
     nodes, matrices, children, roots = _graph(document, meshes, limits)
@@ -187,8 +187,10 @@ def flatten(document, accessors, materials, limits, quantized, warnings) -> list
             uv = (accessors.attribute(attrs["TEXCOORD_0"], "TEXCOORD_0", quantized)
                   if "TEXCOORD_0" in attrs else None)
             material = materials[material_index]
+            if preserve_node_names and (material["texture"] or material.get("emissiveTexture")):
+                require(uv is not None, "gltf_texture_unsupported")
             if uv is not None:
-                uv = transform_uv(uv, material["texture"])
+                uv = transform_uv(uv, material["texture"] or material.get("emissiveTexture"))
             elif material["texture"]:
                 warn(warnings, "A textured part has no UV0; its texture cannot be shown.")
             for semantic, index in attrs.items():
@@ -198,7 +200,9 @@ def flatten(document, accessors, materials, limits, quantized, warnings) -> list
             faces = _triangles(indices, mode)
             if np.linalg.slogdet(world[:3, :3])[0] < 0:
                 faces[:, [1, 2]] = faces[:, [2, 1]]
-            parts.append(Part(key, material["name"] or clean_text(mesh.get("name")) or key,
+            part_name = ((clean_text(node.get("name")) if preserve_node_names else "")
+                         or material["name"] or clean_text(mesh.get("name")) or key)
+            parts.append(Part(key, part_name,
                               clean_text(node.get("name")), clean_text(mesh.get("name")), material_index,
                               _float_array(positions), None if normals is None else _float_array(normals),
                               None if uv is None else _float_array(uv), np.ascontiguousarray(faces, dtype=np.uint32)))

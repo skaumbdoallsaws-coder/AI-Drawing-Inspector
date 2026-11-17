@@ -11,6 +11,7 @@ from .imports import module
 from .lints import lint_model
 from .recipe import ENGINE_VERSION, normalize_recipe, portable_recipe
 from .scene import bounds, expand
+from .prints import print_lints, render_prints
 
 
 @dataclass
@@ -29,6 +30,7 @@ class BuildResult:
     components: list
     budgets: dict
     provenance: dict
+    prints: dict
 
     @property
     def triangles(self):
@@ -47,7 +49,7 @@ def canonical_check(model, dimensions, base_height):
                 "Output dimensions do not match its bounds", "geometry_invalid")
 
 
-def build_model(recipe, *, allowed_categories=None, allowed_appearance_ids=()):
+def build_model(recipe, *, allowed_categories=None, allowed_appearance_ids=(), font_directory=None):
     normalized = normalize_recipe(recipe, allowed_categories=allowed_categories,
                                   allowed_appearance_ids=allowed_appearance_ids)
     budgets = estimate(normalized)
@@ -56,7 +58,8 @@ def build_model(recipe, *, allowed_categories=None, allowed_appearance_ids=()):
     dimensions = dict(zip(("width", "height", "depth"), (high-low).tolist()))
     shift = np.array([-(low[0]+high[0])/2, normalized["hangHeight"]-low[1], -(low[2]+high[2])/2])
     components = [c.transformed(np.eye(3), shift) for c in components]
-    model, part_map = to_model(components, normalized)
+    prints = render_prints(components, font_directory=font_directory)
+    model, part_map = to_model(components, normalized, prints)
     canonical_check(model, dimensions, normalized["hangHeight"])
     count = sum(len(p.indices) for p in model.parts)
     require(count <= MAX_TRIANGLES and len(model.parts) <= MAX_PRIMITIVES, "$",
@@ -81,11 +84,10 @@ def build_model(recipe, *, allowed_categories=None, allowed_appearance_ids=()):
     surfaces = module("footprint").support_surfaces(shifted, catalog_dimensions)
     footprint = module("footprint").footprint(model.parts, normalized["footprint"])
     lints, warnings = lint_model(components, normalized, dimensions, shift, count)
-    if any(c.role == "print" for c in components):
-        warnings.append("MB1a: printed faces show their background color; text and artwork arrive in MB2.")
+    lints.extend(print_lints(components, prints))
     portable, metadata = portable_recipe(normalized)
     provenance = {"generator": ENGINE_VERSION, "hangHeight": normalized["hangHeight"],
                   "sizeBasis": portable["sizeBasis"], "sources": metadata["sources"],
                   "sitePrivate": {"references": metadata["references"]}}
     return BuildResult(normalized, model, glb, dimensions, catalog_dimensions, shift.tolist(), part_map,
-                       lints, warnings, surfaces, footprint, components, budgets, provenance)
+                        lints, warnings, surfaces, footprint, components, budgets, provenance, prints)

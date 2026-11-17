@@ -81,7 +81,7 @@ def test_one_name_one_node_primitives_per_material_and_entry_instance_map():
     assert {m["name"] for m in document["materials"]} == {"housing (paint)", "housing (metal)"}
 
 
-def test_all_materials_authored_finish_adjustments_and_flat_print_uv():
+def test_all_materials_authored_finish_adjustments_and_print_uv():
     result = builder.build_model(recipe(shape(), shape("panel", id="screen", name="display", material="screen"),
         materials={"paint": {"color": "#52708a", "finish": {"appearanceId": "steel",
                     "color": "#aabbcc", "roughness": .3, "metalness": .8}},
@@ -93,9 +93,11 @@ def test_all_materials_authored_finish_adjustments_and_flat_print_uv():
     artwork = next(m for m in document["materials"] if m["extras"].get("facilityArtwork"))
     assert "facilityDefaultFinish" not in artwork["extras"]
     assert max(artwork["emissiveFactor"]) > 0
-    assert "images" not in document  # Prints rasterize only in MB2.
+    assert len(document["images"]) == 1
+    assert artwork["pbrMetallicRoughness"]["baseColorFactor"] == [1, 1, 1, 1]
+    assert artwork["emissiveTexture"] == artwork["pbrMetallicRoughness"]["baseColorTexture"]
     assert next(p for p in result.model.parts if p.name == "display" and p.uv0 is not None).uv0.shape == (6, 2)
-    assert result.warnings
+    assert result.warnings == []
 
 
 def test_component_keys_match_renderer_encoding_and_long_name_fallback():

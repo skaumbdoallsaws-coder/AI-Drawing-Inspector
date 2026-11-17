@@ -14,7 +14,7 @@ def execute_build(job_dir):
             "$", "Application parents must not be loaded by the build worker", "job_invalid")
     from .build import build_model
     result = build_model(recipe, allowed_categories=allowed["categories"],
-                         allowed_appearance_ids=allowed["appearanceIds"])
+                          allowed_appearance_ids=allowed["appearanceIds"], font_directory=job / "fonts")
     require(not any(name == "ai_inspector" or name.startswith("ai_inspector.") for name in sys.modules),
             "$", "Application parents must not be loaded by the build worker", "job_invalid")
     summary = make_result(result, allowed)

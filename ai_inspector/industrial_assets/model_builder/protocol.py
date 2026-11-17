@@ -2,23 +2,26 @@
 from copy import deepcopy
 from hashlib import sha256
 import re
+import struct
 
-from .budgets import copies, estimate
+from .budgets import copies, estimate, panel_pixels, MAX_PRINT_PIXELS, MAX_TEXTURE_PIXELS
 from .errors import json_bytes, parse_json
 from .imports import module
 from .job_io import read_bytes
 from .recipe import ENGINE_VERSION, portable_recipe
+from .print_contract import png_dimensions
 
 # This is a full worker record, NOT the later <=48 KiB MCP summary. At most four
 # instance prefixes per expanded component, with <=512-character part keys.
 RESULT_BYTES = 16 * 1024 * 1024
 GLB_BYTES = 30 * 1024 * 1024
 KEYS = {"schemaVersion", "kind", "engineVersion", "recipeSha256", "allowedSha256", "outputSha256", "outputBytes",
-        "dimensions", "catalogDimensions", "shift", "triangles", "parts", "partMap", "materials",
+        "dimensions", "catalogDimensions", "shift", "triangles", "parts", "partMap", "materials", "images",
         "surfaces", "footprint", "lints", "warnings", "budgets", "provenance"}
 LINT_FIELDS = {"size_mismatch": {"dimensions"}, "floor_shift": {"shift", "baseHeight"},
                "floating_part": set(), "front_check": {"facing"}, "coplanar_overlap": set(),
-               "generic_name": set(), "heavy": {"triangles"}, "tiny_part": set(), "fit_exceeded": {"dimensions"}}
+                "generic_name": set(), "heavy": {"triangles"}, "tiny_part": set(), "fit_exceeded": {"dimensions"},
+                "print_small_text": {"item", "capHeightMm"}, "print_clipped": {"item"}}
 checks = module("protocol")
 _ok, _int, _num, _keys, _list, _vector = (
     checks._ok, checks._int, checks._num, checks._keys, checks._list, checks._vector)
@@ -47,13 +50,46 @@ def make_result(build, allowed):
              "triangles": build.triangles,
              "parts": [{"key": p.key, "name": p.name, "material": p.material, "triangles": len(p.indices)}
                        for p in build.model.parts],
-             "partMap": build.part_map, "materials": build.model.materials, "surfaces": build.surfaces,
+              "partMap": build.part_map, "materials": build.model.materials,
+              "images": [{"entryId": key, "width": p.width, "height": p.height, "mimeType": "image/png",
+                          "bytes": len(p.data), "sha256": sha256(p.data).hexdigest()} for key, p in build.prints.items()],
+              "surfaces": build.surfaces,
              "footprint": build.footprint, "lints": build.lints, "warnings": build.warnings,
              "budgets": build.budgets, "provenance": build.provenance}
     return validate_result(value, build.recipe, allowed)
 
 
-def _materials(materials, allowed):
+def panels(recipe):
+    result = {}
+    def visit(entries):
+        for entry in entries:
+            if "group" in entry:
+                visit(entry["group"])
+            elif entry.get("shape") == "panel":
+                result[entry["id"]] = entry
+    visit(recipe["entries"])
+    return result
+
+
+def _images(images, recipe):
+    expected, seen, pixels = panels(recipe), set(), 0
+    _list(images, 8)
+    for image in images:
+        _keys(image, {"entryId", "width", "height", "mimeType", "bytes", "sha256"})
+        key = image["entryId"]
+        _ok(isinstance(key, str) and key in expected and key not in seen)
+        seen.add(key)
+        _int(image["width"], 1, 1024)
+        _int(image["height"], 1, 1024)
+        _ok((image["width"], image["height"]) == panel_pixels(expected[key]))
+        pixels += image["width"]*image["height"]
+        _ok(image["mimeType"] == "image/png")
+        _int(image["bytes"], 1, image["width"]*image["height"]*4+65536)
+        _ok(isinstance(image["sha256"], str) and re.fullmatch("[0-9a-f]{64}", image["sha256"]))
+    _ok(seen == set(expected) and pixels <= MAX_PRINT_PIXELS and pixels <= MAX_TEXTURE_PIXELS)
+
+
+def _materials(materials, allowed, images, recipe):
     _list(materials, 64)
     _ok(bool(materials))
     required = {"name", "baseColor", "texture", "alphaMode", "alphaCutoff", "emissive",
@@ -70,8 +106,22 @@ def _materials(materials, allowed):
         for key in ("doubleSided", "unlit", "artwork"):
             if key in material:
                 _ok(type(material[key]) is bool)
-        # MB2 deliberately extends this contract when image files/prints exist.
-        _ok(material["texture"] is None and material.get("emissiveTexture") is None)
+        if material["name"].startswith("print:"):
+            key = material["name"][6:]
+            entry = panels(recipe)[key]
+            authored = recipe["materials"][entry["material"]]
+            texture = material["texture"]
+            _keys(texture, {"image", "wrapS", "wrapT"})
+            _int(texture["image"], 0, len(images)-1)
+            _ok(texture["wrapS"] == texture["wrapT"] == 33071 and images[texture["image"]]["entryId"] == key)
+            _ok(material.get("artwork") is True and "defaultFinish" not in material)
+            _ok(material["baseColor"] == [1, 1, 1, authored["opacity"]] and not material["unlit"])
+            _ok(material["emissive"] == [authored["lit"]]*3)
+            _ok(material.get("emissiveTexture") == (texture if authored["lit"] > 0 else None))
+        else:
+            # Composition extends this contract in MB3. Only authored prints can
+            # introduce image references in MB2.
+            _ok(material["texture"] is None and material.get("emissiveTexture") is None)
         if "finishGroup" in material:
             text(material["finishGroup"], 120)
         if "defaultFinish" in material:
@@ -143,7 +193,7 @@ def _parts_and_map(value, recipe):
 
 
 def _lints(value, recipe):
-    _list(value["lints"], 180)
+    _list(value["lints"], 20*len(LINT_FIELDS))
     counts = {}
     for item in value["lints"]:
         _ok(type(item) is dict and isinstance(item.get("code"), str) and item["code"] in LINT_FIELDS)
@@ -166,6 +216,13 @@ def _lints(value, recipe):
             _vector(item["facing"], 3, -1, 1)
         if code == "heavy":
             _ok(type(item["triangles"]) is int and item["triangles"] == value["triangles"] > 20000)
+        if code in ("print_small_text", "print_clipped"):
+            _ok(len(item["entryIds"]) == len(item["instances"]) == 1)
+            entry = panels(recipe)[item["entryIds"][0]]
+            _int(item["item"], 0, len(entry["print"]["items"])-1)
+            if code == "print_small_text":
+                _ok("text" in entry["print"]["items"][item["item"]])
+                _num(item["capHeightMm"], 0, 6)
     _list(value["warnings"], 20)
     for warning in value["warnings"]:
         text(warning, 300)
@@ -191,7 +248,8 @@ def validate_result(value, recipe, allowed):
         _ok(json_bytes(value["budgets"]) == json_bytes(estimate(recipe))
             and value["triangles"] == value["budgets"]["triangles"])
         _ok(json_bytes(value["provenance"]) == json_bytes(provenance(recipe)))
-        _materials(value["materials"], allowed)
+        _images(value["images"], recipe)
+        _materials(value["materials"], allowed, value["images"], recipe)
         _parts_and_map(value, recipe)
         support_recipe = deepcopy(recipe)
         for surface in support_recipe["surfaces"]:
@@ -221,7 +279,7 @@ def read_result(job, recipe, allowed):
         raise ModelImportError("model_worker_failed") from None
 
 
-def validate_glb_metadata(document, result):
+def validate_glb_metadata(document, result, *, payload=None):
     """Bind the part map and material metadata to the flat grouped GLB we return."""
     try:
         _ok(document["asset"]["generator"] == ENGINE_VERSION)
@@ -231,6 +289,20 @@ def validate_glb_metadata(document, result):
         _ok(len(document["nodes"]) == len(document["meshes"]) == len(expected))
         _ok(len(document["materials"]) == result["budgets"]["materials"])
         _ok(document["scene"] == 0 and document["scenes"] == [{"nodes": list(range(len(expected)))}])
+        image_bindings = {}
+        def texture(info, source):
+            _keys(info, {"index", "texCoord"})
+            _ok(type(info["texCoord"]) is int and info["texCoord"] == 0)
+            _int(info["index"], 0, len(document["textures"])-1)
+            record = document["textures"][info["index"]]
+            _keys(record, {"source", "sampler"})
+            _int(record["source"], 0, len(document["images"])-1)
+            _int(record["sampler"], 0, len(document["samplers"])-1)
+            _ok(document["samplers"][record["sampler"]] == {"wrapS": source["wrapS"], "wrapT": source["wrapT"],
+                                                          "magFilter": 9729, "minFilter": 9987})
+            prior = image_bindings.setdefault(source["image"], record["source"])
+            _ok(prior == record["source"])
+            return info
         for index, (name, parts) in enumerate(expected.items()):
             _ok(document["nodes"][index] == {"name": name, "mesh": index})
             mesh = document["meshes"][index]
@@ -245,12 +317,43 @@ def validate_glb_metadata(document, result):
                 extras = {"facilityAuthoredFinish": True, "facilityMaterialRole": name,
                           **module("extended_materials").write_extras(source)}
                 _ok(actual["extras"] == extras)
-                _ok(actual["pbrMetallicRoughness"] == {"baseColorFactor": source["baseColor"],
-                    "roughnessFactor": source["roughness"], "metallicFactor": source["metalness"]})
+                expected_pbr = {"baseColorFactor": source["baseColor"],
+                                "roughnessFactor": source["roughness"], "metallicFactor": source["metalness"]}
+                if source["texture"] is not None:
+                    _ok("TEXCOORD_0" in primitive["attributes"])
+                    expected_pbr["baseColorTexture"] = texture(actual["pbrMetallicRoughness"]["baseColorTexture"], source["texture"])
+                _ok(actual["pbrMetallicRoughness"] == expected_pbr)
+                if source.get("emissiveTexture") is not None:
+                    _ok(texture(actual["emissiveTexture"], source["emissiveTexture"]) == expected_pbr["baseColorTexture"])
+                else:
+                    _ok("emissiveTexture" not in actual)
                 for source_key, target in (("alphaMode", "alphaMode"), ("alphaCutoff", "alphaCutoff"),
                                            ("doubleSided", "doubleSided"), ("emissive", "emissiveFactor")):
                     _ok(actual[target] == source[source_key])
                 _ok(actual.get("extensions", {}) == ({"KHR_materials_unlit": {}} if source["unlit"] else {}))
-        _ok(not document.get("images") and not document.get("textures"))
-    except (ValueError, KeyError, IndexError, TypeError, ModelImportError):
+        count = len(result["images"])
+        for name in ("images", "textures", "samplers"):
+            _ok(len(document.get(name, [])) == count)
+        _ok(set(image_bindings) == set(range(count)) and len(set(image_bindings.values())) == count)
+        if count:
+            _ok(isinstance(payload, bytes) and len(payload) <= GLB_BYTES)
+            json_size = struct.unpack_from("<I", payload, 12)[0]
+            binary_size, binary_kind = struct.unpack_from("<I4s", payload, 20+json_size)
+            binary_start = 28+json_size
+            _ok(binary_kind == b"BIN\0" and binary_start+binary_size == len(payload))
+            for source_index, glb_index in image_bindings.items():
+                record, expected_image = document["images"][glb_index], result["images"][source_index]
+                _keys(record, {"bufferView", "mimeType"})
+                _ok(record["mimeType"] == "image/png")
+                _int(record["bufferView"], 0, len(document["bufferViews"])-1)
+                view = document["bufferViews"][record["bufferView"]]
+                _keys(view, {"buffer", "byteOffset", "byteLength"})
+                _ok(type(view["buffer"]) is int and view["buffer"] == 0)
+                _int(view["byteOffset"], 0, binary_size)
+                _int(view["byteLength"], 1, binary_size-view["byteOffset"])
+                start = binary_start+view["byteOffset"]
+                data = payload[start:start+view["byteLength"]]
+                _ok(len(data) == expected_image["bytes"] and sha256(data).hexdigest() == expected_image["sha256"])
+                _ok(png_dimensions(data) == (expected_image["width"], expected_image["height"]))
+    except (ValueError, KeyError, IndexError, TypeError, struct.error, ModelImportError):
         raise ModelImportError("model_worker_failed") from None

@@ -38,14 +38,15 @@ FINISH = obj({"appearanceId": text(120), "color": COLOR,
               "roughness": num(0, 1), "metalness": num(0, 1)}, ["appearanceId"])
 MATERIAL = obj({"color": COLOR, "roughness": num(0, 1), "metalness": num(0, 1),
                 "opacity": num(.2, 1), "lit": num(0, 1), "finish": FINISH}, ["color"])
-BOX2 = arr(num(0, 1), 4)
+# Modest overflow is clipped and linted by MB2; large coordinates still refuse.
+BOX2 = arr(num(-1, 2), 4)
 PAINT = {"fill": COLOR, "stroke": COLOR}
 PRINT_ITEM = {"oneOf": [
     obj({"text": text(60), "box": BOX2, "color": COLOR, "weight": enum("regular", "bold"),
          "align": enum("left", "center", "right")}, ["text", "box", "color"]),
     obj({"rect": BOX2, **PAINT, "lineMm": num(.1, 100), "radiusMm": num(0, 100)}, ["rect"]),
     obj({"line": BOX2, "color": COLOR, "lineMm": num(.1, 100)}, ["line", "color", "lineMm"]),
-    obj({"circle": arr(num(0, 1), 3), **PAINT}, ["circle"]),
+    obj({"circle": arr(num(-1, 2), 3), **PAINT}, ["circle"]),
     obj({"barcode": BOX2, "seed": integer(0, 4294967295)}, ["barcode", "seed"]),
     obj({"stripes": BOX2, "colors": arr(COLOR, 2), "angleDegrees": num(-360, 360),
          "widthMm": num(.1, 1000)}, ["stripes", "colors", "angleDegrees", "widthMm"]),

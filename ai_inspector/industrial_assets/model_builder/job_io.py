@@ -86,18 +86,29 @@ def pinned_font():
     return folder, manifest
 
 
-def validate_fonts(job):
+def font_bytes(font_directory=None):
+    """Read the pinned bytes, from a host-owned job copy or the bundled folder."""
     try:
-        _, trusted = pinned_font()
-        folder = directory(job / "fonts")
+        bundled, trusted = pinned_font()
+        folder = bundled if font_directory is None else directory(font_directory)
         entry = trusted["regular"]
-        require(names(folder, 2) == {"fonts.json", entry["file"]}, "$.fonts",
-                "Expected only the pinned font and its manifest", "font_missing")
         require(read_json(folder, "fonts.json", FONT_MANIFEST_BYTES) == trusted, "$.fonts",
                 "Font manifest differs from the bundled manifest", "font_missing")
         payload = read_bytes(folder, entry["file"], entry["bytes"])
         require(len(payload) == entry["bytes"] and sha256(payload).hexdigest() == entry["sha256"],
                 "$.fonts", "Font bytes differ from the pinned SHA-256", "font_missing")
+        return payload
+    except (OSError, ValueError, module("errors").ModelImportError) as error:
+        raise ModelBuildError("font_missing", "$.fonts", "The pinned job font is missing or invalid") from error
+
+
+def validate_fonts(job):
+    try:
+        _, trusted = pinned_font()
+        folder = directory(job / "fonts")
+        require(names(folder, 2) == {"fonts.json", trusted["regular"]["file"]}, "$.fonts",
+                "Expected only the pinned font and its manifest", "font_missing")
+        font_bytes(folder)
         return trusted
     except (OSError, ValueError, module("errors").ModelImportError) as error:
         raise ModelBuildError("font_missing", "$.fonts", "The pinned job font is missing or invalid") from error

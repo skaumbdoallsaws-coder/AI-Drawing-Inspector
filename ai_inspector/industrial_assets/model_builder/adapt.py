@@ -16,16 +16,19 @@ def material_key(component):
     return entry["material"]
 
 
-def material_value(component, recipe):
+def material_value(component, recipe, image_indices):
     entry = component.entry
     value = deepcopy(recipe["materials"][entry["material"]])
     result = module("materials").default_material()
     color = module("transforms").linear_color
     if component.role == "print":
-        value["color"] = entry["print"]["background"]
-        value.pop("finish", None)
-        result["artwork"] = True
-        # MB2 replaces this flat color with a texture and neutral white factor.
+        from .errors import require
+        require("finish" not in value, component.path + ".material",
+                "Printed front materials cannot have a default finish", "print_invalid")
+        value["color"] = "#ffffff"
+        result.update(artwork=True, texture={"image": image_indices[entry["id"]], "wrapS": 33071, "wrapT": 33071})
+        if value["lit"] > 0:
+            result["emissiveTexture"] = dict(result["texture"])
     elif component.role == "back":
         value["color"] = entry["back"]
         value["lit"] = 0
@@ -43,14 +46,16 @@ def encode_name(name):
                    else f"%{c:02X}" for c in name.encode("utf-8"))
 
 
-def to_model(components, recipe):
+def to_model(components, recipe, prints):
     api = module("model")
+    image_indices = {entry_id: i for i, entry_id in enumerate(prints)}
+    images = [api.ModelImage(p.data, "image/png", p.width, p.height, p.width, p.height) for p in prints.values()]
     materials, material_indices, groups = [], {}, OrderedDict()
     for component in components:
         key = material_key(component)
         if key not in material_indices:
             material_indices[key] = len(materials)
-            materials.append(material_value(component, recipe))
+            materials.append(material_value(component, recipe, image_indices))
         group = (component.entry["name"], key)
         groups.setdefault(group, []).append(component)
     parts, entries, instances, node_ordinals = [], {}, {}, {}
@@ -84,7 +89,7 @@ def to_model(components, recipe):
         parts.append(api.Part(key, name, name, name, material_indices[material],
                               np.concatenate(positions).astype(np.float32), np.concatenate(normals).astype(np.float32),
                               np.concatenate(uv).astype(np.float32) if any_uv else None, np.concatenate(indices)))
-    model = api.Model(recipe["name"], "recipe", 0, "", "model-builder-1", parts, materials, [], {})
+    model = api.Model(recipe["name"], "recipe", 0, "", "model-builder-1", parts, materials, images, {})
     mapping = {"entries": {k: sorted(v) for k, v in sorted(entries.items())},
                "instances": {k: sorted(v) for k, v in sorted(instances.items())}}
     return model, mapping

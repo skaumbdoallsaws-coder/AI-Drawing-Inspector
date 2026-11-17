@@ -4,6 +4,7 @@ Kept outside model_builder so the private worker package never imports an
 application parent. The caller owns the job directory; MB4 owns publication.
 """
 import asyncio
+import struct
 import threading
 
 from . import primitives
@@ -90,11 +91,12 @@ def run_build(job_dir, dependency_root, *, cancel_event=None, timeout=WALL_SECON
             if before != after:
                 raise ModelImportError("model_worker_failed")
             result, payload = protocol.read_result(job, recipe, allowed)
+            protocol.validate_glb_metadata(primitives.gltf_json(payload), result, payload=payload)
             checked = primitives.verify(payload, result["dimensions"], base_height=recipe["hangHeight"])
-            protocol.validate_glb_metadata(primitives.gltf_json(payload), result)
             if checked["triangles"] != result["triangles"] or checked["bytes"] != result["outputBytes"]:
                 raise ModelImportError("model_worker_failed")
-        except (OSError, ValueError, KeyError, TypeError, ModelImportError):
+        except (OSError, ValueError, KeyError, TypeError, IndexError, struct.error,
+                OverflowError, RecursionError, ModelImportError):
             raise ModelImportError("model_worker_failed") from None
         if event.is_set():
             raise ModelImportError("model_cancelled")

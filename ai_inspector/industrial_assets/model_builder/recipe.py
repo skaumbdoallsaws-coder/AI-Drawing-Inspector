@@ -158,7 +158,8 @@ def _printing(entry, path):
             item.setdefault("lineMm", 1)
             item.setdefault("radiusMm", 0)
         if "circle" in item:
-            require(item["circle"][2] > 0, p + ".circle", "Circle radius must be positive", "print_invalid")
+            require(0 < item["circle"][2] <= 1, p + ".circle",
+                    "Circle radius must be a positive width fraction at most 1", "print_invalid")
         if "dots" in item:
             _rectangle(item["dots"]["area"], p + ".dots.area")
             require(2 * item["dots"]["radiusMm"] <= item["dots"]["pitchMm"], p,

@@ -37,7 +37,7 @@ def sample():
              "materials": [{"name": "paint", "baseColor": [.1, .2, .3, 1], "texture": None, "alphaMode": "OPAQUE",
                             "alphaCutoff": .5, "emissive": [0,0,0], "doubleSided": False,
                             "roughness": .6, "metalness": 0, "unlit": False}],
-             "surfaces": [], "footprint": [[{"x": -.5, "z": -.5}, {"x": .5, "z": -.5},
+              "images": [], "surfaces": [], "footprint": [[{"x": -.5, "z": -.5}, {"x": .5, "z": -.5},
                                            {"x": .5, "z": .5}, {"x": -.5, "z": .5}]],
              "lints": [], "warnings": [], "budgets": module("budgets").estimate(raw),
              "provenance": protocol.provenance(raw)}

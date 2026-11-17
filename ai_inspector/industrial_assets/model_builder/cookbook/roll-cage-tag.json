@@ -13,10 +13,10 @@
    "artifactSha256": "8dda66bf181b8f9c4f00bdb5f91a7973b623075b7f7950dc18681240e33b6674", "position": [0, 0, 0], "rotateY": 0,
    "recolor": [{"select": "p:cage%20top%20rail#0", "material": "tag"}]},
   {"id": "tag", "name": "carrier tag", "shape": "panel", "material": "tag",
-   "center": [0, 0.835, 0.3275], "size": [0.36, 0.20], "facing": "+z", "back": "#1f5f3a",
+   "center": [0, 0.885, 0.3275], "size": [0.36, 0.20], "facing": "+z", "back": "#1f5f3a",
    "print": {"background": "#1f5f3a", "items": [
     {"rect": [0.024, 0.043, 0.976, 0.957], "stroke": "#ffffff", "lineMm": 4, "radiusMm": 9},
     {"text": "OUTBOUND", "box": [0.08, 0.20, 0.92, 0.80], "color": "#ffffff", "weight": "bold"}]}},
   {"id": "clips", "name": "tag clips", "shape": "box", "material": "clips",
-   "center": [-0.12, 0.955, 0.3315], "size": [0.032, 0.05, 0.011], "repeat": {"count": 2, "step": [0.24, 0, 0]}}],
+   "center": [-0.12, 0.975, 0.3315], "size": [0.032, 0.05, 0.011], "repeat": {"count": 2, "step": [0.24, 0, 0]}}],
  "footprint": "box"}

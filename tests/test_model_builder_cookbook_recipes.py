@@ -144,3 +144,13 @@ def test_a_category_refusal_names_the_categories_this_site_offers():
     with pytest.raises(module("errors").ModelBuildError) as caught:
         module("recipe").normalize_recipe(value, allowed_categories=["Workstations", "Storage"], allowed_appearance_ids=[])
     assert caught.value.to_dict()["details"]["problem"].endswith("choose one of: Storage, Workstations")
+
+
+def test_e1_cage_tag_matches_the_hand_placed_pair_in_size_height_and_centring():
+    # Hand-placed pair (docs/sage-model-builder-reference/cart_tags.py): a 0.36 x 0.20 m placard whose top sits
+    # 15 mm below the cart's top rail, centred on the cart. E1 allows 1 cm.
+    tag = next(e for e in raw("roll-cage-tag")["entries"] if e.get("id") == "tag")
+    rail_top = max(e["max"][1] for e in raw("roll-cage-plain")["entries"] if e.get("name") == "cage top rail")
+    assert tag["size"] == [0.36, 0.20]
+    assert abs((rail_top - (tag["center"][1] + tag["size"][1] / 2)) - 0.015) <= 0.01
+    assert abs(tag["center"][0]) <= 0.01

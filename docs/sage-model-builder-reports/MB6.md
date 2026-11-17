@@ -95,3 +95,7 @@ same renderer (model-builder-night/e1_sheets.py; pictures in model-builder-night
   cartons sat lower than in the original, which stacks them to about 0.8 m with some reaching the rim. The scatter
   window's top went from 0.75 m to 0.95 m, still under the 1.032 m rim. Bounds, part names and triangles are
   unchanged, and the test still passes. The MB0 reference recipe stays as it was recorded.
+- Cage + tag against the hand-placed pair (cart_tags.py: the placard's top sits 15 mm below the rail top). The
+  cookbook tag (from the MB3 template) hung 65 mm below. It is raised 5 cm (centre y 0.885), and the clips now run
+  up to the rail top (0.95-1.00). It still builds with no lints and reads forward. Size and centring were already
+  equal. New test: test_e1_cage_tag_matches_the_hand_placed_pair_in_size_height_and_centring.

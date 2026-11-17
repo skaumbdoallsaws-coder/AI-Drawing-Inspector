@@ -450,6 +450,9 @@ def _prepare(service, principal, site_id, layout_id, base_revision, request, *, 
         "operationReceipt": deepcopy(prepared), "ghostPreview": {"layout": deepcopy(prepared["document"])},
         "transactionBinding": binding.to_dict(), "validation": {
             "noNewErrors": True,
+            **({"replacements": [{"operationIndex": row["index"], **row["replacement"]}
+                                   for row in prepared["operationResults"] if "replacement" in row]}
+               if any("replacement" in row for row in prepared["operationResults"]) else {}),
             # What the change adds; spatial and routing below are the whole layout.
             **({"introduced": introduced} if introduced is not None else {}),
             **({"siteContext": site_review} if site_review is not None else {}),

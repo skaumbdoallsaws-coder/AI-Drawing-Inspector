@@ -222,6 +222,8 @@ class FacilityEditGateway(FacilityReadGateway):
             "saved": False, "approvalRequired": not (self.edit_mode == "direct" and alternative["directApplyPolicy"]["eligible"]),
             "editMode": self.edit_mode, "directApplyPolicy": alternative["directApplyPolicy"], "expiresAt": result["expiresAt"],
             "validation": alternative["validation"], "metrics": alternative["metrics"],
+            **({"replacements": alternative["validation"]["replacements"]}
+               if "replacements" in alternative["validation"] else {}),
             "diffHash": alternative["operationReceipt"]["diffHash"],
             "affectedIds": alternative["operationReceipt"]["affectedIds"][:100],
             "createdIds": alternative["operationReceipt"]["createdIds"][:100]}

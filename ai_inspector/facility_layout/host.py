@@ -716,6 +716,7 @@ class LocalFacilityLayoutHost:
                 self._resolve_current_asset_definition
             ),
             component_inventory_resolver=self._resolve_component_inventory,
+            anchor_replacement_resolver=self._resolve_anchor_replacement,
             process_map_resolver=(
                 self._resolve_process_map
                 if self.process_map_root is not None
@@ -779,6 +780,10 @@ class LocalFacilityLayoutHost:
         from ai_inspector.codex_runtime.component_inventory import resolve_component_inventory
         return resolve_component_inventory(self.agent_runtime, principal, reference,
             placement_id, representation, project_root=self._component_visual_root, asset=asset)
+
+    def _resolve_anchor_replacement(self, principal, reference, layout, operation):
+        from .model_builder_anchor import resolve_anchor_replacement
+        return resolve_anchor_replacement(self, principal, reference, layout, operation)
 
     def _load_facility_planning_package(
         self,

@@ -1368,6 +1368,12 @@ def _op_set_equipment_decals(document, operation, _index, _base_revision):
 
 
 def _op_replace_asset(document, operation, _index, _base_revision):
+    anchored = operation.get("_anchorResolved")
+    if "anchorInclude" in operation and not isinstance(anchored, dict):
+        _fail("anchor_include_invalid", "Anchored replacement must be resolved by the server.")
+    if anchored is not None and (set(anchored) != {"transform", "componentMaterials"}
+                                 or "anchorInclude" not in operation):
+        _fail("anchor_include_invalid", "Invalid resolved anchored replacement.")
     identifier = _clean_id(operation.get("placementId"), "placementId", "pl")
     placement = _find(document, "placements", "placementId", identifier, "Placement")
     asset_id = _clean_id(operation.get("assetId"), "assetId", "asset")
@@ -1393,7 +1399,18 @@ def _op_replace_asset(document, operation, _index, _base_revision):
         _fail("replacement_has_dependencies", "Detach linked equipment, routes, process bindings, movement, or wall artwork before replacing this asset.", details={"targetId":identifier,"references":sorted(set(references))})
     placement["assetId"] = asset_id
     placement["assetDefinitionRevision"] = revision
-    placement.pop("componentMaterials", None)
+    if anchored is None:
+        placement.pop("componentMaterials", None)
+    else:
+        placement["transform"] = anchored["transform"]
+        if anchored["componentMaterials"] is None:
+            placement.pop("componentMaterials", None)
+        else:
+            from .component_materials import normalize_component_materials
+            try:
+                placement["componentMaterials"] = normalize_component_materials(anchored["componentMaterials"], document)
+            except ValueError as error:
+                _fail("invalid_component_materials", str(error))
     from .equipment_decals import remove_equipment_decals
     remove_equipment_decals(document, identifier)
     if not keep: placement.pop("appearance", None)

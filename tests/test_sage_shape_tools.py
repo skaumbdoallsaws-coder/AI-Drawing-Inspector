@@ -106,6 +106,7 @@ def test_the_edit_gateway_offers_the_shape_tools_and_the_read_gateway_does_not(h
     assert set(shapes.NAMES) <= names
     assert {"inspect_model_import", "prepare_model_asset", "register_model_asset"} <= names
     assert {"get_model_recipe", "inspect_model_include", "build_model_draft", "revise_model_draft"} <= names
+    assert "measure_facility_gap" in names
     reader = FacilityReadGateway(host.agent_runtime, host.principal(), {
         "siteId": LOCAL_SITE_ID, "layoutId": LOCAL_LAYOUT_ID, "revision": saved(host)["revision"]}, turn_id="read")
     assert not set(shapes.NAMES) & {spec["name"] for spec in reader.specs}

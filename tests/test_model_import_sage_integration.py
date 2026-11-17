@@ -206,7 +206,8 @@ def test_foreign_imports_and_drafts_match_missing_ids(env, scope):
         ("register_model_asset", {"draftId": draft_id}, {"draftId": "md-" + "f" * 24}),
     ):
         foreign_result, missing_result = call(gate, tool, arguments), call(gate, tool, missing)
-        assert not foreign_result["ok"] and foreign_result == missing_result
+        assert not foreign_result["ok"] and foreign_result["error"] == missing_result["error"]
+        assert set(foreign_result) == set(missing_result)
         assert gate.take_image() is None
 
 

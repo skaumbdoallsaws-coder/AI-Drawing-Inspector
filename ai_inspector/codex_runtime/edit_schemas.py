@@ -350,8 +350,11 @@ def operation_batch_schema():
     operation("set_position_mode", {"placementId": ref("placementId"), "positionMode": POSITION_MODE})
     operation("set_snap_relationship", {"placementId": ref("placementId"), "snapRelationship": placement["snapRelationship"]})
     operation("replace_asset", {"placementId": ref("placementId"), "assetId": ref("stableId"),
-        "assetDefinitionRevision": ref("revision"), "keepAppearance": {"type": "boolean"}},
-        ["placementId", "assetId", "assetDefinitionRevision"])
+        "assetDefinitionRevision": ref("revision"), "keepAppearance": {"type": "boolean"},
+        "anchorInclude": {"type": "string", "minLength": 1, "maxLength": 80}},
+        ["placementId", "assetId", "assetDefinitionRevision"],
+        "With anchorInclude, the server pins the included host to the old placement during preview and apply. "
+        "Read dropped finishes and decals in the replacement report; ask before dropping decals.")
     operation("set_appearance", {"placementIds": array(ref("placementId"), 50, 1, uniqueItems=True), "color": nullable(COLOR),
               "appearance": nullable(ref("facilityAppearance"))}, ["placementIds"],
               "Give exactly one of color (a plain color) or appearance (a finish from list_facility_library, plus only the "

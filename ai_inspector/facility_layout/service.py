@@ -376,6 +376,7 @@ class FacilityLayoutService:
         component_inventory_resolver: Callable[
             [FacilityPrincipal, Mapping[str, str], str, str], Mapping[str, Any]
         ] | None = None,
+        anchor_replacement_resolver: Callable | None = None,
         process_map_resolver: Optional[ProcessMapResolver] = None,
         evidence_authority_resolver: Optional[
             EvidenceAuthorityResolver
@@ -409,6 +410,7 @@ class FacilityLayoutService:
             current_asset_definition_resolver
         )
         self.component_inventory_resolver = component_inventory_resolver
+        self.anchor_replacement_resolver = anchor_replacement_resolver
         self.process_map_resolver = process_map_resolver
         self.evidence_authority_resolver = evidence_authority_resolver
         self.spatial_executor = spatial_executor or FacilitySpatialExecutor()
@@ -3087,6 +3089,20 @@ class FacilityLayoutService:
                 "Facility Layout revision conflict.",
                 details={"currentRevision": current["revision"]},
             )
+        resolved_operations = []
+        replacement_reports = {}
+        for index, operation in enumerate(operations):
+            if isinstance(operation, Mapping) and operation.get("op") == "replace_asset":
+                if "_anchorResolved" in operation:
+                    raise FacilityLayoutError("anchor_include_invalid", "Internal anchor data cannot be supplied.")
+                if "anchorInclude" in operation:
+                    if self.anchor_replacement_resolver is None:
+                        raise FacilityLayoutError("anchor_include_unavailable", "Anchored replacement is unavailable.")
+                    reference = {"siteId": site_id, "layoutId": layout_id, "revision": base_revision}
+                    operation, replacement_reports[index] = self.anchor_replacement_resolver(
+                        principal, reference, current["layout"], operation)
+            resolved_operations.append(operation)
+        operations = resolved_operations
         self._verify_spatial_candidate_operations(
             principal,
             site_id,
@@ -3113,6 +3129,8 @@ class FacilityLayoutService:
             operations,
             base_revision=base_revision,
         )
+        for index, report in replacement_reports.items():
+            operation_result["operationResults"][index]["replacement"] = report
         self._require_floor_plan_artifacts(principal, site_id, current["layout"], operation_result["document"])
         dependencies = self.validate_dependencies(
             principal,

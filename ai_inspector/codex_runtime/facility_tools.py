@@ -16,13 +16,14 @@ from ai_inspector.facility_layout.agent_runtime import FacilityLayoutAgentRuntim
 from .policy import PilotError
 from . import model_import_tools
 from . import model_builder_tools
+from . import facility_gap
 
 
 READ_NAMES = frozenset({"inspect_facility_entities", "inspect_facility_semantics",
                         "inspect_facility_findings", "analyze_facility_spatial",
                         "search_industrial_assets", "inspect_facility_region", "analyze_facility_fit",
                         "inspect_pattern_provenance", "inspect_cell_layout_provenance",
-                        model_builder_tools.GET, model_builder_tools.INCLUDE})
+                        model_builder_tools.GET, model_builder_tools.INCLUDE, facility_gap.NAME})
 OUTPUT_SCHEMA = {
     "type": "object", "required": ["ok"], "properties": {
         "ok": {"type": "boolean"}, "data": {"type": "object"},
@@ -61,7 +62,7 @@ def tool_specs():
             *pattern_tool_specs(), position_tool_spec(), stack_tool_spec(), views_tool_spec(),
             *research_tool_specs(),
             *site_tool_specs(), *floor_plan_tool_specs(), *model_import_tools.tool_specs(),
-            *model_builder_tools.tool_specs()]
+            *model_builder_tools.tool_specs(), facility_gap.tool_spec()]
 
 
 def read_bound_layout(runtime, principal, reference):
@@ -466,6 +467,8 @@ class FacilityReadGateway:
             return model_import_tools.inspect(self, arguments)
         if name in model_builder_tools.READ_NAMES:
             return model_builder_tools.read(self, name, arguments)
+        if name == facility_gap.NAME:
+            return facility_gap.measure(self.runtime, self.principal, self.reference, arguments)
         from .site_tools import CATALOG_TOOLS, NAMES as SITE_NAMES, STEP_TOOLS, read_site
         from .floor_plan_tools import NAMES as FLOOR_PLAN_NAMES, read as read_floor_plan
         if name in FLOOR_PLAN_NAMES:

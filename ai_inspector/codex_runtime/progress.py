@@ -56,6 +56,7 @@ SIMPLE = {
     "inspect_model_import": (READ, "the imported 3D model"),
     "get_model_recipe": (READ, "model recipes"),
     "inspect_model_include": (READ, "the included model's parts"),
+    "measure_facility_gap": (MEASURE, "the clear space between facility items"),
     "build_model_draft": (PREPARE, "the 3D model draft"),
     "revise_model_draft": (PREPARE, "the revised 3D model draft"),
     "prepare_model_asset": (PREPARE, "the 3D model draft"),

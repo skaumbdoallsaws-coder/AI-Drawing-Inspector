@@ -336,7 +336,10 @@ class ModelImportHooks:
                              "displayName": bound["displayName"], "category": bound["category"],
                               "dimensions": draft["catalogDimensions"] if is_build else draft["dimensions"],
                               "attribution": bound.get("attribution") if is_build else bound["attribution"],
-                             "added": installed["added"]})
+                             "added": installed["added"],
+                             **({"includeFrames": [{"includeId": row["includeId"],
+                                                     "frame": row["frame"], "anchorable": row["anchorable"]}
+                                                    for row in draft["includes"]]} if is_build else {})})
 
     @host_errors
     def describe_model_attachment(self, principal, binding, import_id: str) -> dict | None:

@@ -749,6 +749,10 @@ class LocalFacilityLayoutHost:
         self.agent_runtime.model_import_inspect = self._model_import_hooks.inspect
         self.agent_runtime.model_import_prepare = self._model_import_hooks.prepare
         self.agent_runtime.model_import_register = self._model_import_hooks.register
+        self.agent_runtime.model_builder_build = self._model_import_hooks.build_for_sage
+        self.agent_runtime.model_builder_revise = self._model_import_hooks.revise_build
+        self.agent_runtime.model_builder_recipe = self._model_import_hooks.get_builder_recipe
+        self.agent_runtime.model_builder_include = self._model_import_hooks.inspect_builder_include
         self.agent_runtime.describe_model_attachment = self._model_import_hooks.describe_model_attachment
         self.agent_runtime.registrations_since = self._model_import_hooks.registrations_since
         self.construction_service = FacilityConstructionService(
@@ -1049,6 +1053,15 @@ class LocalFacilityLayoutHost:
 
     def focus_model_build_view(self, principal, reference, draft_id, focus, cancel=None):
         return self._model_import_hooks.focus_build_view(principal, reference, draft_id, focus, cancel)
+
+    def revise_model_build_draft(self, principal, reference, arguments, cancel=None):
+        return self._model_import_hooks.revise_build(principal, reference, arguments, cancel)
+
+    def get_model_recipe(self, principal, reference, arguments):
+        return self._model_import_hooks.get_builder_recipe(principal, reference, arguments)
+
+    def inspect_model_include(self, principal, reference, arguments):
+        return self._model_import_hooks.inspect_builder_include(principal, reference, arguments)
 
     def register_authored_asset(self, family: str, parameters: Mapping[str, Any] | None = None) -> dict[str, Any]:
         """Build a basic shape (shape_families) and add it to the shared private library and to this running host,

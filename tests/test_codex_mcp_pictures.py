@@ -10,7 +10,7 @@ import json
 import httpx
 import pytest
 
-from ai_inspector.codex_runtime import documentation_tools, facility_tools, model_import_tools
+from ai_inspector.codex_runtime import documentation_tools, facility_tools, model_builder_tools, model_import_tools
 from ai_inspector.facility_layout import sage_shapes
 from ai_inspector.codex_runtime.facility_tools import OUTPUT_SCHEMA
 from ai_inspector.codex_runtime.mcp_bridge import make_application
@@ -21,7 +21,7 @@ PICTURE = {"mimeType": "image/jpeg", "data": base64.b64encode(b"\xff\xd8\xff a p
 # place_grid (its planImage; sage_shapes, BS3-BS4), plus imported source/draft contact sheets.
 # The Documentation gateway attaches none.
 PICTURE_TOOLS = {"show_facility_views", "look_at_site_photo", "author_shape_asset", "place_grid",
-                 "inspect_model_import", "prepare_model_asset"}
+                 "inspect_model_import", "prepare_model_asset", "build_model_draft", "revise_model_draft"}
 HEADERS = {"Authorization": "Bearer secret", "Accept": "application/json, text/event-stream",
            "MCP-Protocol-Version": "2025-11-25"}
 
@@ -99,7 +99,7 @@ def test_every_result_without_a_picture_is_as_before():
 
 def test_the_tools_that_can_attach_a_picture_declare_no_output_schema_and_the_others_keep_theirs():
     facility, shapes = facility_tools.tool_specs(), sage_shapes.tool_specs()
-    imports = model_import_tools.edit_tool_specs()
+    imports = model_import_tools.edit_tool_specs() + model_builder_tools.edit_tool_specs()
     assert {item["name"] for item in facility + shapes + imports if item.get("pictures")} == PICTURE_TOOLS
     for specs in (facility, shapes, imports, documentation_tools.tool_specs(), documentation_tools.tool_specs(research=True)):
         listed, = posted(Gateway(specs), ("tools/list", {}))

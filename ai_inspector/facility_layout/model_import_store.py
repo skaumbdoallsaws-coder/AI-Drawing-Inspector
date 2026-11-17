@@ -749,6 +749,16 @@ class ModelImportStore:
         return list_drafts(self, scope)
 
     @host_errors
+    def recent_build_registrations(self, scope, since):
+        from .model_build_store import recent_registrations
+        return recent_registrations(self, scope, since=since)
+
+    @host_errors
+    def build_summary(self, scope, draft_id):
+        from .model_build_store import summary
+        return summary(self, scope, draft_id)
+
+    @host_errors
     def focus_build_view(self, scope, draft_id, focus, private_asset_root, cancel=None):
         from .model_build_views import focus_view
         return focus_view(self, scope, draft_id, focus, private_asset_root, cancel)

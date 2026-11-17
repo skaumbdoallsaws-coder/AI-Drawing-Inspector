@@ -62,6 +62,7 @@ def test_the_reads_are_published_and_the_staging_only_where_changes_are_staged()
     assert "preview_floor_plan_import" not in {spec["name"] for spec in tool_specs()}
     assert "preview_floor_plan_import" in {spec["name"] for spec in edit_tool_specs()}
     assert "inspect_model_import" in {spec["name"] for spec in tool_specs()}
+    assert {"get_model_recipe", "inspect_model_include"} <= {spec["name"] for spec in tool_specs()}
     assert {"prepare_model_asset", "register_model_asset"} <= {spec["name"] for spec in edit_tool_specs()}
     assert describe("plan_floor_plan_conversion", {})["running"] == "Checking the walls, doors and rooms in the drawing"
     assert describe("preview_floor_plan_import", {"packageId": "floor-plan-1"}, edit_mode="direct")["running"] \

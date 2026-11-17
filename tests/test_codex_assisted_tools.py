@@ -23,7 +23,8 @@ def test_contract_has_no_commit_approval_or_shell_capability(setup):
     _, gateway, _ = setup
     assert {s["name"] for s in edit_tool_specs()} == {"preview_facility_operations", "preview_facility_undo",
                                                       "preview_planned_design", "preview_floor_plan_import",
-                                                      "prepare_model_asset", "register_model_asset"}
+                                                      "prepare_model_asset", "register_model_asset",
+                                                      "build_model_draft", "revise_model_draft"}
     assert "apply_document_edits" not in {spec["name"] for spec in gateway.specs}
     assert "find_document_text" not in {spec["name"] for spec in gateway.specs}
     assert "read_document_objects" not in {spec["name"] for spec in gateway.specs}

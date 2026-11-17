@@ -15,12 +15,14 @@ from ai_inspector.facility_layout.errors import FacilityLayoutError
 from ai_inspector.facility_layout.agent_runtime import FacilityLayoutAgentRuntimeError
 from .policy import PilotError
 from . import model_import_tools
+from . import model_builder_tools
 
 
 READ_NAMES = frozenset({"inspect_facility_entities", "inspect_facility_semantics",
                         "inspect_facility_findings", "analyze_facility_spatial",
                         "search_industrial_assets", "inspect_facility_region", "analyze_facility_fit",
-                        "inspect_pattern_provenance", "inspect_cell_layout_provenance"})
+                        "inspect_pattern_provenance", "inspect_cell_layout_provenance",
+                        model_builder_tools.GET, model_builder_tools.INCLUDE})
 OUTPUT_SCHEMA = {
     "type": "object", "required": ["ok"], "properties": {
         "ok": {"type": "boolean"}, "data": {"type": "object"},
@@ -29,6 +31,9 @@ OUTPUT_SCHEMA = {
                   "additionalProperties": False},
     }, "additionalProperties": False,
 }
+OUTPUT_SCHEMA["properties"]["turnRemaining"] = {"type": "object", "properties": {
+    "seconds": {"type": "integer", "minimum": 0}, "calls": {"type": "integer", "minimum": 0}},
+    "required": ["seconds", "calls"], "additionalProperties": False}
 
 
 def tool_specs():
@@ -55,7 +60,8 @@ def tool_specs():
             parking_tool_spec(), workstation_tool_spec(), light_positions_tool_spec(), light_coverage_tool_spec(),
             *pattern_tool_specs(), position_tool_spec(), stack_tool_spec(), views_tool_spec(),
             *research_tool_specs(),
-            *site_tool_specs(), *floor_plan_tool_specs(), *model_import_tools.tool_specs()]
+            *site_tool_specs(), *floor_plan_tool_specs(), *model_import_tools.tool_specs(),
+            *model_builder_tools.tool_specs()]
 
 
 def read_bound_layout(runtime, principal, reference):
@@ -108,6 +114,13 @@ class FacilityReadGateway:
             raise PilotError("codex_run_closed", "This inspection is no longer active.", 409)
         return read_bound_layout(self.runtime, self.principal, self.reference)
 
+    def deadline_remaining(self):
+        return max(0, self.deadline - time.monotonic())
+
+    def turn_remaining(self):
+        return {"seconds": max(0, int(self.deadline_remaining())),
+                "calls": max(0, self.max_calls - self.calls)}
+
     def take_image(self):
         """The picture the last tool call produced, if any; handed out once."""
         image, self.last_image = getattr(self, "last_image", None), None
@@ -121,6 +134,10 @@ class FacilityReadGateway:
             started = time.monotonic()
             self.calls += 1
             model_import = name in model_import_tools.NAMES
+            builder = (name in model_builder_tools.NAMES or
+                       (name in {model_import_tools.INSPECT, model_import_tools.REGISTER}
+                        and isinstance(arguments, dict) and isinstance(arguments.get("draftId"), str)
+                        and arguments["draftId"].startswith("md-")))
             self.model_import_cancel = threading.Event() if model_import else None
             try:
                 if self.calls > self.max_calls:
@@ -176,6 +193,10 @@ class FacilityReadGateway:
                 result = {"ok": False, "error": {"code": str(code), "message": message}}
                 if isinstance(error, PilotError) and getattr(error, "argument_findings", None):
                     result["error"]["details"] = {"findings": error.argument_findings}
+                if isinstance(error, PilotError) and isinstance(getattr(error, "details", None), dict):
+                    details = deepcopy(error.details)
+                    if len(json.dumps(details, allow_nan=False).encode()) <= 16000:
+                        result["error"]["details"] = details
                 if isinstance(error, (FacilityLayoutError, FacilityLayoutAgentRuntimeError)) and isinstance(getattr(error, "details", None), dict):
                     details = (deepcopy(error.details) if model_import else
                         {key: deepcopy(value[:10] if isinstance(value, list) else value)
@@ -185,6 +206,8 @@ class FacilityReadGateway:
                         result["error"]["details"] = details
             finally:
                 self.model_import_cancel = None
+            if builder:
+                result["turnRemaining"] = self.turn_remaining()
             self.receipts.append({"tool": name if name in self.validators else "denied", "ok": result["ok"],
                 "argumentHash": hashlib.sha256(json.dumps(arguments, sort_keys=True).encode()).hexdigest(),
                 "durationMs": round((time.monotonic() - started) * 1000),
@@ -441,6 +464,8 @@ class FacilityReadGateway:
     def _read_data(self, name, arguments):
         if name == model_import_tools.INSPECT:
             return model_import_tools.inspect(self, arguments)
+        if name in model_builder_tools.READ_NAMES:
+            return model_builder_tools.read(self, name, arguments)
         from .site_tools import CATALOG_TOOLS, NAMES as SITE_NAMES, STEP_TOOLS, read_site
         from .floor_plan_tools import NAMES as FLOOR_PLAN_NAMES, read as read_floor_plan
         if name in FLOOR_PLAN_NAMES:

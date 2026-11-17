@@ -86,6 +86,61 @@ def list_drafts(store, scope):
         return sorted(result, key=lambda v: (v["created"], v["draftId"]), reverse=True)
 
 
+def recent_registrations(store, scope, *, since):
+    from .model_import_store import DRAFT_ID
+    store._authorize(scope)
+    with disk.coordinator(store.root):
+        rows = []
+        for path in (store._folder(scope) / "registrations").glob("md-*.json"):
+            if not DRAFT_ID.fullmatch(path.stem):
+                continue
+            receipt = store._receipt(scope, path.stem)
+            if receipt is None or receipt["at"] < since or not receipt["assetId"].startswith("asset-built-"):
+                continue
+            draft = read(store, scope, path.stem, allow_expired=True)
+            rows.append({"draftId": path.stem, "assetId": receipt["assetId"],
+                         "revision": receipt["revision"], "name": draft["recipe"]["name"],
+                         "registered": receipt["at"]})
+        return sorted(rows, key=lambda row: (row["registered"], row["draftId"]), reverse=True)[:20]
+
+
+def summary(store, scope, draft_id):
+    from ..industrial_assets.model_builder.errors import json_bytes, parse_json
+    from ..industrial_assets.model_builder.job_io import read_bytes
+    from ..industrial_assets.model_builder.protocol import RESULT_BYTES
+    store._authorize(scope)
+    with disk.coordinator(store.root):
+        draft = store._draft(scope, draft_id)
+        if draft.get("kind") != "build":
+            raise FacilityLayoutError("model_recipe_missing", "That built draft is unavailable.", status_code=404)
+        folder = store._folder(scope) / "drafts" / draft_id
+        result = parse_json(read_bytes(folder, "result.json", RESULT_BYTES), RESULT_BYTES)
+        drafts.result_matches(draft, result)
+        parts = result["parts"]
+        value = {"kind": "build", "draftId": draft_id, "name": draft["recipe"]["name"],
+                 "dimensions": draft["catalogDimensions"], "triangles": draft["triangles"],
+                 "shift": result["shift"], "partsTotal": len(parts),
+                 "parts": [{"id": part["key"], "name": part["name"], "triangles": part["triangles"]}
+                           for part in parts[:64]],
+                 "materials": [{"name": material["name"], "color": material["baseColor"],
+                                **({"defaultFinish": material["defaultFinish"]} if material.get("defaultFinish") else {})}
+                               for material in result["materials"]],
+                 "surfaces": draft["surfaces"], "footprint": draft["footprint"],
+                 "lints": result["lints"], "warnings": result["warnings"],
+                 "attribution": draft["attribution"]}
+        value["nextPartsOffset"] = len(value["parts"]) if len(value["parts"]) < len(parts) else None
+        while len(json_bytes(value)) > 48*1024:
+            for field in ("parts", "lints", "warnings", "surfaces", "footprint", "materials"):
+                if isinstance(value[field], list) and value[field]:
+                    value[field].pop()
+                    break
+            else:
+                raise FacilityLayoutError("model_summary_invalid", "The built draft summary is too large.",
+                                          status_code=503)
+            value["nextPartsOffset"] = len(value["parts"]) if len(value["parts"]) < len(parts) else None
+        return value
+
+
 def build(store, scope, recipe, cancel=None, *, categories, appearance_ids, include_catalog=None,
           derived_from=None, recheck=None):
     from .model_import_store import build_failure, quota, translate, ModelImportError

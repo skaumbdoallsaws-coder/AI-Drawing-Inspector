@@ -325,11 +325,16 @@ def test_registration_hook_also_runs_without_attachments(server_surface, pilot_h
     assert result["registeredAssets"] == ["imported-receipt"]
 
 
-def test_failed_turn_does_not_claim_registrations(server_surface, pilot_harness):
+def test_failed_turn_reports_only_registrations_completed_before_the_failure(server_surface, pilot_harness):
+    # Sage model builder C34 (docs/sage-model-builder-plan.md) replaced "a failed turn claims nothing": the failure
+    # path reports what the durable receipts show completed before it, never what the model's text says.
     pilot_harness.failure = PilotError("codex_test_failure", "Synthetic failure")
-    with pytest.raises(PilotError):
+    with pytest.raises(PilotError) as caught:
         pilot_harness.invoke(request(server_surface))
-    assert pilot_harness.receipt_calls == []
+    assert len(pilot_harness.receipt_calls) == 1
+    assert caught.value.code == "codex_test_failure"
+    assert "Registration completed before this failure: imported-receipt." in str(caught.value)
+    assert "forged-asset" not in str(caught.value)
 
 
 def test_missing_registration_hook_reports_empty(fake_host):

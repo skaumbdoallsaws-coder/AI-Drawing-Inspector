@@ -105,6 +105,7 @@ def test_the_edit_gateway_offers_the_shape_tools_and_the_read_gateway_does_not(h
     names = {spec["name"] for spec in gateway(host).specs}
     assert set(shapes.NAMES) <= names
     assert {"inspect_model_import", "prepare_model_asset", "register_model_asset"} <= names
+    assert {"get_model_recipe", "inspect_model_include", "build_model_draft", "revise_model_draft"} <= names
     reader = FacilityReadGateway(host.agent_runtime, host.principal(), {
         "siteId": LOCAL_SITE_ID, "layoutId": LOCAL_LAYOUT_ID, "revision": saved(host)["revision"]}, turn_id="read")
     assert not set(shapes.NAMES) & {spec["name"] for spec in reader.specs}
@@ -291,6 +292,10 @@ def test_the_chat_names_each_step():
         "Planned pedestrian barriers along 2 lines")
     assert describe(shapes.GRID_TOOL, {})["running"] == "Planning a grid of steel columns"
     assert describe(shapes.ROOF_TOOL, {})["running"] == "Planning the roof frame"
+    assert "model" in describe("build_model_draft", {})["running"].lower()
+    assert "model" in describe("revise_model_draft", {})["running"].lower()
+    assert "recipe" in describe("get_model_recipe", {})["running"].lower()
+    assert "parts" in describe("inspect_model_include", {})["running"].lower()
 
 
 def ruled(zone_id, label, box, **rules):

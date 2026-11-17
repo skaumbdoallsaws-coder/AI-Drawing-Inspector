@@ -70,8 +70,10 @@ def _bundle_files(directory: Path, draft_directory: Path, draft: dict, identity:
 
 class ModelImportHooks:
     """The host owns this adapter; tools never get filesystem paths or authority from IDs."""
-    def __init__(self, host):
+    def __init__(self, host, *, cookbook_root=None):
         self.host = host
+        from .model_builder_sources import DEFAULT_COOKBOOK
+        self.cookbook_root = DEFAULT_COOKBOOK if cookbook_root is None else Path(cookbook_root)
         self._principals = OrderedDict()
         self._principal_lock = threading.Lock()
 
@@ -109,7 +111,8 @@ class ModelImportHooks:
         return ModelImportScope(principal, reference["siteId"], reference["layoutId"])
 
     @host_errors
-    def inspect(self, principal, reference, *, import_id=None, draft_id=None, offset=0, limit=64) -> tuple[dict, bytes | None]:
+    def inspect(self, principal, reference, *, import_id=None, draft_id=None, offset=0, limit=64,
+                focus=None) -> tuple[dict, bytes | None]:
         scope = self._scope(principal, reference)
         if import_id is not None and draft_id is not None:
             raise FacilityLayoutError("model_reference_invalid", "Supply either importId or draftId.")
@@ -118,9 +121,15 @@ class ModelImportHooks:
         store = self.store
         if draft_id is not None:
             value = store.draft(scope, draft_id)
+            if focus is not None and value.get("kind") != "build":
+                raise FacilityLayoutError("model_focus_invalid", "Focus is available for built drafts only.")
             result = {} if value.get("kind") == "build" else {key: value[key] for key in PUBLIC_FIELDS}
             result.update(store.draft_parts(scope, draft_id, offset, limit))
-            return _bounded(result), store.preview(scope, draft_id, draft=True)
+            picture = (store.focus_build_view(scope, draft_id, focus, self.host._component_visual_root)
+                       if focus is not None else store.preview(scope, draft_id, draft=True))
+            return _bounded(result), picture
+        if focus is not None:
+            raise FacilityLayoutError("model_focus_invalid", "Focus needs a built draftId.")
         result = store.inspect(scope, import_id, offset, limit)
         picture = store.preview(scope, import_id) if import_id is not None and result.get("state") == "ready" else None
         return _bounded(result), picture
@@ -148,7 +157,99 @@ class ModelImportHooks:
             appearance_ids=sorted(load_library()["appearances"]), derived_from=derived_from,
             include_catalog=IncludeCatalog(self.host._component_visual_root),
             recheck=lambda: self._scope(principal, reference, write=True))
-        return _bounded(result), self.store.preview(scope, result["draftId"], draft=True)
+        return result, self.store.preview(scope, result["draftId"], draft=True)
+
+    @host_errors
+    def build_for_sage(self, principal, reference, recipe, cancel=None):
+        result, picture = self.build(principal, reference, recipe, cancel)
+        return self.store.build_summary(self._scope(principal, reference), result["draftId"]), picture
+
+    def _builder_library(self):
+        from .appearance_library import load_library
+        rows = self.host.list_assets()["assets"]
+        return rows, sorted({row["category"] for row in rows}), sorted(load_library()["appearances"])
+
+    @host_errors
+    def revise_build(self, principal, reference, arguments, cancel=None):
+        from ..industrial_assets.model_builder.edits import apply_edits
+        from ..industrial_assets.model_builder_host import IncludeCatalog
+        from .model_builder_sources import built_record, installed_recipe
+        scope = self._scope(principal, reference, write=True)
+        rows, categories, appearances = self._builder_library()
+        draft_id, asset_id = arguments.get("draftId"), arguments.get("assetId")
+        if bool(draft_id) == bool(asset_id) or (asset_id and not arguments.get("revision")):
+            raise FacilityLayoutError("model_revision_invalid", "Choose one built draft or a built asset revision.")
+        if draft_id:
+            draft = self.store.draft(scope, draft_id)
+            if draft.get("kind") != "build":
+                raise FacilityLayoutError("model_recipe_missing", "That built draft is unavailable.", status_code=404)
+            source = draft["recipe"]
+            derived_from = draft["buildProvenance"].get("derivedFrom")
+        else:
+            record = built_record(rows, asset_id, arguments["revision"])
+            source = installed_recipe(self.host._component_visual_root, record,
+                                      categories=categories, appearance_ids=appearances)
+            derived_from = asset_id
+        recipe = apply_edits(source, arguments["edits"], allowed_categories=categories,
+                             allowed_appearance_ids=appearances)
+        result = self.store.build(scope, recipe, cancel, categories=categories, appearance_ids=appearances,
+                                  derived_from=derived_from,
+                                  include_catalog=IncludeCatalog(self.host._component_visual_root),
+                                  recheck=lambda: self._scope(principal, reference, write=True))
+        self._scope(principal, reference, write=True)
+        picture = (self.store.focus_build_view(scope, result["draftId"], arguments["focus"],
+                                               self.host._component_visual_root, cancel)
+                   if arguments.get("focus") else self.store.preview(scope, result["draftId"], draft=True))
+        return self.store.build_summary(scope, result["draftId"]), picture
+
+    @host_errors
+    def get_builder_recipe(self, principal, reference, arguments):
+        from .model_builder_sources import cookbook_index, cookbook_recipe, built_record, installed_recipe
+        scope = self._scope(principal, reference)
+        rows, categories, appearances = self._builder_library()
+        if not arguments:
+            built = []
+            for row in rows:
+                if not row.get("assetId", "").startswith("asset-built-") or not row.get("buildProvenance"):
+                    continue
+                folder = disk.safe(self.host._component_visual_root / "generated/industrial_assets/authored/built" /
+                                   row["assetId"] / "recipe.json")
+                if folder.is_file():
+                    built.append((folder.stat().st_mtime_ns, row))
+            built.sort(key=lambda item: (item[0], item[1]["assetId"]), reverse=True)
+            listing = {"cookbook": cookbook_index(self.cookbook_root),
+                       "builtAssets": [{"assetId": row["assetId"], "revision": row["assetDefinitionRevision"],
+                                         "name": row["displayName"], "sizeBasis": row["buildProvenance"]["sizeBasis"]}
+                                        for _, row in built[:20]],
+                       "drafts": self.store.list_build_drafts(scope),
+                       "registeredLast24Hours": self.store.recent_build_registrations(scope, time.time()-86400)}
+            return _bounded(listing)
+        if "cookbookId" in arguments:
+            recipe = cookbook_recipe(self.cookbook_root, arguments["cookbookId"],
+                                     categories=categories, appearance_ids=appearances)
+            result = {"kind": "cookbook", "cookbookId": arguments["cookbookId"], "recipe": recipe}
+        elif "draftId" in arguments:
+            draft = self.store.draft(scope, arguments["draftId"])
+            if draft.get("kind") != "build":
+                raise FacilityLayoutError("model_recipe_missing", "That built draft is unavailable.", status_code=404)
+            result = {"kind": "draft", "draftId": arguments["draftId"], "recipe": draft["recipe"]}
+        else:
+            record = built_record(rows, arguments["assetId"])
+            recipe = installed_recipe(self.host._component_visual_root, record,
+                                      categories=categories, appearance_ids=appearances)
+            result = {"kind": "asset", "assetId": record["assetId"],
+                      "revision": record["assetDefinitionRevision"], "recipe": recipe}
+        if len(disk.encode(result)) > 48*1024:
+            raise FacilityLayoutError("model_summary_invalid", "The model recipe exceeds the result limit.",
+                                      status_code=503)
+        return result
+
+    @host_errors
+    def inspect_builder_include(self, principal, reference, arguments):
+        from ..industrial_assets.model_builder_host import IncludeCatalog, inspect_model_include
+        self._scope(principal, reference)
+        self.host.list_assets()  # Refresh the host's catalog binding before resolving the pinned artifact.
+        return inspect_model_include(arguments, catalog=IncludeCatalog(self.host._component_visual_root))
 
     @host_errors
     def list_build_drafts(self, principal, reference):

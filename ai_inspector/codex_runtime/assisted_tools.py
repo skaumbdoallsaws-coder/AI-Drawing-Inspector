@@ -5,6 +5,7 @@ from ai_inspector.facility_layout.placement_intents import PLACEMENT_INTENT_KEYS
 from .edit_schemas import obj, operation_batch_schema, text
 from .policy import PilotError
 from . import model_import_tools
+from . import model_builder_tools
 
 PACKAGE_LIMITS = (1000, 600_000)  # a design package from the server's planner, not model-written operations
 PREVIEWS = {"preview_facility_operations", "preview_facility_undo", "preview_planned_design",
@@ -43,6 +44,7 @@ def edit_tool_specs():
          "input_schema": obj({"receiptId": text()})},
         preview_spec(),
         *model_import_tools.edit_tool_specs(),
+        *model_builder_tools.edit_tool_specs(),
     ]
 
 
@@ -91,6 +93,8 @@ class FacilityEditGateway(FacilityReadGateway):
     def _read_data(self, name, arguments):
         if name in {model_import_tools.PREPARE, model_import_tools.REGISTER}:
             return model_import_tools.edit(self, name, arguments)
+        if name in model_builder_tools.EDIT_NAMES:
+            return model_builder_tools.edit(self, name, arguments)
         # inspect_model_import uses the same read path and scope hook as the read gateway.
         if name == model_import_tools.INSPECT:
             return super()._read_data(name, arguments)

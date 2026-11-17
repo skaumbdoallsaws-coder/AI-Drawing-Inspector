@@ -177,7 +177,10 @@ def normalize_recipe(recipe, *, allowed_categories=None, allowed_appearance_ids=
         _validate(recipe, RECIPE_SCHEMA)
         value = _canonical(deepcopy(recipe))
         if allowed_categories is not None:
-            require(value["category"] in allowed_categories, "$.category", "Category is not in the supplied catalog")
+            # Name the choices so Sage can pick the closest existing category (sites differ).
+            choices = ", ".join(sorted(str(c) for c in allowed_categories))[:400]
+            require(value["category"] in allowed_categories, "$.category",
+                    "Category is not in the supplied catalog; choose one of: " + choices)
         for key, default in {"description": "", "tags": [], "front": [], "references": [], "hangHeight": 0,
                              "surfaces": [], "footprint": "hull"}.items():
             value.setdefault(key, default)

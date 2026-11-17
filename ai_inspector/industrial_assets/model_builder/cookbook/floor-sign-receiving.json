@@ -1,0 +1,32 @@
+{"name": "Floor sign on a post - RECEIVING",
+ "category": "Material Handling",
+ "description": "Free-standing area sign: weighted round base plate, steel post and a double-sided RECEIVING sign board at eye height. Move it to mark a receiving area.",
+ "tags": ["floor sign", "area sign", "receiving", "post sign", "wayfinding"],
+ "size": {"width": 0.62, "depth": 0.40, "height": 1.80},
+ "sizeBasis": {"kind": "typical", "note": "post sign class: 600 x 400 mm board on a 1.8 m post, 400 mm base"},
+ "front": ["receiving sign front"],
+ "materials": {
+  "base": {"color": "#2f3337", "roughness": 0.6, "metalness": 0.4},
+  "post": {"color": "#b9bec4", "roughness": 0.35, "metalness": 0.8},
+  "board": {"color": "#1d3f73", "roughness": 0.5, "metalness": 0.2},
+  "face": {"color": "#1d3f73", "roughness": 0.5}},
+ "entries": [
+  {"id": "base-plate", "name": "sign base", "shape": "cylinder", "material": "base",
+   "from": [0, 0.0, 0], "to": [0, 0.025, 0], "radius": 0.20, "segments": 32},
+  {"id": "base-collar", "name": "sign base", "shape": "cylinder", "material": "base",
+   "from": [0, 0.025, 0], "to": [0, 0.10, 0], "radius": 0.04, "segments": 20},
+  {"id": "post", "name": "sign post", "shape": "cylinder", "material": "post",
+   "from": [0, 0.03, 0], "to": [0, 1.42, 0], "radius": 0.024, "segments": 20},
+  {"id": "board", "name": "sign board", "shape": "box", "material": "board",
+   "min": [-0.31, 1.38, -0.012], "max": [0.31, 1.80, 0.012]},
+  {"id": "front-face", "name": "receiving sign front", "shape": "panel", "material": "face",
+   "center": [0, 1.59, 0.014], "size": [0.58, 0.38], "facing": "+z",
+   "print": {"background": "#1d3f73", "items": [
+    {"rect": [0.03, 0.045, 0.97, 0.955], "stroke": "#ffffff", "lineMm": 6, "radiusMm": 12},
+    {"text": "RECEIVING", "box": [0.08, 0.22, 0.92, 0.78], "color": "#ffffff", "weight": "bold"}]}},
+  {"id": "back-face", "name": "receiving sign back", "shape": "panel", "material": "face",
+   "center": [0, 1.59, -0.014], "size": [0.58, 0.38], "facing": "-z",
+   "print": {"background": "#1d3f73", "items": [
+    {"rect": [0.03, 0.045, 0.97, 0.955], "stroke": "#ffffff", "lineMm": 6, "radiusMm": 12},
+    {"text": "RECEIVING", "box": [0.08, 0.22, 0.92, 0.78], "color": "#ffffff", "weight": "bold"}]}}],
+ "footprint": "hull"}

@@ -66,6 +66,7 @@ venv/
 !tests/fixtures/facility_layout/**/*.json
 !ai_inspector/industrial_assets/model_builder/**/*.json
 !docs/sage-model-builder-reference/**/*.json
+!docs/sage-model-builder-eval/**/*.json
 !tests/fixtures/model_builder/**/*.json
 
 # OS files

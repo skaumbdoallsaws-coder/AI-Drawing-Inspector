@@ -85,3 +85,13 @@ and the person are where they should be.
   so this moves to MB7's isolated server, or the morning.
 - If a later builder version changes the plain cage's output bytes, its asset id changes too. The cookbook test
   then fails and names the new values. That is intended.
+
+## E1 side-by-side check (2026-11-17, MB8 preparation)
+
+The hand-built library originals (read-only from the user's library) and the cookbook builds were rendered with the
+same renderer (model-builder-night/e1_sheets.py; pictures in model-builder-night/out/e1, not in the repo).
+- Baler and pack station: they look the same, view for view.
+- Gaylord: the pallet differs, as C42 expects (the original's pallet is a user CAD-library model). The flattened
+  cartons sat lower than in the original, which stacks them to about 0.8 m with some reaching the rim. The scatter
+  window's top went from 0.75 m to 0.95 m, still under the 1.032 m rim. Bounds, part names and triangles are
+  unchanged, and the test still passes. The MB0 reference recipe stays as it was recorded.

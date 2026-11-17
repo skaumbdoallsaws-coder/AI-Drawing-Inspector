@@ -10,6 +10,7 @@ const Workspace = require('../static/facility_layout_workspace.js');
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
 const id = n => 'mi-' + String(n).padStart(24, '0');
+const referenceId = n => 'rf-' + String(n).padStart(24, '0');
 const file = name => ({ name: name || 'bowl.glb', size: 1024 });
 const record = (n, state, extra) => Object.assign({ id: id(n), state: state || 'ready' }, extra);
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
@@ -46,6 +47,103 @@ test('three files start two uploads; third waits and all three can be attached',
     pending[1].resolve(record(2)); pending[2].resolve(record(3)); await flush();
     const payload = Attachments.buildPayload(h.chips(), '');
     assert.strictEqual(payload.canSend, true); assert.strictEqual(payload.attachments.length, 3);
+});
+
+test('mixed chips share the three-file cap and send only ready reference IDs', async () => {
+    const h = setup({ importModel: async () => record(1),
+        importReferenceFile: async () => ({ referenceId: referenceId(2), state: 'processing' }),
+        getReferenceFile: async () => ({ referenceId: referenceId(2), state: 'ready', kind: 'image', pages: 1 }) });
+    assert.strictEqual(h.controller.add([file('part.glb'), { name: 'photo.png', type: 'image/png', size: 2048 },
+        file('other.glb'), { name: 'extra.jpg', size: 100 }]), 3);
+    await flush();
+    assert.deepStrictEqual(h.chips().map(c => c.state), ['ready', 'checking', 'ready']);
+    assert.strictEqual(Attachments.buildPayload(h.chips(), 'place these').blocked, true);
+    await h.time.advance(1000);
+    assert.deepStrictEqual(Attachments.buildPayload(h.chips(), '').attachments, [
+        { kind: 'model-import', importId: id(1) },
+        { kind: 'reference-file', referenceId: referenceId(2) },
+        { kind: 'model-import', importId: id(1) },
+    ]);
+});
+
+test('reference refusals show server text and never enter the chat payload', async () => {
+    const pdf = setup({ importReferenceFile: async () => { throw Object.assign(
+        new Error('PDF reading is not enabled; attach a screenshot of the page.'), { status: 422 }); } });
+    pdf.controller.add([{ name: 'sheet.pdf', type: 'application/pdf', size: 100 }]); await flush();
+    assert.strictEqual(pdf.chips()[0].state, 'refused');
+    assert.match(pdf.chips()[0].reason, /screenshot/);
+    assert.deepStrictEqual(Attachments.buildPayload(pdf.chips(), 'hello').attachments, []);
+    const gif = setup({ importReferenceFile: async () => { throw Object.assign(new Error('Use one image frame.'), { status: 422 }); } });
+    gif.controller.add([{ name: 'animation.gif', type: 'image/gif', size: 200 }]); await flush();
+    assert.strictEqual(gif.chips()[0].state, 'refused');
+    assert.match(Attachments.chipLabel ? Attachments.chipLabel(gif.chips()[0]) : gif.chips()[0].reason, /frame/);
+});
+
+test('drop classification uses image MIME or extension and ignores late reference responses', async () => {
+    assert.strictEqual(Attachments.fileKind({ name: 'misnamed.bin', type: 'image/png' }), 'reference-file');
+    assert.strictEqual(Attachments.fileKind({ name: 'sheet.PDF', type: '' }), 'reference-file');
+    assert.strictEqual(Attachments.fileKind({ name: 'animation.gif', type: 'image/gif' }), 'reference-file');
+    assert.strictEqual(Attachments.fileKind({ name: 'part.glb', type: '' }), 'model-import');
+    for (const changed of [{ layoutId: 'another-layout' }, { conversationId: 'another-chat' }]) {
+        const pending = deferred();
+        const h = setup({ importReferenceFile: () => pending.promise });
+        h.controller.add([{ name: 'photo.webp', size: 100 }]);
+        h.controller.sync(Object.assign({}, h.context, changed));
+        pending.resolve({ referenceId: referenceId(1), state: 'processing' }); await flush();
+        assert.deepStrictEqual(h.chips(), []);
+    }
+});
+
+test('first reference provider note is remembered once and never blocks on storage', () => {
+    const values = new Map();
+    const storage = { getItem: key => values.get(key), setItem: (key, value) => values.set(key, value) };
+    assert.strictEqual(Attachments.firstReferenceNote(storage), true);
+    assert.strictEqual(Attachments.firstReferenceNote(storage), false);
+    assert.strictEqual(Attachments.firstReferenceNote({ getItem: () => { throw new Error('disabled'); } }), true);
+});
+
+test('chat omits attachments for a plain turn and keeps mixed retry identities', () => {
+    const html = fs.readFileSync(path.join(__dirname, '../static/index.html'), 'utf8');
+    const send = html.slice(html.indexOf('async function handleAgentSend('), html.indexOf('// === Scout Browser Search'));
+    assert.ok(send.includes('...(modelAttachments.length ? { attachments: modelAttachments } : {})'));
+    assert.ok(send.includes("attachment.referenceId === chip.referenceId"));
+    assert.ok(html.includes('id="agentReferenceFileInput"'));
+    assert.ok(html.includes('20261117-reference-files-1'));
+});
+
+test('reference transport uses raw scoped routes, encoded name, progress and refusal text', async () => {
+    const calls = []; let status = 202;
+    const transport = Transport.createHttpTransport({ siteId: 'site a', layoutId: 'layout/b',
+        fetch: async (url, init) => { calls.push({ url, init }); return response(status,
+            status === 422 ? { error: { code: 'reference_pdf_disabled', message: 'Attach a screenshot.' } }
+                : { referenceId: referenceId(1), state: 'processing' }); } });
+    const source = { name: 'phone photo.jpg', type: 'image/jpeg', size: 1234 };
+    await transport.importReferenceFile(source); await transport.getReferenceFile(referenceId(1));
+    assert.strictEqual(calls[0].url, '/api/facility-layouts/site%20a/layout%2Fb/reference-files');
+    assert.strictEqual(calls[0].init.body, source);
+    assert.strictEqual(calls[0].init.headers['X-Reference-Name'], 'phone%20photo.jpg');
+    assert.ok(calls[1].url.endsWith('/reference-files/' + referenceId(1)));
+    assert.throws(() => transport.getReferenceFile('../bad'), /id is required/);
+    status = 422;
+    await assert.rejects(transport.importReferenceFile(source), error => error.status === 422 && error.message === 'Attach a screenshot.');
+});
+
+test('reference XHR sends the raw file and reports byte progress', async () => {
+    const instances = [];
+    class Xhr {
+        constructor() { this.upload = {}; this.headers = {}; instances.push(this); }
+        open(method, url) { this.method = method; this.url = url; }
+        setRequestHeader(key, value) { this.headers[key] = value; }
+        send(body) { this.body = body; this.upload.onprogress({ lengthComputable: true, loaded: 512, total: 1024 });
+            this.status = 202; this.responseText = JSON.stringify({ referenceId: referenceId(1), state: 'processing' }); this.onload(); }
+    }
+    const progress = [], source = { name: 'photo.png', type: 'image/png', size: 1024 };
+    const transport = Transport.createHttpTransport({ siteId: 's', layoutId: 'l', XMLHttpRequest: Xhr,
+        fetch: () => { throw new Error('No fetch upload expected'); } });
+    await transport.importReferenceFile(source, { onProgress: value => progress.push(value) });
+    assert.deepStrictEqual(progress, [50]);
+    assert.strictEqual(instances[0].body, source);
+    assert.ok(instances[0].url.endsWith('/reference-files'));
 });
 
 test('429 admission automatically retries at 2/4/8 seconds then busy; explicit retry recovers', async () => {

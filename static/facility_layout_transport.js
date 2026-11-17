@@ -768,10 +768,64 @@
             return result;
         }
 
+        async function importReferenceFile(file, requestOptions) {
+            if (!file || typeof file.size !== 'number') throw new TypeError('Choose a photo or spec sheet.');
+            if (file.size > 25 * 1024 * 1024) throw new TypeError('The reference is larger than 25 MB.');
+            const config = requestOptions || {};
+            const uploadHeaders = Object.assign({}, headers, {
+                'Content-Type': 'application/octet-stream',
+                'X-InspectorPro-Session': sessionId,
+                'X-Reference-Name': encodeURIComponent(String(file.name || 'reference').slice(0, 240)),
+            });
+            const Xhr = options.XMLHttpRequest || (typeof XMLHttpRequest === 'function' ? XMLHttpRequest : null);
+            if (Xhr && typeof config.onProgress === 'function') {
+                return new Promise(function (resolve, reject) {
+                    const xhr = new Xhr();
+                    const abort = function () { xhr.abort(); };
+                    const finish = function (error, result) {
+                        if (config.signal) config.signal.removeEventListener('abort', abort);
+                        if (error) reject(error); else resolve(result);
+                    };
+                    xhr.open('POST', layoutUrl + '/reference-files');
+                    xhr.withCredentials = options.credentials === 'include';
+                    Object.keys(uploadHeaders).forEach(key => xhr.setRequestHeader(key, uploadHeaders[key]));
+                    xhr.upload.onprogress = function (event) {
+                        if (event.lengthComputable && event.total) config.onProgress(event.loaded / event.total * 100);
+                    };
+                    xhr.onload = function () {
+                        let result = {};
+                        try { result = JSON.parse(xhr.responseText); } catch (_) { /* Show an invalid response as an error. */ }
+                        finish(xhr.status >= 200 && xhr.status < 300 ? null : errorFromResponse(xhr, result), result);
+                    };
+                    xhr.onerror = function () { finish(new Error('The reference upload could not reach the server.')); };
+                    xhr.onabort = function () { finish(Object.assign(new Error('Reference upload cancelled.'), { name: 'AbortError' })); };
+                    if (config.signal) {
+                        if (config.signal.aborted) { finish(Object.assign(new Error('Reference upload cancelled.'), { name: 'AbortError' })); return; }
+                        config.signal.addEventListener('abort', abort, { once: true });
+                    }
+                    xhr.send(file);
+                });
+            }
+            const response = await fetchImpl(layoutUrl + '/reference-files', {
+                method: 'POST', cache: 'no-store', credentials: options.credentials || 'same-origin',
+                headers: uploadHeaders, body: file, signal: config.signal,
+            });
+            const result = await response.json().catch(function () { return {}; });
+            if (!response.ok) throw errorFromResponse(response, result);
+            if (config.onProgress) config.onProgress(100);
+            return result;
+        }
+
         function modelImportPath(importId, suffix) {
             const id = String(importId || '');
             if (!/^mi-[a-f0-9]{24}$/.test(id)) throw new TypeError('A model import id is required.');
             return '/model-imports/' + id + (suffix || '');
+        }
+
+        function referenceFilePath(referenceId) {
+            const id = String(referenceId || '');
+            if (!/^rf-[a-f0-9]{24}$/.test(id)) throw new TypeError('A reference file id is required.');
+            return '/reference-files/' + id;
         }
 
         function floorPlanPath(importId, suffix) {
@@ -1459,6 +1513,10 @@
             importDecalImage: importDecalImage,
             importFloorPlan: importFloorPlan,
             importModel: importModel,
+            importReferenceFile: importReferenceFile,
+            getReferenceFile: function (referenceId, requestOptions) {
+                return request(referenceFilePath(referenceId), 'GET', undefined, requestOptions);
+            },
             getModelImport: function (importId, requestOptions) {
                 return request(modelImportPath(importId), 'GET', undefined, requestOptions);
             },

@@ -37,6 +37,7 @@ FORBIDDEN_PORTS = frozenset({8181, 8480, 8491, 8493})
 SAFE_ENV = {"SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "NUMBER_OF_PROCESSORS",
             "PROCESSOR_ARCHITECTURE", "PROCESSOR_IDENTIFIER", "OS"}
 IMPORT_PATH = re.compile(r"/api/facility-layouts/[^/]+/[^/]+/model-imports(?:/mi-[0-9a-f]{24}(?:/retry)?)?$")
+REFERENCE_PATH = re.compile(r"/api/facility-layouts/[^/]+/[^/]+/reference-files$")
 IMPORT_ID = re.compile(r"mi-[0-9a-f]{24}$")
 CHAT_PATHS = frozenset({"/api/agent/chat", "/api/agent/chat/stream", "/api/agent/chat/v2/stream"})
 SUCCESS_TEXT = "Browser verification received the model attachments."
@@ -253,7 +254,7 @@ def reserve_listener() -> socket.socket:
 
 def allowed_server_request(method: str, path: str) -> bool:
     if method == "POST":
-        return bool(IMPORT_PATH.fullmatch(path))
+        return bool(IMPORT_PATH.fullmatch(path) or REFERENCE_PATH.fullmatch(path))
     if method not in {"GET", "HEAD"}:
         return False
     if path == "/" or path.startswith(("/static/", "/generated/")):

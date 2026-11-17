@@ -20848,6 +20848,7 @@
             border-radius: 8px; font-size: 12px; }
         .agent-model-chip-copy { display: grid; flex: 1; min-width: 0; gap: 3px; overflow-wrap: anywhere; }
         .agent-model-chip-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .agent-model-chip-note { font-size: 11px; color: #9aa8b8; line-height: 1.35; }
         .agent-model-chip[data-state="failed"], .agent-model-chip[data-state="refused"], .agent-model-chip[data-state="busy"] { border-color: #ba8e53; }
         .agent-model-chip button { flex: none; color: inherit; background: transparent; border: 1px solid #66758b; border-radius: 4px; cursor: pointer; }
         .agent-model-chip progress { width: 48px; }
@@ -21519,7 +21520,7 @@
 
             <!-- Agent Panel -->
             <div class="agent-panel" id="agentPanel">
-                <div id="agentModelDropTarget" class="agent-model-drop-target" hidden>Drop a 3D model (.glb, .zip) to attach it</div>
+                <div id="agentModelDropTarget" class="agent-model-drop-target" hidden>Drop a 3D model, photo or spec sheet to attach it</div>
                 <div class="agent-panel-inner">
                     <div class="agent-panel-header">
                         <svg viewBox="0 0 32 32" fill="none">
@@ -21587,11 +21588,13 @@
                             <textarea id="agentInput" placeholder="Message your agent..." autocomplete="off" rows="1"></textarea>
                             <div class="agent-composer-footer">
                                 <div class="agent-attachment-options">
-                                    <button class="agent-camera-btn" id="agentCameraBtn" type="button" title="Attach a model" aria-label="Attachment options" aria-expanded="false" hidden>+</button>
+                                    <button class="agent-camera-btn" id="agentCameraBtn" type="button" title="Attach a file" aria-label="Attachment options" aria-expanded="false" hidden>+</button>
                                     <div id="agentAttachmentMenu" class="agent-attachment-menu" role="menu" hidden>
                                         <button type="button" role="menuitem">Attach 3D model (.glb, .zip)</button>
+                                        <button type="button" role="menuitem">Attach photo or spec sheet (.png, .jpg, .webp, .pdf)</button>
                                     </div>
                                     <input id="agentModelFileInput" type="file" accept=".glb,.zip" multiple hidden>
+                                    <input id="agentReferenceFileInput" type="file" accept=".png,.jpg,.jpeg,.webp,.pdf" multiple hidden>
                                 </div>
                                 <select id="agentFacilityEditMode" class="agent-model-btn" aria-label="Layout edit mode"
                                     title="Apply routine reversible edits directly, or preview every edit first">
@@ -21794,8 +21797,8 @@
     <script src="/static/facility_layout_patterns.js?v=20261101-cell-facing"></script>
     <script src="/static/facility_layout_command_adapter.js?v=20260912-contract-v1-retry-fix"></script>
     <script src="/static/facility_layout_session.js?v=20261104-columns-1"></script>
-    <script src="/static/facility_layout_transport.js?v=20261109-model-import-1"></script>
-    <script src="/static/facility_layout_chat_attachments.js?v=20261109-model-import-1"></script>
+    <script src="/static/facility_layout_transport.js?v=20261117-reference-files-1"></script>
+    <script src="/static/facility_layout_chat_attachments.js?v=20261117-reference-files-1"></script>
     <script src="/static/facility_layout_generation_view.js?v=20260917-generation-research"></script>
     <script src="/static/facility_layout_workspace.js?v=20261116-builder-card-1"></script>
     <script src="/static/facility_layout_app.js?v=20261104-fp-authored-1"></script>
@@ -86533,7 +86536,7 @@
                     agentSendBtn.setAttribute('aria-label', 'Stop generating');
                 } else if (modelSend.blocked) {
                     agentSendBtn.textContent = 'Uploading...';
-                    agentSendBtn.title = 'Wait for the model checks to finish';
+                    agentSendBtn.title = 'Wait for the file checks to finish';
                     agentSendBtn.setAttribute('aria-label', 'Uploading...');
                 } else {
                     agentSendBtn.innerHTML = _agentSendDefaultMarkup;
@@ -86701,7 +86704,8 @@
             _modelChatAttachments = _modelAttachmentRuntime.mount({
                 document, panel: $('agentPanel'), button: agentCameraBtn,
                 host: $('agentModelChips'), menu: $('agentAttachmentMenu'),
-                input: $('agentModelFileInput'), drop: $('agentModelDropTarget'),
+                input: $('agentModelFileInput'), referenceInput: $('agentReferenceFileInput'),
+                drop: $('agentModelDropTarget'),
                 getContext: _modelChatContext, onChange: updateSendButtonState,
                 onNotice: text => { if (window._toast) window._toast(text, 'info'); },
             });
@@ -96085,7 +96089,10 @@
                     }
                     // A frozen retry sends the original IDs, even if the composer changed.
                     modelAttachmentSnapshot.chips = modelAttachmentSnapshot.chips.filter(chip =>
-                        modelAttachments.some(attachment => attachment.importId === chip.importId));
+                        modelAttachments.some(attachment => attachment.kind === chip.kind &&
+                            (attachment.kind === 'reference-file'
+                                ? attachment.referenceId === chip.referenceId
+                                : attachment.importId === chip.importId)));
                 }
                 if (modelSend.blocked || (!text && !hasImage && !modelAttachments.length)
                         || (originSession.waiting && !isBargeIn)) return;
@@ -96095,7 +96102,7 @@
                 let workingAssistant = null;
 
                 const displayText = (text || (hasImage ? '\uD83D\uDCF7 [Screenshot attached]' : ''))
-                    + (modelAttachments.length ? (text ? '\n\n' : '') + '[3D model attachments: ' + modelAttachments.length + ']' : '');
+                    + (modelAttachments.length ? (text ? '\n\n' : '') + '[File attachments: ' + modelAttachments.length + ']' : '');
                 if (!retry) {
                     originSession.pendingInput = '';
                     addMessage(displayText, 'user', originAgent);

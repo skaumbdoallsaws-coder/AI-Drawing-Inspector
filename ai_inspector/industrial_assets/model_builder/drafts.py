@@ -8,7 +8,7 @@ from .errors import json_bytes, parse_json
 from .identity import asset_identity, build_provenance
 from .imports import module
 from .job_io import directory, read_bytes
-from .recipe import ENGINE_VERSION, RECIPE_BYTES, normalize_recipe
+from .recipe import ENGINE_VERSION, RECIPE_BYTES, normalize_recipe, portable_recipe
 from .protocol import RESULT_BYTES, GLB_BYTES
 
 DAY = 86400
@@ -80,7 +80,8 @@ def result_matches(draft, result):
 def write_draft(destination, recipe, result, payload, preview, thumbnail, *, scope, created, derived_from=None):
     value = make_draft(recipe, result, scope, created, derived_from)
     result_matches(value, result)
-    files = {"draft.json": json_bytes(value), "recipe.json": json_bytes(recipe), "result.json": json_bytes(result),
+    files = {"draft.json": json_bytes(value), "recipe.json": json_bytes(portable_recipe(recipe)[0]),
+             "result.json": json_bytes(result),
              "model.glb": payload, "preview.png": preview, "thumbnail.webp": thumbnail}
     if value["attribution"] is not None:
         files["CREDITS.txt"] = module("credit").credits_text(value["attribution"]).encode("utf-8")
@@ -125,7 +126,7 @@ def read_draft(folder, *, compact=False):
             raise ValueError("Invalid build file digest")
     if manifest["files"]["model.glb"]["sha256"] != value["outputSha256"]:
         raise ValueError("Build manifest differs from its output identity")
-    if parse_json(read_bytes(folder, "recipe.json", RECIPE_BYTES), RECIPE_BYTES) != value["recipe"]:
+    if parse_json(read_bytes(folder, "recipe.json", RECIPE_BYTES), RECIPE_BYTES) != portable_recipe(value["recipe"])[0]:
         raise ValueError("Build recipe differs from its frozen draft")
     result = parse_json(read_bytes(folder, "result.json", RESULT_BYTES), RESULT_BYTES)
     result_matches(value, result)

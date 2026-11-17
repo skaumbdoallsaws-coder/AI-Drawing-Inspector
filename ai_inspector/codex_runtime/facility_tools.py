@@ -23,7 +23,7 @@ READ_NAMES = frozenset({"inspect_facility_entities", "inspect_facility_semantics
                         "inspect_facility_findings", "analyze_facility_spatial",
                         "search_industrial_assets", "inspect_facility_region", "analyze_facility_fit",
                         "inspect_pattern_provenance", "inspect_cell_layout_provenance",
-                        model_builder_tools.GET, model_builder_tools.INCLUDE, facility_gap.NAME})
+                        *model_builder_tools.READ_NAMES, facility_gap.NAME})
 OUTPUT_SCHEMA = {
     "type": "object", "required": ["ok"], "properties": {
         "ok": {"type": "boolean"}, "data": {"type": "object"},

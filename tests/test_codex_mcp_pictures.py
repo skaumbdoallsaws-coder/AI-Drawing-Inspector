@@ -21,7 +21,8 @@ PICTURE = {"mimeType": "image/jpeg", "data": base64.b64encode(b"\xff\xd8\xff a p
 # place_grid (its planImage; sage_shapes, BS3-BS4), plus imported source/draft contact sheets.
 # The Documentation gateway attaches none.
 PICTURE_TOOLS = {"show_facility_views", "look_at_site_photo", "author_shape_asset", "place_grid",
-                 "inspect_model_import", "prepare_model_asset", "build_model_draft", "revise_model_draft"}
+                 "inspect_model_import", "prepare_model_asset", "build_model_draft", "revise_model_draft",
+                 "inspect_reference_file"}
 HEADERS = {"Authorization": "Bearer secret", "Accept": "application/json, text/event-stream",
            "MCP-Protocol-Version": "2025-11-25"}
 

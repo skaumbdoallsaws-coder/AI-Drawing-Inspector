@@ -69,8 +69,8 @@ def limit_resources() -> bool:
         return False
 
 
-def _build(job, job_io):
-    """Only the build task bootstraps this second private package."""
+def _build(job, job_io, task_name="build"):
+    """Builder and reference tasks bootstrap the second private package."""
     package = Path(__file__).resolve().parent.parent / "model_builder"
     spec = importlib.util.spec_from_file_location("_model_builder_worker", package / "__init__.py",
                                                  submodule_search_locations=[str(package)])
@@ -78,8 +78,11 @@ def _build(job, job_io):
     sys.modules[spec.name] = builder
     spec.loader.exec_module(builder)
     try:
-        task = importlib.import_module(".worker_task", spec.name)
-        task.execute_build(job)
+        task = importlib.import_module(".worker_task" if task_name == "build" else ".reference_worker", spec.name)
+        if task_name == "build":
+            task.execute_build(job)
+        else:
+            task.execute_reference(job)
     except builder.ModelBuildError as error:
         errors = importlib.import_module(".errors", spec.name)
         payload = errors.json_bytes(error.to_dict())
@@ -94,7 +97,7 @@ def main(argv=None) -> int:
     if not limit_resources():
         return 4
     argv = sys.argv[1:] if argv is None else argv
-    if len(argv) != 3 or argv[2] not in {"inspect", "prepare", "build"}:
+    if len(argv) != 3 or argv[2] not in {"inspect", "prepare", "build", "reference"}:
         return 1
     dependencies, job = Path(argv[0]), Path(argv[1])
     if not dependencies.is_absolute() or not job.is_absolute():
@@ -112,8 +115,8 @@ def main(argv=None) -> int:
         job = job_io.local_directory(job)
         # Append directly: no .pth, sitecustomize, PYTHONPATH or cwd lookup.
         sys.path.append(str(dependencies))
-        if argv[2] == "build":
-            return _build(job, job_io)
+        if argv[2] in {"build", "reference"}:
+            return _build(job, job_io, argv[2])
         task = importlib.import_module(".worker_task", spec.name)
         if argv[2] == "inspect":
             task.execute_inspect(job)

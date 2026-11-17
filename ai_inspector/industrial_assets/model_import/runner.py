@@ -92,7 +92,7 @@ def _launch(job, dependency_root, task, event, timeout, *, build_error_decoder=N
         if code == 3:
             raise ModelImportError("model_runtime_unavailable")
         if code == 2:
-            if task == "build":
+            if task in {"build", "reference"}:
                 try:
                     require(build_error_decoder is not None, "model_worker_failed")
                     refusal = build_error_decoder(bounded_read(job, "error.json", 8192))

@@ -73,7 +73,19 @@ def add_credited(c, kind="cc-by"):
 
 def test_host_build_inspect_register_repeat_reload_and_compaction(context):
     c = context
-    raw = recipe(references=["rf-"+"1"*24], sizeBasis={"kind": "research", "note": "Generic example size",
+    from ai_inspector.facility_layout.reference_files import ReferenceStore
+    from ai_inspector.facility_layout.model_import_runtime import model_import_runtime
+    references = ReferenceStore(c.host.service, dependency_root=model_import_runtime().dependency_root)
+    c.host.service._reference_store = references
+    upload = references.begin_upload(c.scope, "example.png", len(PNG))
+    upload.write(PNG)
+    reference_id = upload.finish()["referenceId"]
+    for _ in range(100):
+        if references.get(c.scope, reference_id)["state"] == "ready":
+            break
+        time.sleep(.05)
+    assert references.get(c.scope, reference_id)["state"] == "ready"
+    raw = recipe(references=[reference_id], sizeBasis={"kind": "research", "note": "Generic example size",
                   "sources": [{"url": "https://example.org/spec", "title": "Example specification"}]})
     result, picture = c.host.build_model_draft(c.principal, c.reference, raw)
     assert picture == PNG
@@ -95,7 +107,7 @@ def test_host_build_inspect_register_repeat_reload_and_compaction(context):
     manifest = json.loads((target / "bundle.json").read_bytes())
     assert manifest["kind"] == "build" and manifest["identity"] == asset_identity(frozen)["identity"]
     assert "references" not in json.loads((target / "recipe.json").read_bytes())
-    assert b"rf-"+b"1"*24 not in b"".join(p.read_bytes() for p in target.iterdir())
+    assert reference_id.encode() not in b"".join(p.read_bytes() for p in target.iterdir())
     assert c.host.list_model_build_drafts(c.principal, c.reference) == []
     receipt = c.store.receipt(c.scope, result["draftId"])
     assert c.store.registrations_since(c.scope, 0) == [first["assetId"]]

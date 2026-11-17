@@ -34,6 +34,7 @@ from contextvars import ContextVar
 from types import SimpleNamespace
 from typing import (
     Any,
+    Annotated,
     Awaitable,
     Callable,
     Dict,
@@ -43,6 +44,7 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
+    Union,
 )
 from urllib.parse import urlsplit
 
@@ -23419,9 +23421,19 @@ class ModelImportChatAttachment(BaseModel):
     importId: str = Field(pattern=r"^mi-[0-9a-f]{24}$", min_length=27, max_length=27)
 
 
+class ReferenceFileChatAttachment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["reference-file"]
+    referenceId: str = Field(pattern=r"^rf-[0-9a-f]{24}$", min_length=27, max_length=27)
+
+
+ChatAttachment = Annotated[Union[ModelImportChatAttachment, ReferenceFileChatAttachment], Field(discriminator="kind")]
+
+
 class AgentChatRequest(BaseModel):
     message: str
-    attachments: List[ModelImportChatAttachment] = Field(default_factory=list, max_length=3)
+    attachments: List[ChatAttachment] = Field(default_factory=list, max_length=3)
     history: Optional[List[Dict[str, Any]]] = []
     inspection_context: Optional[Dict[str, Any]] = None
     context: Optional[Dict[str, Any]] = None  # Alternative name from frontend

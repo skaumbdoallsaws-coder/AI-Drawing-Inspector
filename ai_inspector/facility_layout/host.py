@@ -754,6 +754,8 @@ class LocalFacilityLayoutHost:
         self.agent_runtime.model_builder_revise = self._model_import_hooks.revise_build
         self.agent_runtime.model_builder_recipe = self._model_import_hooks.get_builder_recipe
         self.agent_runtime.model_builder_include = self._model_import_hooks.inspect_builder_include
+        self.agent_runtime.inspect_reference_file = self._model_import_hooks.inspect_reference_file
+        self.agent_runtime.describe_reference_attachment = self._model_import_hooks.describe_reference_attachment
         self.agent_runtime.describe_model_attachment = self._model_import_hooks.describe_model_attachment
         self.agent_runtime.registrations_since = self._model_import_hooks.registrations_since
         self.construction_service = FacilityConstructionService(
@@ -822,6 +824,9 @@ class LocalFacilityLayoutHost:
         store = getattr(self.service, "_model_import_store", None)
         if store is not None:
             store.close()
+        references = getattr(self.service, "_reference_store", None)
+        if references is not None:
+            references.close()
         self.service.spatial_executor.close(wait=True)
 
     def _agent_generation_layout(

@@ -85,8 +85,8 @@ def apply_edits(recipe, edits, *, allowed_categories, allowed_appearance_ids):
         elif kind == "top":
             require(set(operation) <= {"op", "set", "unset"}, path, "Invalid top edit")
             fields = set(operation.get("set", {})) | set(operation.get("unset", []))
-            require(not fields & {"entries", "materials", "references"}, path,
-                    "Use entry or material edits; references arrive in the reference phase")
+            require(not fields & {"entries", "materials"}, path,
+                    "Use entry or material edits for those collections")
             _fields(result, operation, path)
         else:
             raise ModelBuildError("schema_invalid", path + ".op", "Unknown edit operation")

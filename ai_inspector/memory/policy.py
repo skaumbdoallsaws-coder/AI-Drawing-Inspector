@@ -98,14 +98,18 @@ def normalize_request_identity_v1(raw: Mapping[str, Any]) -> Dict[str, Any]:
 
 def _normalize_attachments(value: Any) -> list[Dict[str, str]]:
     if not isinstance(value, list) or len(value) > 3:
-        raise ValueError("attachments must be an array of at most three model imports")
+        raise ValueError("attachments must be an array of at most three files")
     normalized = []
     for item in value:
-        if (not isinstance(item, Mapping) or set(item) != {"kind", "importId"}
-                or item["kind"] != "model-import" or not isinstance(item["importId"], str)
-                or not re.fullmatch(r"mi-[0-9a-f]{24}", item["importId"])):
-            raise ValueError("attachments must contain only kind and a valid model importId")
-        normalized.append({"kind": "model-import", "importId": item["importId"]})
+        if not isinstance(item, Mapping):
+            raise ValueError("attachments must have a kind and a scoped id")
+        kind = item.get("kind")
+        field, pattern = (("importId", r"mi-[0-9a-f]{24}") if kind == "model-import" else
+                          ("referenceId", r"rf-[0-9a-f]{24}") if kind == "reference-file" else (None, None))
+        if (field is None or set(item) != {"kind", field} or not isinstance(item[field], str)
+                or not re.fullmatch(pattern, item[field])):
+            raise ValueError("attachments must have a valid model importId or referenceId")
+        normalized.append({"kind": kind, field: item[field]})
     return normalized
 
 

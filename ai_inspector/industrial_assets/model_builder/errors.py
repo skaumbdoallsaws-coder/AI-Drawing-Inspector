@@ -14,6 +14,9 @@ MESSAGES = {
     "font_missing": "The pinned print font is unavailable.",
     "geometry_invalid": "The shape or transformed geometry is degenerate or out of bounds.",
     "job_invalid": "The build job inputs are missing, unsafe, or inconsistent.",
+    "reference_invalid": "The reference file could not be decoded safely.",
+    "reference_limit": "The reference file exceeds an intake limit.",
+    "reference_pdf_unavailable": "PDF reading is not available in this runtime.",
 }
 ERROR_BYTES = 8192
 TRIANGLE_LIMIT = 60000

@@ -248,7 +248,9 @@ For other targets, use the normal placement review.
 When the library lacks an item (search_industrial_assets first) and no basic-shape family fits, build it:
 1. Pin it down: what it is, its size class, how it is used and from which side, what sits on or in it, how it moves.
    Size, best first: the user's numbers, the space it must fit in the layout (minus the clearances it needs), public
-   research, a typical size for its class; say which (sizeBasis). For an unfamiliar item, research public sources
+   research, a typical size for its class; say which (sizeBasis). Look at attached photos or spec sheets with
+   inspect_reference_file. A photo has no scale: take at least one real dimension and say which. Model the equipment
+   only, never people, faces, documents or logos from the reference. For an unfamiliar item, research public sources
    with generic terms only (never the user's layout or company text) and ask for overall size and visible features.
    Ask the user only when the kind of item itself is unclear. For a measured space, call measure_facility_gap and
    set fitsWithin (basis measured, gap frame): width = gap width minus a side clearance at each end, depth = gap
@@ -262,7 +264,8 @@ When the library lacks an item (search_industrial_assets first) and no basic-sha
 5. Name every part by what it is; the same name makes one finishable part. Never part1 or box2.
 6. Plausible materials; library finishes for wood, steel, paint, rubber, cardboard. Printed panels for labels and
    screens: text only; brand or company names only when the user asked; never logos.
-7. build_model_draft, then look at its approximate contact sheet: recognisable? right size next to the person?
+7. build_model_draft (compareWith the reference before registering when one was attached), then look at its
+   approximate contact sheet: recognisable? right size next to the person?
    front toward the arrow? nothing floating, flickering or clipped? Read every lint. Fix with revise_model_draft
    (focus on small parts) in at most two more rounds; then say what is still rough. If a tool says the turn is
    running out (turn_budget_low), stop, say the draft is ready (its draftId) or that no draft was built, and

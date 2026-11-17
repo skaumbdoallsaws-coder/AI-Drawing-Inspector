@@ -318,7 +318,7 @@ def _bundle_conflict(asset_id: str) -> None:
                               status_code=409)
 
 
-def _same_bundle(folder: Path, files: Mapping[str, bytes], asset_id: str) -> None:
+def _same_bundle(folder: Path, files: Mapping[str, bytes], asset_id: str, *, manifest_limit=None) -> None:
     """No repair or overwrite on reuse: even a missing/corrupted file is a conflict."""
     if not folder.is_dir() or folder.is_symlink() or {p.name for p in folder.iterdir()} != set(files):
         _bundle_conflict(asset_id)
@@ -327,7 +327,7 @@ def _same_bundle(folder: Path, files: Mapping[str, bytes], asset_id: str) -> Non
         if file.is_symlink() or not file.is_file():
             _bundle_conflict(asset_id)
         if name == "bundle.json":
-            if file.stat().st_size > BUNDLE_FILES[name]:
+            if file.stat().st_size > (manifest_limit or BUNDLE_FILES[name]):
                 _bundle_conflict(asset_id)
             try:
                 identical = _bundle_json(_bundle_object(file.read_bytes())) == payload
@@ -339,25 +339,55 @@ def _same_bundle(folder: Path, files: Mapping[str, bytes], asset_id: str) -> Non
             _bundle_conflict(asset_id)
 
 
-def install_bundle(root: str | Path, entry: dict, files: Mapping[str, bytes]) -> dict[str, Any]:
-    """Publish immutable import bytes before their entry (D5), reusing exact orphans.
+def _dispatch_bundle(entry, files):
+    """Missing kind is a legacy import; its validator and bytes stay unchanged."""
+    from . import model_builder_bundle as builds
+    payload = files.get("bundle.json") if isinstance(files, Mapping) else None
+    if not isinstance(payload, bytes) or not 0 < len(payload) <= builds.FILES["bundle.json"]:
+        raise ValueError("The bundle manifest is invalid")
+    value = _bundle_object(payload)
+    kind = value.get("kind", "import")
+    if kind == "build":
+        try:
+            frozen = builds.validate_bundle(entry, files)
+        except builds.module("errors").ModelImportError as error:
+            raise ValueError("The built bundle failed validation") from error
+        return frozen, builds.FOLDER, builds.FILES["bundle.json"]
+    if kind != "import":
+        raise ValueError("Unknown model bundle kind")
+    if "kind" not in value:
+        return _validate_bundle(entry, files), BUNDLE_FOLDER, BUNDLE_FILES["bundle.json"]
+    # Explicit import kinds use exactly the existing import validator as well.
+    if len(payload) > BUNDLE_FILES["bundle.json"]:
+        raise ValueError("The import manifest exceeds its size limit")
+    legacy = dict(value)
+    legacy.pop("kind")
+    candidate = dict(files, **{"bundle.json": _bundle_json(legacy)})
+    frozen = _validate_bundle(entry, candidate)
+    frozen["bundle.json"] = _bundle_json(value)
+    return frozen, BUNDLE_FOLDER, BUNDLE_FILES["bundle.json"]
 
-    files maps the four BUNDLE_FILES names to bytes. bundle.json is
+
+def install_bundle(root: str | Path, entry: dict, files: Mapping[str, bytes]) -> dict[str, Any]:
+    """Publish immutable model bytes before their entry, reusing exact orphans.
+
+    Legacy/import files map the four BUNDLE_FILES names to bytes. bundle.json is
     {schemaVersion: 1, assetId, identity: <D6 identity.asset_identity(...)["identity"]>,
      files: {<each of the other three names>: {sha256, bytes}}}.
     Its own hash is intentionally excluded. Returns the same receipt keys as install.
-    The caller performs layout.edit and import-scope authorization before calling.
+    Build manifests dispatch to model_builder_bundle's separate validator/folder.
+    The caller performs layout.edit and draft-scope authorization before calling.
     """
     from ai_inspector.facility_layout.errors import FacilityLayoutError
 
     root = Path(root).resolve()
     entry = deepcopy(entry)
     try:
-        frozen = _validate_bundle(entry, files)
+        frozen, bundle_folder, manifest_limit = _dispatch_bundle(entry, files)
     except (ValueError, TypeError, KeyError, UnicodeError, OverflowError, RecursionError) as error:
         raise FacilityLayoutError("asset_bundle_invalid", str(error)) from None
     asset_id = entry["assetId"]
-    folder = root / BUNDLE_FOLDER / asset_id
+    folder = root / bundle_folder / asset_id
     catalog = root / CATALOG
     with LOCK, CatalogLock(catalog):
         # Resolve only while publication is serialized. On Windows, resolving a
@@ -375,13 +405,13 @@ def install_bundle(root: str | Path, entry: dict, files: Mapping[str, bytes]) ->
         if known:
             if len(known) != 1 or _bundle_json(known[0]) != _bundle_json(entry):
                 _bundle_conflict(asset_id)
-            _same_bundle(folder, frozen, asset_id)
+            _same_bundle(folder, frozen, asset_id, manifest_limit=manifest_limit)
             return {"assetId": asset_id, "added": False, "modelWritten": False, "backup": None}
         # Check that catalog publication is possible before staging any files.
         updated = appended(original, entry)
         written = False
         if folder.exists() or folder.is_symlink():
-            _same_bundle(folder, frozen, asset_id)
+            _same_bundle(folder, frozen, asset_id, manifest_limit=manifest_limit)
         else:
             folder.parent.mkdir(parents=True, exist_ok=True)
             temporary = Path(tempfile.mkdtemp(prefix="." + asset_id + "-", dir=folder.parent))

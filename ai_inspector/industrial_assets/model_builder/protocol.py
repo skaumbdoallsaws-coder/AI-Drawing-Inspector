@@ -346,6 +346,8 @@ def validate_glb_metadata(document, result, *, payload=None):
     """Bind the part map and material metadata to the flat grouped GLB we return."""
     try:
         _ok(document["asset"]["generator"] == ENGINE_VERSION)
+        _ok(document["asset"].get("extras", {}).get("facilityBuildIncludes", []) == result["includes"])
+        _ok(document["asset"].get("extras", {}).get("facilityBuildAttribution") == result["attribution"])
         expected = {}
         for part in result["parts"]:
             expected.setdefault(part["name"], []).append(part)

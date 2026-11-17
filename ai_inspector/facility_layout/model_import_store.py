@@ -35,6 +35,8 @@ from ..industrial_assets.model_import.protocol import read_summary
 from ..industrial_assets.model_import.recipe import normalize_recipe
 from ..industrial_assets.model_import.runner import _result, prepare_draft, run_inspect
 from ..industrial_assets.model_import.validation import clean_text
+from ..industrial_assets.model_builder.errors import ModelBuildError
+from ..industrial_assets.model_builder.imports import module as builder_import
 
 STORE_FOLDER = "model-imports"
 MIB = 1024 * 1024
@@ -45,6 +47,7 @@ INSPECT_OUTPUT_BYTES = CACHE_BYTES + CACHE_METADATA_BYTES + INSPECTION_BYTES + P
 PREPARE_OUTPUT_BYTES = INSPECT_OUTPUT_BYTES + sum(DRAFT_FILES.values()) + MARGIN
 IMPORT_ID = re.compile(r"mi-[0-9a-f]{24}")
 DRAFT_ID = re.compile(r"md-[0-9a-f]{24}")
+BUILD_JOB_ID = re.compile(r"mbj-[0-9a-f]{24}")
 HASH = re.compile(r"[0-9a-f]{64}")
 # Folder names are kept short: Windows refuses paths over 259 characters unless long paths are turned on, and a
 # prepare job nests scope/jobs/<token>/.model-prepare-*/output/<file> below the app's data folder (2026-11-09: the
@@ -97,11 +100,25 @@ def translate(error: ModelImportError) -> FacilityLayoutError:
     return FacilityLayoutError(error.code, error.message, status_code=error.status_code, details=error.details)
 
 
+def build_failure(error):
+    if isinstance(error, ModelBuildError):
+        return FacilityLayoutError(error.code, error.message, details=error.to_dict()["details"])
+    if isinstance(error, builder_import("errors").ModelImportError):
+        return translate(error)
+    return job_failure(error)
+
+
+def lease_key(value):
+    return value["objectId"] if value.get("kind", "import") == "build" else value["importId"]
+
+
 def host_errors(method):
     @wraps(method)
     def call(*args, **kwargs):
         try:
             return method(*args, **kwargs)
+        except ModelBuildError as error:
+            raise build_failure(error) from None
         except ModelImportError as error:
             raise translate(error) from None
         except OSError as error:
@@ -140,8 +157,9 @@ class ModelImportScope:
 
 
 class _Lease:
-    def __init__(self, store, scope, import_id, amount, cancel=None):
+    def __init__(self, store, scope, import_id, amount, cancel=None, *, kind="import"):
         self.store, self.scope, self.import_id = store, scope, import_id
+        self.kind = kind
         self.token = uuid.uuid4().hex[:16]
         self.cancel = cancel if cancel is not None else threading.Event()
         self.done = threading.Event()
@@ -150,6 +168,9 @@ class _Lease:
         self.data = {**disk.owner(), "token": self.token, "scope": scope.key, "importId": import_id,
                      "user": sha256((scope.principal.tenant_id + "\0" + scope.principal.principal_id).encode()).hexdigest(),
                      "reserved": amount}
+        if kind == "build":
+            self.data.pop("importId")
+            self.data.update(kind="build", objectId=import_id)
         self.job = store.root / scope.key / "jobs" / self.token
 
     def check(self):
@@ -162,7 +183,8 @@ class _Lease:
         self.ending = True
         with disk.coordinator(self.store.root):
             disk.remove(self.job)
-            disk.remove(self.store.root / self.scope.key / "uploads" / (self.import_id + ".part"))
+            if self.kind == "import":
+                disk.remove(self.store.root / self.scope.key / "uploads" / (self.import_id + ".part"))
             lock = self.store.root / self.scope.key / "locks" / (self.import_id + ".json")
             if (disk.read_json(lock) or {}).get("token") == self.token:
                 lock.unlink(missing_ok=True)
@@ -264,12 +286,13 @@ class Upload:
 class ModelImportStore:
     """One app root, injectable workers for tests; all public lookups recheck scope."""
     def __init__(self, layout_root, *, layout_reader, runtime=None, inspect_worker=None, prepare_worker=None,
-                 site_bytes=SITE_BYTES):
+                 build_worker=None, site_bytes=SITE_BYTES):
         self.root = disk.safe(Path(layout_root).absolute() / STORE_FOLDER)
         self.layout_reader = layout_reader
         self.runtime = runtime
         self.inspect_worker = inspect_worker or run_inspect
         self.prepare_worker = prepare_worker or prepare_draft
+        self.build_worker = build_worker
         self.site_bytes = site_bytes
 
     def _authorize(self, scope: ModelImportScope, write=False) -> None:
@@ -293,7 +316,7 @@ class ModelImportStore:
         length = len(disk.encode(record))
         if length > 256 * 1024:
             raise quota()
-        if not any(v["scope"] == scope.key and v["importId"] == record["id"] for v in self._active()):
+        if not any(v["scope"] == scope.key and v.get("importId") == record["id"] for v in self._active()):
             # Housekeeping also reserves the temporary copy while the coordinator is held.
             self._capacity(scope, length)
         disk.atomic(self._folder(scope) / "imports" / (record["id"] + ".json"), record)
@@ -308,8 +331,12 @@ class ModelImportStore:
             value = disk.read_json(file)
             if not isinstance(value, dict) or not TOKEN.fullmatch(str(value.get("token", ""))):
                 raise FacilityLayoutError("model_store_invalid", "An import reservation is invalid.", status_code=503)
+            kind = value.get("kind", "import")
+            valid_id = (kind == "import" and IMPORT_ID.fullmatch(str(value.get("importId", "")))) or (
+                kind == "build" and "importId" not in value and
+                (BUILD_JOB_ID.fullmatch(str(value.get("objectId", ""))) or DRAFT_ID.fullmatch(str(value.get("objectId", "")))))
             if (file.stem != value["token"] or not SCOPE_KEY.fullmatch(str(value.get("scope", "")))
-                    or not IMPORT_ID.fullmatch(str(value.get("importId", "")))
+                    or not valid_id
                     or not HASH.fullmatch(str(value.get("user", "")))
                     or type(value.get("reserved")) is not int or not 0 <= value["reserved"] <= SITE_BYTES
                     or type(value.get("created")) not in (int, float) or not math.isfinite(value["created"])
@@ -319,12 +346,16 @@ class ModelImportStore:
             values.append(value)
         return values
 
-    def _owned_size(self, value):
+    def _owned_paths(self, value):
         folder = self.root / value["scope"]
-        return (disk.size(folder / "jobs" / value["token"])
-                + disk.size(folder / "uploads" / (value["importId"] + ".part"))
-                + disk.size(folder / "imports" / (value["importId"] + ".json"))
-                + disk.size(folder / "locks" / (value["importId"] + ".json")))
+        paths = [folder / "jobs" / value["token"], folder / "locks" / (lease_key(value) + ".json")]
+        if value.get("kind", "import") == "import":
+            paths.extend([folder / "uploads" / (value["importId"] + ".part"),
+                          folder / "imports" / (value["importId"] + ".json")])
+        return paths
+
+    def _owned_size(self, value):
+        return sum(disk.size(p) for p in self._owned_paths(value))
 
     def _capacity(self, scope, amount, token=None):
         # Count owned trees by their reservation, never by a racy pair of size scans:
@@ -334,11 +365,7 @@ class ModelImportStore:
         excluded = set()
         reserved = amount if token is None else 0
         for value in active:
-            folder = self._folder(scope)
-            excluded.update((folder / "jobs" / value["token"],
-                             folder / "uploads" / (value["importId"] + ".part"),
-                             folder / "imports" / (value["importId"] + ".json"),
-                             folder / "locks" / (value["importId"] + ".json")))
+            excluded.update(self._owned_paths(value))
             reserved += amount if value["token"] == token else value["reserved"]
         def committed(path):
             path = disk.safe(path)
@@ -356,10 +383,10 @@ class ModelImportStore:
         lease.data["reserved"] = amount
         disk.atomic(self.root / "active" / (lease.token + ".json"), lease.data)
 
-    def _claim(self, scope, import_id, amount, cancel=None) -> _Lease:
+    def _claim(self, scope, import_id, amount, cancel=None, *, kind="import") -> _Lease:
         # Caller holds coordinator. Reconciliation occurs before admission, not while a live worker owns files.
         require_path_budget(self.root)
-        lease = _Lease(self, scope, import_id, amount, cancel)
+        lease = _Lease(self, scope, import_id, amount, cancel, kind=kind)
         active = self._active()
         if (self.root / "active" / (lease.token + ".json")).exists():
             raise busy()
@@ -634,15 +661,26 @@ class ModelImportStore:
         if not isinstance(draft_id, str) or not DRAFT_ID.fullmatch(draft_id):
             raise missing()
         directory = disk.safe(self._folder(scope) / "drafts" / draft_id)
-        value = disk.read_json(directory / "draft.json", DRAFT_BYTES)
+        from ..industrial_assets.model_builder.drafts import DRAFT_BYTES as BUILD_DRAFT_BYTES
+        value = disk.read_json(directory / "draft.json", max(DRAFT_BYTES, BUILD_DRAFT_BYTES))
         if not isinstance(value, dict):
             raise missing()
+        if value.get("kind", "import") == "build":
+            from .model_build_store import read
+            return read(self, scope, draft_id)
+        if value.get("kind", "import") != "import":
+            raise FacilityLayoutError("model_store_invalid", "Unknown model draft kind.", status_code=503)
+        # Preserve the import protocol's original bound and validator.
+        value = disk.read_json(directory / "draft.json", DRAFT_BYTES)
         try:
             value = validate_draft(value)
             record = self._record(scope, value["recipe"]["importId"])
             if value["sourceSha256"] != record["sha256"] or value["draftId"] != draft_id:
                 raise missing()
-            if self._receipt(scope, draft_id) is None:
+            receipt = self._receipt(scope, draft_id)
+            if receipt is not None and not receipt["assetId"].startswith("asset-import-"):
+                raise FacilityLayoutError("model_store_invalid", "The import receipt has the wrong kind.", status_code=503)
+            if receipt is None:
                 return read_draft_output(directory)
             manifest = disk.read_json(directory / "manifest.json", 4096)
             if not isinstance(manifest, dict):
@@ -671,6 +709,12 @@ class ModelImportStore:
         self._authorize(scope)
         with disk.coordinator(self.root):
             value = self._draft(scope, draft_id)
+            if value.get("kind") == "build":
+                from ..industrial_assets.model_builder.drafts import public_result
+                try:
+                    return public_result(self._folder(scope) / "drafts" / draft_id, value, offset=offset, limit=limit)
+                except ValueError:
+                    raise FacilityLayoutError("model_parts_page_invalid", "Use a valid parts offset and a limit of 1-64.") from None
             if type(offset) is not int or not 0 <= offset <= value["partsTotal"] or type(limit) is not int or not 1 <= limit <= 64:
                 raise FacilityLayoutError("model_parts_page_invalid", "Use a valid parts offset and a limit of 1-64.")
             parts = []
@@ -693,6 +737,16 @@ class ModelImportStore:
                 if len(disk.encode(result)) <= SUMMARY_BYTES:
                     return result
                 parts.pop()
+
+    @host_errors
+    def build(self, scope, recipe, cancel=None, **options):
+        from .model_build_store import build
+        return build(self, scope, recipe, cancel, **options)
+
+    @host_errors
+    def list_build_drafts(self, scope):
+        from .model_build_store import list_drafts
+        return list_drafts(self, scope)
 
     @host_errors
     def prepare(self, scope, recipe, cancel=None):
@@ -793,7 +847,7 @@ class ModelImportStore:
             return None
         if (not isinstance(value, dict) or set(value) != {"assetId", "revision", "at"}
                 or not isinstance(value["assetId"], str)
-                or not re.fullmatch(r"asset-import-[a-z0-9-]{1,40}-[a-f0-9]{24}", value["assetId"])
+                or not re.fullmatch(r"asset-(?:import|built)-[a-z0-9-]{1,40}-[a-f0-9]{24}", value["assetId"])
                 or not isinstance(value["revision"], str) or not 1 <= len(value["revision"]) <= 128
                 or clean_text(value["revision"], 128) != value["revision"]
                 or type(value["at"]) not in (int, float) or not 0 < value["at"] < 1e12):
@@ -816,9 +870,12 @@ class ModelImportStore:
         try:
             with disk.coordinator(self.root):
                 value = self._draft(scope, draft_id)
-                import_id = value["recipe"]["importId"]
-                metadata_bytes = disk.size(self._folder(scope) / "imports" / (import_id + ".json")) + 16 * 1024
-                lease = self._claim(scope, import_id, metadata_bytes, cancel)
+                if value.get("kind") == "build":
+                    lease = self._claim(scope, draft_id, 16*1024, cancel, kind="build")
+                else:
+                    import_id = value["recipe"]["importId"]
+                    metadata_bytes = disk.size(self._folder(scope) / "imports" / (import_id + ".json")) + 16 * 1024
+                    lease = self._claim(scope, import_id, metadata_bytes, cancel)
                 directory = self._folder(scope) / "drafts" / draft_id
             lease.check()
             yield value, directory, lease
@@ -831,11 +888,14 @@ class ModelImportStore:
         self._authorize(scope, True)
         with disk.coordinator(self.root):
             value = self._draft(scope, draft_id)
-            import_id = value["recipe"]["importId"]
+            is_build = value.get("kind") == "build"
+            import_id = draft_id if is_build else value["recipe"]["importId"]
             lock = disk.read_json(self._folder(scope) / "locks" / (import_id + ".json"))
             if lock is not None and (_lease is None or lock.get("token") != _lease.token):
                 raise busy()
-            if (not isinstance(asset_id, str) or not re.fullmatch(r"asset-import-[a-z0-9-]{1,40}-[a-f0-9]{24}", asset_id)
+            valid_asset = (asset_id == value["assetId"] if is_build else isinstance(asset_id, str) and
+                           re.fullmatch(r"asset-import-[a-z0-9-]{1,40}-[a-f0-9]{24}", asset_id))
+            if (not valid_asset
                     or not isinstance(revision, str) or not 1 <= len(revision) <= 128
                     or clean_text(revision, 128) != revision):
                 raise FacilityLayoutError("model_receipt_invalid", "Supply a valid asset identity and revision.")
@@ -906,8 +966,9 @@ class ModelImportStore:
                     continue
                 folder = self.root / lease["scope"]
                 disk.remove(folder / "jobs" / lease["token"])
-                disk.remove(folder / "uploads" / (lease["importId"] + ".part"))
-                lock = folder / "locks" / (lease["importId"] + ".json")
+                if lease.get("kind", "import") == "import":
+                    disk.remove(folder / "uploads" / (lease["importId"] + ".part"))
+                lock = folder / "locks" / (lease_key(lease) + ".json")
                 if (disk.read_json(lock) or {}).get("token") == lease["token"]:
                     disk.remove(lock)
                 disk.remove(self.root / "active" / (lease["token"] + ".json"))
@@ -918,7 +979,9 @@ class ModelImportStore:
                 disk.safe(folder)
                 scope = self._scope_stub(folder.name)
                 locks = {}
-                for lock in (folder / "locks").glob("mi-*.json"):
+                for lock in (folder / "locks").glob("*.json"):
+                    if not (IMPORT_ID.fullmatch(lock.stem) or DRAFT_ID.fullmatch(lock.stem) or BUILD_JOB_ID.fullmatch(lock.stem)):
+                        continue
                     value = disk.read_json(lock)
                     if disk.live(value):
                         locks[lock.stem] = value
@@ -943,7 +1006,8 @@ class ModelImportStore:
                         if not DRAFT_ID.fullmatch(draft_dir.name) or draft_dir.name in known:
                             continue
                         draft = disk.read_json(draft_dir / "draft.json", DRAFT_BYTES)
-                        if isinstance(draft, dict) and draft.get("recipe", {}).get("importId") == record["id"]:
+                        if (isinstance(draft, dict) and draft.get("kind", "import") == "import"
+                                and draft.get("recipe", {}).get("importId") == record["id"]):
                             try:
                                 read_draft_output(disk.safe(draft_dir))
                             except ModelImportError:
@@ -1012,6 +1076,9 @@ class ModelImportStore:
                     else:
                         self._save(scope, record)
                 self._source_gc(scope)
+
+                from .model_build_store import trim
+                trim(self, scope, now=now)
 
     def close(self):
         """Application shutdown: cancel owned work and wait for worker termination."""

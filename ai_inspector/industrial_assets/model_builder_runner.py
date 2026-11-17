@@ -20,7 +20,7 @@ ModelImportError = module("errors").ModelImportError
 WALL_SECONDS = module("limits").WALL_SECONDS
 
 
-def write_job_inputs(job_dir, recipe, *, categories, appearance_ids, font_directory=None, include_catalog=None):
+def write_job_inputs(job_dir, recipe, *, categories, appearance_ids, font_directory=None, include_catalog=None, previews=False):
     """Populate an empty host-owned job with normalized JSON and pinned-font copies.
 
     font_directory is trusted host configuration, never a field in recipe data.
@@ -50,6 +50,8 @@ def write_job_inputs(job_dir, recipe, *, categories, appearance_ids, font_direct
         inputs = [
                 (job, "recipe.json", json_bytes(normalized)), (job, "allowed.json", json_bytes(allowed)),
                 (job / "fonts", "fonts.json", json_bytes(manifest)), (job / "fonts", font_name, font)]
+        if previews:
+            inputs.append((job, job_io.PREVIEW_REQUEST, json_bytes({"previews": True})))
         if wanted:
             inputs.append((job / "includes", "manifest.json", json_bytes(
                 [sources[entry["id"]]["manifest"] for entry, _, _ in wanted])))
@@ -94,10 +96,13 @@ def run_build(job_dir, dependency_root, *, cancel_event=None, timeout=WALL_SECON
         raise ModelImportError("model_cancelled")
     try:
         job, dependencies = job_io.directory(job_dir), job_io.directory(dependency_root)
-        if job_io.names(job, len(job_io.INPUT_NAMES)) != job_io.INPUT_NAMES:
+        preview_request = job_io.file_path(job, job_io.PREVIEW_REQUEST).exists()
+        expected = job_io.INPUT_NAMES | ({job_io.PREVIEW_REQUEST} if preview_request else set())
+        if job_io.names(job, len(expected)) != expected:
             raise ModelImportError("model_worker_failed")
         before = (job_io.read_bytes(job, "recipe.json", RECIPE_BYTES),
-                  job_io.read_bytes(job, "allowed.json", job_io.ALLOWED_BYTES), _include_fingerprint(job))
+                  job_io.read_bytes(job, "allowed.json", job_io.ALLOWED_BYTES), _include_fingerprint(job),
+                  job_io.read_bytes(job, job_io.PREVIEW_REQUEST, 128) if preview_request else None)
     except (OSError, ValueError, ModelImportError):
         raise ModelImportError("model_worker_failed") from None
     if _owned is not None:
@@ -108,7 +113,8 @@ def run_build(job_dir, dependency_root, *, cancel_event=None, timeout=WALL_SECON
         try:
             recipe, allowed = job_io.read_inputs(job, outputs=True)
             after = (job_io.read_bytes(job, "recipe.json", RECIPE_BYTES),
-                     job_io.read_bytes(job, "allowed.json", job_io.ALLOWED_BYTES), _include_fingerprint(job))
+                     job_io.read_bytes(job, "allowed.json", job_io.ALLOWED_BYTES), _include_fingerprint(job),
+                     job_io.read_bytes(job, job_io.PREVIEW_REQUEST, 128) if preview_request else None)
             if before != after:
                 raise ModelImportError("model_worker_failed")
             result, payload = protocol.read_result(job, recipe, allowed,
@@ -117,6 +123,10 @@ def run_build(job_dir, dependency_root, *, cancel_event=None, timeout=WALL_SECON
             checked = primitives.verify(payload, result["dimensions"], base_height=recipe["hangHeight"])
             if checked["triangles"] != result["triangles"] or checked["bytes"] != result["outputBytes"]:
                 raise ModelImportError("model_worker_failed")
+            if preview_request:
+                for name, kind, maximum in (("preview.png", "preview", module("limits").PREVIEW_BYTES),
+                                             ("thumbnail.webp", "thumbnail", module("limits").THUMBNAIL_BYTES)):
+                    module("pictures").validate_picture(job_io.read_bytes(job, name, maximum), kind)
         except (OSError, ValueError, KeyError, TypeError, IndexError, struct.error,
                 OverflowError, RecursionError, ModelImportError):
             raise ModelImportError("model_worker_failed") from None
@@ -145,3 +155,21 @@ async def run_build_async(job_dir, dependency_root, *, cancel_event=None, timeou
             except (OSError, ValueError, ModelImportError):
                 pass
         raise
+
+
+def prepare_build_draft(recipe, destination, cancel_event, *, dependency_root, categories, appearance_ids,
+                        scope, created, include_catalog=None, derived_from=None):
+    """Stage a complete immutable draft inside the caller's reserved job folder."""
+    from pathlib import Path
+    from .model_builder import drafts
+    destination = Path(destination)
+    job = destination.parent / "worker"
+    job.mkdir()
+    normalized = write_job_inputs(job, recipe, categories=categories, appearance_ids=appearance_ids,
+                                  include_catalog=include_catalog, previews=True)
+    result = run_build(job, dependency_root, cancel_event=cancel_event)
+    return drafts.write_draft(
+        destination, normalized, result, job_io.read_bytes(job, "model.glb", protocol.GLB_BYTES),
+        job_io.read_bytes(job, "preview.png", drafts.FILES["preview.png"]),
+        job_io.read_bytes(job, "thumbnail.webp", drafts.FILES["thumbnail.webp"]),
+        scope=scope, created=created, derived_from=derived_from)

@@ -31,7 +31,11 @@ def validate_part(part, index=None):
 
 def validate_draft(value):
     try:
-        _keys(value, {*PUBLIC_FIELDS, "schemaVersion", "engineVersion", "recipe", "sourceSha256", "outputSha256"})
+        fields = {*PUBLIC_FIELDS, "schemaVersion", "engineVersion", "recipe", "sourceSha256", "outputSha256"}
+        if isinstance(value, dict) and "kind" in value:
+            _ok(value["kind"] == "import")
+            fields.add("kind")
+        _keys(value, fields)
         _ok(type(value["schemaVersion"]) is int and value["schemaVersion"] == 1)
         _ok(value["engineVersion"] == MODEL_IMPORT_ENGINE_VERSION)
         _ok(normalize_recipe(value["recipe"]) == value["recipe"])

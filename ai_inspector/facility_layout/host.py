@@ -25,7 +25,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from .api import create_facility_layout_router
 from .asset_orientation import attach_registered_semantics
 from .model_axes import mirror_catalog_record
-from .private_catalog import private_asset_spec
+from .private_catalog import project_private_asset
 from .authority_repository import (
     FacilityShellRepository,
     PolicySetRepository,
@@ -401,7 +401,7 @@ def _private_manifest_specs(root: Path) -> tuple[dict[str, Any], ...]:
         for item in _PRIVATE_LOCAL_ASSET_SPECS
     }
     for index, raw in enumerate(assets):
-        specs.append(private_asset_spec(raw, index=index, seen=seen, reserved=reserved))
+        specs.append(project_private_asset(raw, index=index, seen=seen, reserved=reserved))
     return tuple(specs)
 
 
@@ -455,6 +455,9 @@ def build_private_local_asset_catalog(
         if "attribution" in spec:
             entry["attribution"] = deepcopy(spec["attribution"])
             entry["definition"]["attribution"] = deepcopy(spec["attribution"])
+        if "build_provenance" in spec:
+            entry["buildProvenance"] = deepcopy(spec["build_provenance"])
+            entry["definition"]["buildProvenance"] = deepcopy(spec["build_provenance"])
         entry["assetDefinitionRevision"] = _revision(entry["definition"])
         tags = [str(value) for value in spec.get("tags", ())]
         if tags:
@@ -1037,6 +1040,12 @@ class LocalFacilityLayoutHost:
                                 draft_id: str) -> dict[str, Any]:
         """Publish the frozen, authorized draft; MI2b keeps receipts and retries immutable."""
         return self._model_import_hooks.register_imported_asset(principal, site_id, layout_id, draft_id)
+
+    def build_model_draft(self, principal, reference, recipe, cancel=None, *, derived_from=None):
+        return self._model_import_hooks.build(principal, reference, recipe, cancel, derived_from=derived_from)
+
+    def list_model_build_drafts(self, principal, reference):
+        return self._model_import_hooks.list_build_drafts(principal, reference)
 
     def register_authored_asset(self, family: str, parameters: Mapping[str, Any] | None = None) -> dict[str, Any]:
         """Build a basic shape (shape_families) and add it to the shared private library and to this running host,

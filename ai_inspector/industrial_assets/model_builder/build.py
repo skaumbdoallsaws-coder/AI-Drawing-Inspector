@@ -1,6 +1,7 @@
 """In-process kernel seam shared with the limited worker; publication belongs to MB4."""
 from copy import deepcopy
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -68,12 +69,16 @@ def build_model(recipe, *, allowed_categories=None, allowed_appearance_ids=(), f
     components = [c.transformed(np.eye(3), shift) for c in components]
     prints = render_prints(components, font_directory=font_directory)
     model, part_map, include_maps, image_ids = to_model(components, normalized, prints, loaded)
+    includes = include_results(normalized, components, loaded, include_maps)
     canonical_check(model, dimensions, normalized["hangHeight"])
     count = sum(len(p.indices) for p in model.parts)
     require(count <= MAX_TRIANGLES and len(model.parts) <= MAX_PRIMITIVES, "$",
             "Output exceeds its geometry budget", "budget_exceeded")
     try:
         glb = module("writer").write_glb(model, generator=ENGINE_VERSION, grouped=True, extended_materials=True)
+        from .identity import bind_includes
+        glb = bind_includes(glb, includes, attribution)
+        require(len(glb) <= 30*1024*1024, "$", "Output GLB exceeds 30 MiB", "budget_exceeded")
     except module("errors").ModelImportError as error:
         code = "budget_exceeded" if error.code == "model_output_too_large" else "geometry_invalid"
         raise ModelBuildError(code, "$", "GLB writer refused " + error.code) from None
@@ -94,7 +99,10 @@ def build_model(recipe, *, allowed_categories=None, allowed_appearance_ids=(), f
                 and normalized["hangHeight"]-1e-7 <= surface["height"] <= catalog_dimensions["height"]+1e-7,
                 f"$.surfaces[{i}]", "Surface must be inside the final model bounds")
     surfaces = module("footprint").support_surfaces(shifted, catalog_dimensions)
-    footprint = module("footprint").footprint(model.parts, normalized["footprint"])
+    # The catalog checks the footprint against these float64 dimensions to 1e-8; the float32 Part arrays can round an
+    # extreme point outward by ~3e-8 (any coordinate float32 cannot hold), so take it from the float64 components.
+    footprint = module("footprint").footprint([SimpleNamespace(positions=c.mesh.positions) for c in components],
+                                              normalized["footprint"])
     lints, warnings = lint_model(components, normalized, dimensions, shift, count)
     lints.extend(print_lints(components, prints))
     for entry, _, _ in entries(normalized):
@@ -110,4 +118,4 @@ def build_model(recipe, *, allowed_categories=None, allowed_appearance_ids=(), f
                   "sitePrivate": {"references": metadata["references"]}}
     return BuildResult(normalized, model, glb, dimensions, catalog_dimensions, shift.tolist(), part_map,
                         lints, warnings, surfaces, footprint, components, budgets, provenance, prints,
-                        include_results(normalized, components, loaded, include_maps), attribution, include_sources, image_ids)
+                        includes, attribution, include_sources, image_ids)

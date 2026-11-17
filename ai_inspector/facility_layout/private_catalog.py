@@ -46,6 +46,15 @@ def validate_attribution(value: Any) -> dict[str, str]:
     return deepcopy(value)
 
 
+def project_private_asset(raw: Any, **kwargs) -> dict[str, Any]:
+    """Add optional builder metadata without changing the legacy entry rules."""
+    spec = private_asset_spec(raw, **kwargs)
+    if "buildProvenance" in raw:
+        from ..industrial_assets.model_builder.identity import validate_provenance
+        spec["build_provenance"] = validate_provenance(raw["buildProvenance"])
+    return spec
+
+
 def private_asset_spec(raw: Any, *, index: int = 0, seen: set[str] | None = None,
                        reserved: Collection[str] = ()) -> dict[str, Any]:
     """Validate one entry using the binder's original rules and return its spec."""

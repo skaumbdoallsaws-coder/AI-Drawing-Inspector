@@ -251,3 +251,16 @@ def test_lints_are_capped_and_dense_contact_work_is_bounded():
     pieces = [shape(id=f"p-{i}", min=[-.5, i*.2, -.5], max=[.5, i*.2+.01, .5]) for i in range(30)]
     result = builder.build_model(recipe(*pieces))
     assert sum(f["code"] == "floating_part" for f in result.lints) == 20
+
+
+@pytest.mark.parametrize("name", ["baler-vertical-42", "gaylord-on-pallet", "pack-station-printer",
+                                  "carrier-tag-ups", "pallet-plain", "roll-cage-plain"])
+@pytest.mark.parametrize("mode", ["hull", "box"])
+def test_footprint_stays_inside_catalog_bounds_at_the_catalog_tolerance(name, mode):
+    # private_catalog refuses a footprint point beyond width/2 or depth/2 by more than 1e-8. Taken from the float32
+    # Part arrays, the baler, pack station and roll cage overshot by 1-3e-8 and would have been refused at install.
+    raw = dict(reference(name), footprint=mode)
+    result = builder.build_model(raw)
+    half_width, half_depth = result.dimensions["width"]/2, result.dimensions["depth"]/2
+    for point in result.footprint[0]:
+        assert abs(point["x"]) <= half_width+1e-8 and abs(point["z"]) <= half_depth+1e-8

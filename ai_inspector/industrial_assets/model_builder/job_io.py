@@ -9,7 +9,8 @@ from .imports import module
 from .recipe import RECIPE_BYTES, normalize_recipe
 
 INPUT_NAMES = {"recipe.json", "allowed.json", "fonts", "includes"}
-OUTPUT_NAMES = ("model.glb", "result.json", "error.json")
+OUTPUT_NAMES = ("model.glb", "result.json", "error.json", "preview.png", "thumbnail.webp")
+PREVIEW_REQUEST = "draft-request.json"
 ALLOWED_BYTES = 256 * 1024
 FONT_BYTES = 2 * 1024 * 1024
 FONT_MANIFEST_BYTES = 4096
@@ -118,6 +119,11 @@ def read_inputs(job, *, outputs=False, check_fonts=True):
     try:
         job = directory(job)
         expected = INPUT_NAMES | ({"model.glb", "result.json"} if outputs else set())
+        if file_path(job, PREVIEW_REQUEST).exists():
+            request = read_json(job, PREVIEW_REQUEST, 128)
+            require(type(request) is dict and set(request) == {"previews"} and request["previews"] is True,
+                    "$", "Invalid draft request", "job_invalid")
+            expected = expected | {PREVIEW_REQUEST} | ({"preview.png", "thumbnail.webp"} if outputs else set())
         require(names(job, len(expected)) == expected, "$", "Job has missing or unexpected files", "job_invalid")
         allowed = validate_allowed(read_json(job, "allowed.json", ALLOWED_BYTES))
         raw = read_json(job, "recipe.json", RECIPE_BYTES)

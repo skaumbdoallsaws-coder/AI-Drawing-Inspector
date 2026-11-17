@@ -118,7 +118,7 @@ class ModelImportHooks:
         store = self.store
         if draft_id is not None:
             value = store.draft(scope, draft_id)
-            result = {key: value[key] for key in PUBLIC_FIELDS}
+            result = {} if value.get("kind") == "build" else {key: value[key] for key in PUBLIC_FIELDS}
             result.update(store.draft_parts(scope, draft_id, offset, limit))
             return _bounded(result), store.preview(scope, draft_id, draft=True)
         result = store.inspect(scope, import_id, offset, limit)
@@ -133,6 +133,26 @@ class ModelImportHooks:
         # A stale document during a long prepare cannot authorize subsequent actions.
         self._scope(principal, reference, write=True)
         return _bounded(result), store.preview(scope, result["draftId"], draft=True)
+
+    @host_errors
+    def build(self, principal, reference, recipe, cancel=None, *, derived_from=None):
+        """Host entry only; MB5 supplies the Sage tool and its request envelope."""
+        scope = self._scope(principal, reference, write=True)
+        from .appearance_library import load_library
+        from ..industrial_assets.model_builder_host import IncludeCatalog
+        catalog = self.host.list_assets()["assets"]
+        if derived_from is not None and not any(v["assetId"] == derived_from for v in catalog):
+            raise FacilityLayoutError("asset_missing", "The source asset for this recipe is unavailable.")
+        result = self.store.build(
+            scope, recipe, cancel, categories=sorted({v["category"] for v in catalog}),
+            appearance_ids=sorted(load_library()["appearances"]), derived_from=derived_from,
+            include_catalog=IncludeCatalog(self.host._component_visual_root),
+            recheck=lambda: self._scope(principal, reference, write=True))
+        return _bounded(result), self.store.preview(scope, result["draftId"], draft=True)
+
+    @host_errors
+    def list_build_drafts(self, principal, reference):
+        return self.store.list_build_drafts(self._scope(principal, reference))
 
     @host_errors
     def register(self, principal, reference, draft_id: str) -> dict:
@@ -169,16 +189,31 @@ class ModelImportHooks:
             if reference is not None:
                 self._scope(principal, reference, write=True)
             receipt = store.receipt(scope, draft_id)
-            identity = asset_identity(draft)
-            entry = dict(catalog_semantics(draft), assetId=identity["assetId"],
-                         artifact=(BUNDLE_FOLDER / identity["assetId"] / "model.glb").as_posix(),
-                         sourceToCanonical=FRAME)
+            is_build = draft.get("kind") == "build"
+            if is_build:
+                from ..industrial_assets import model_builder_bundle as builds
+                identity = builds.identity.asset_identity(draft)
+                entry = builds.catalog_entry(draft)
+                bundle_folder = builds.FOLDER
+            else:
+                identity = asset_identity(draft)
+                entry = dict(catalog_semantics(draft), assetId=identity["assetId"],
+                             artifact=(BUNDLE_FOLDER / identity["assetId"] / "model.glb").as_posix(),
+                             sourceToCanonical=FRAME)
+                bundle_folder = BUNDLE_FOLDER
             if receipt is not None and receipt["assetId"] != entry["assetId"]:
                 raise FacilityLayoutError("asset_identity_conflict", "The registration receipt has a different identity.",
                                           status_code=409)
-            source = (self.host._component_visual_root / BUNDLE_FOLDER / identity["assetId"]
+            source = (self.host._component_visual_root / bundle_folder / identity["assetId"]
                       if receipt is not None else directory)
-            files = _bundle_files(source, directory, draft, identity)
+            if is_build:
+                try:
+                    files = builds.bundle_files(source, directory, draft)
+                except (ValueError, KeyError, TypeError, OSError, builds.module("errors").ModelImportError):
+                    raise FacilityLayoutError("asset_identity_conflict", "The built bundle differs from its frozen draft.",
+                                              status_code=409) from None
+            else:
+                files = _bundle_files(source, directory, draft, identity)
             lease.check()
             try:
                 installed = install_bundle(self.host._component_visual_root, entry, files)
@@ -193,7 +228,8 @@ class ModelImportHooks:
             return _bounded({"assetId": bound["assetId"],
                              "assetDefinitionRevision": bound["assetDefinitionRevision"],
                              "displayName": bound["displayName"], "category": bound["category"],
-                             "dimensions": draft["dimensions"], "attribution": bound["attribution"],
+                              "dimensions": draft["catalogDimensions"] if is_build else draft["dimensions"],
+                              "attribution": bound.get("attribution") if is_build else bound["attribution"],
                              "added": installed["added"]})
 
     @host_errors

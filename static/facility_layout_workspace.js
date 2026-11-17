@@ -1013,6 +1013,7 @@
                 }).filter(Boolean) : [],
                 thumbnailUrl: thumbnailUrl,
                 attribution: clone(record.attribution || source.attribution || definition.attribution || null),
+                buildProvenance: clone(record.buildProvenance || source.buildProvenance || definition.buildProvenance || null),
                 width: Number.isFinite(width) && width > 0 ? width : 1.2,
                 depth: Number.isFinite(depth) && depth > 0 ? depth : 0.8,
                 height: Number.isFinite(height) && height > 0 ? height : 1,
@@ -1026,6 +1027,13 @@
                 || left.label.localeCompare(right.label)
                 || left.assetId.localeCompare(right.assetId);
         });
+    }
+
+    function builtAssetLine(record) {
+        const provenance = record && record.buildProvenance;
+        const basis = provenance && provenance.sizeBasis;
+        const kind = basis && cleanString(basis.kind, '');
+        return kind ? 'Built by Sage - ' + boundedText(kind, 80) : '';
     }
 
     function rectangleBounds(center, width, depth) {
@@ -12735,6 +12743,12 @@
                 className: 'ip-flw-asset-card-description',
             }, boundedText(record.description, 110)));
         }
+        const builtLine = builtAssetLine(record);
+        if (builtLine) {
+            copy.appendChild(element(this.document, 'small', {
+                className: 'ip-flw-asset-card-built',
+            }, builtLine));
+        }
         if (record.attribution) {
             const credit = ['title', 'author', 'license'].map(function (key) {
                 return boundedText(record.attribution[key], 300);
@@ -19225,6 +19239,7 @@
         snapWorldPoint: snapWorldPoint,
         quarterTurnQuaternion: quarterTurnQuaternion,
         normalizeCatalog: normalizeCatalog,
+        builtAssetLine: builtAssetLine,
         buildAssetBatchPlacementRequests: buildAssetBatchPlacementRequests,
         buildAlignmentUpdates: buildAlignmentUpdates,
         buildDistributionUpdates: buildDistributionUpdates,

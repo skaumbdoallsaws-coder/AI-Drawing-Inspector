@@ -70,6 +70,7 @@ def trim(store, scope, *, now=None, protect=()):
     for index, (_, _, expires, folder) in enumerate(unregistered):
         if index < excess or expires <= now:
             disk.remove(folder)
+            disk.remove(store._folder(scope) / "views" / folder.name)
 
 
 def list_drafts(store, scope):

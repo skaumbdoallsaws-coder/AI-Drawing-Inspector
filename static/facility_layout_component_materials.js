@@ -42,9 +42,17 @@
         slots(object).forEach(item=>{
             const data=item.material.userData||{};
             const id=data.facilityDefaultFinish,group=typeof data.facilityFinishGroup==='string'&&data.facilityFinishGroup?data.facilityFinishGroup:null;
-            if(!item.key.startsWith('p:'))return;
+            if(!item.key.startsWith('p:')||data.facilityArtwork===true)return;
             if(group&&!groups.some(v=>v.key===item.key))groups.push({key:item.key,legacyKey:item.legacyKey,group});
-            if(typeof id==='string'&&id&&!parts.some(v=>v.key===item.key))parts.push(group?{key:item.key,appearanceId:id,group}:{key:item.key,appearanceId:id});
+            if(typeof id==='string'&&id&&!parts.some(v=>v.key===item.key)){
+                const value=group?{key:item.key,appearanceId:id,group}:{key:item.key,appearanceId:id};
+                const adjustments=data.facilityDefaultFinishAdjustments;
+                if(adjustments&&typeof adjustments==='object'&&!Array.isArray(adjustments)){
+                    if(typeof adjustments.color==='string'&&/^#[0-9a-fA-F]{6}$/.test(adjustments.color))value.color=adjustments.color;
+                    ['roughness','metalness'].forEach(key=>{if(typeof adjustments[key]==='number'&&Number.isFinite(adjustments[key])&&adjustments[key]>=0&&adjustments[key]<=1)value[key]=adjustments[key];});
+                }
+                parts.push(value);
+            }
         });
         object.userData=object.userData||{};
         object.userData.facilityDefaultParts=parts;
@@ -70,7 +78,9 @@
         const byDefault=new Map(parts.filter(v=>!v.group||!set.has(v.group)).map(v=>[v.key,v]));
         const applied=[];
         slots(object).forEach(item=>{
-            const v=byKey.get(item.key)||(sameRepresentation?byKey.get(item.legacyKey):null)||byDefault.get(item.key);if(!v)return;
+            // A printed face takes the user's own part finish, never a model default (C6/C28).
+            const artwork=!!(item.material.userData&&item.material.userData.facilityArtwork===true);
+            const v=byKey.get(item.key)||(sameRepresentation?byKey.get(item.legacyKey):null)||(artwork?null:byDefault.get(item.key));if(!v)return;
             if(v.appearanceId){
                 const material=finishes&&finishes.materialFor(v,item.node);
                 if(!material)return;

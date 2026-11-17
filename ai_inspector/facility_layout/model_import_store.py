@@ -749,6 +749,11 @@ class ModelImportStore:
         return list_drafts(self, scope)
 
     @host_errors
+    def focus_build_view(self, scope, draft_id, focus, private_asset_root, cancel=None):
+        from .model_build_views import focus_view
+        return focus_view(self, scope, draft_id, focus, private_asset_root, cancel)
+
+    @host_errors
     def prepare(self, scope, recipe, cancel=None):
         self._authorize(scope, True)
         try:

@@ -1,4 +1,4 @@
-"""MB4a opt-in previews inside the existing contained build worker. Run outside sandbox."""
+"""Build-specific previews inside the existing contained build worker. Run outside sandbox."""
 from pathlib import Path
 import threading
 
@@ -12,7 +12,7 @@ from tests.model_builder_test_support import module, recipe, shape
 DEPENDENCIES = Path(np.__file__).resolve().parent.parent
 
 
-def test_real_worker_builds_complete_draft_with_existing_print_preview_renderer(tmp_path):
+def test_real_worker_builds_complete_draft_with_builder_preview_renderer(tmp_path):
     raw = recipe(shape("panel", center=[0, .1, 0], size=[.3, .2],
                        print={"background": "#ffffff", "items": [
                            {"text": "OUTBOUND", "box": [.05, .1, .95, .8], "color": "#000000"}]}),
@@ -23,17 +23,18 @@ def test_real_worker_builds_complete_draft_with_existing_print_preview_renderer(
         categories=[raw["category"]], appearance_ids=[], scope="a"*24, created=1700000000)
     assert drafts.read_draft(destination) == frozen
     assert (destination / "model.glb").read_bytes() == expected.glb
-    # Same renderer/read mode, no new shader or special MB4b camera path.
+    # The import reader remains shared; only the build picture path differs.
     imports = module("imports").module
     restored = imports("reader").read_model(expected.glb, extended_materials=True)
     assert any(m.get("artwork") and m["texture"] for m in restored.materials)
-    pictures = imports("preview").render_previews(restored)
+    pictures = module("pictures").render_previews(restored)
     assert (destination / "preview.png").read_bytes() == pictures.preview
     assert (destination / "thumbnail.webp").read_bytes() == pictures.thumbnail
+    assert pictures.preview != imports("preview").render_previews(restored).preview
     assert frozen["kind"] == "build"
 
 
-@pytest.mark.parametrize("failure", ["missing", "corrupt", "cancelled"])
+@pytest.mark.parametrize("failure", ["missing", "corrupt", "cancelled", "palette"])
 def test_runner_refuses_partial_preview_outputs_and_cleans_only_owned_outputs(tmp_path, monkeypatch, failure):
     job = tmp_path / "job"
     job.mkdir()
@@ -47,6 +48,8 @@ def test_runner_refuses_partial_preview_outputs_and_cleans_only_owned_outputs(tm
             (job / "thumbnail.webp").unlink()
         elif failure == "corrupt":
             (job / "preview.png").write_bytes(b"corrupt")
+        elif failure == "palette":
+            (job / runner.job_io.APPEARANCE_COLORS).write_bytes(b"{} ")
         else:
             cancel.set()
     monkeypatch.setattr(runner.launch, "_launch", changed)
@@ -54,4 +57,5 @@ def test_runner_refuses_partial_preview_outputs_and_cleans_only_owned_outputs(tm
         runner.run_build(job, DEPENDENCIES, cancel_event=cancel)
     assert caught.value.code == ("model_cancelled" if failure == "cancelled" else "model_worker_failed")
     assert not any((job / name).exists() for name in runner.job_io.OUTPUT_NAMES)
-    assert {p.name for p in job.iterdir()} == runner.job_io.INPUT_NAMES | {runner.job_io.PREVIEW_REQUEST}
+    assert {p.name for p in job.iterdir()} == runner.job_io.INPUT_NAMES | {
+        runner.job_io.PREVIEW_REQUEST, runner.job_io.APPEARANCE_COLORS}

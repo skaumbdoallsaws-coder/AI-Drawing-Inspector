@@ -1047,6 +1047,9 @@ class LocalFacilityLayoutHost:
     def list_model_build_drafts(self, principal, reference):
         return self._model_import_hooks.list_build_drafts(principal, reference)
 
+    def focus_model_build_view(self, principal, reference, draft_id, focus, cancel=None):
+        return self._model_import_hooks.focus_build_view(principal, reference, draft_id, focus, cancel)
+
     def register_authored_asset(self, family: str, parameters: Mapping[str, Any] | None = None) -> dict[str, Any]:
         """Build a basic shape (shape_families) and add it to the shared private library and to this running host,
         so placements of it bind at once (docs/sage-basic-shapes-plan.md, BS2).

@@ -111,15 +111,27 @@ def material_slots(document):
                 extras = material.get("extras") if isinstance(material.get("extras"), dict) else {}
                 if extras.get("facilityAuthoredFinish") is True:
                     slot["authoredFinish"] = True
+                if extras.get("facilityArtwork") is True and pbr.get("baseColorTexture") is not None:
+                    slot["printedArtwork"] = True
                 # The model names a library finish for this part (a light's lens that comes lit); the view
                 # applies it under the placement's own part finishes (static/facility_layout_component_materials.js).
-                if isinstance(extras.get("facilityDefaultFinish"), str) and extras["facilityDefaultFinish"]:
+                if not slot.get("printedArtwork") and isinstance(extras.get("facilityDefaultFinish"), str) and extras["facilityDefaultFinish"]:
                     slot["defaultFinish"] = extras["facilityDefaultFinish"][:120]
+                    adjustments = extras.get("facilityDefaultFinishAdjustments")
+                    if isinstance(adjustments, dict):
+                        clean = {}
+                        color = adjustments.get("color")
+                        if isinstance(color, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", color):
+                            clean["color"] = color
+                        for key in ("roughness", "metalness"):
+                            value = adjustments.get(key)
+                            if type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 1:
+                                clean[key] = value
+                        if clean:
+                            slot["defaultFinishAdjustments"] = clean
                 # A default in a finish group (a stack light's lamps) shows only while no part of it has its own.
                 if isinstance(extras.get("facilityFinishGroup"), str) and extras["facilityFinishGroup"]:
                     slot["finishGroup"] = extras["facilityFinishGroup"][:120]
-                if extras.get("facilityArtwork") is True and pbr.get("baseColorTexture") is not None:
-                    slot["printedArtwork"] = True
                 slots.append(slot)
                 if len(slots) > 100000:
                     raise ValueError("Too many material slots")
@@ -313,10 +325,12 @@ def shown_finish(slot, placement, layout, finished_groups=frozenset()):
         return _finish(override, layout, "part override")
     if override:
         return {**{key: override[key] for key in ("color", "roughness", "metalness")}, "source": "part override"}
-    if slot.get("defaultFinish") and slot.get("finishGroup") not in finished_groups:
-        return _finish({"appearanceId": slot["defaultFinish"]}, layout, "the model's default finish")
+    # A printed face keeps the user's own part finish (above) but never takes a model default or an object finish.
     if slot.get("printedArtwork"):
         return {"source": "printed artwork (an image); object finishes and colors leave it as it is"}
+    if slot.get("defaultFinish") and slot.get("finishGroup") not in finished_groups:
+        return _finish({"appearanceId": slot["defaultFinish"], **slot.get("defaultFinishAdjustments", {})},
+                       layout, "the model's default finish")
     appearance = placement.get("appearance") or {}
     if appearance.get("appearanceId"):
         return _finish(appearance, layout, "object finish")

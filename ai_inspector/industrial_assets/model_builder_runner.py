@@ -51,7 +51,13 @@ def write_job_inputs(job_dir, recipe, *, categories, appearance_ids, font_direct
                 (job, "recipe.json", json_bytes(normalized)), (job, "allowed.json", json_bytes(allowed)),
                 (job / "fonts", "fonts.json", json_bytes(manifest)), (job / "fonts", font_name, font)]
         if previews:
+            from ..facility_layout.appearance_library import load_library
+            appearances = load_library()["appearances"]
+            colors = {key: appearances[key]["color"] for key in allowed["appearanceIds"]
+                      if key in appearances and isinstance(appearances[key].get("color"), str)}
+            job_io.validate_appearance_colors(colors)
             inputs.append((job, job_io.PREVIEW_REQUEST, json_bytes({"previews": True})))
+            inputs.append((job, job_io.APPEARANCE_COLORS, json_bytes(colors)))
         if wanted:
             inputs.append((job / "includes", "manifest.json", json_bytes(
                 [sources[entry["id"]]["manifest"] for entry, _, _ in wanted])))
@@ -97,12 +103,13 @@ def run_build(job_dir, dependency_root, *, cancel_event=None, timeout=WALL_SECON
     try:
         job, dependencies = job_io.directory(job_dir), job_io.directory(dependency_root)
         preview_request = job_io.file_path(job, job_io.PREVIEW_REQUEST).exists()
-        expected = job_io.INPUT_NAMES | ({job_io.PREVIEW_REQUEST} if preview_request else set())
+        expected = job_io.INPUT_NAMES | ({job_io.PREVIEW_REQUEST, job_io.APPEARANCE_COLORS} if preview_request else set())
         if job_io.names(job, len(expected)) != expected:
             raise ModelImportError("model_worker_failed")
         before = (job_io.read_bytes(job, "recipe.json", RECIPE_BYTES),
                   job_io.read_bytes(job, "allowed.json", job_io.ALLOWED_BYTES), _include_fingerprint(job),
-                  job_io.read_bytes(job, job_io.PREVIEW_REQUEST, 128) if preview_request else None)
+                   job_io.read_bytes(job, job_io.PREVIEW_REQUEST, 128) if preview_request else None,
+                   job_io.read_bytes(job, job_io.APPEARANCE_COLORS, job_io.ALLOWED_BYTES) if preview_request else None)
     except (OSError, ValueError, ModelImportError):
         raise ModelImportError("model_worker_failed") from None
     if _owned is not None:
@@ -114,7 +121,8 @@ def run_build(job_dir, dependency_root, *, cancel_event=None, timeout=WALL_SECON
             recipe, allowed = job_io.read_inputs(job, outputs=True)
             after = (job_io.read_bytes(job, "recipe.json", RECIPE_BYTES),
                      job_io.read_bytes(job, "allowed.json", job_io.ALLOWED_BYTES), _include_fingerprint(job),
-                     job_io.read_bytes(job, job_io.PREVIEW_REQUEST, 128) if preview_request else None)
+                      job_io.read_bytes(job, job_io.PREVIEW_REQUEST, 128) if preview_request else None,
+                      job_io.read_bytes(job, job_io.APPEARANCE_COLORS, job_io.ALLOWED_BYTES) if preview_request else None)
             if before != after:
                 raise ModelImportError("model_worker_failed")
             result, payload = protocol.read_result(job, recipe, allowed,
@@ -173,3 +181,45 @@ def prepare_build_draft(recipe, destination, cancel_event, *, dependency_root, c
         job_io.read_bytes(job, "preview.png", drafts.FILES["preview.png"]),
         job_io.read_bytes(job, "thumbnail.webp", drafts.FILES["thumbnail.webp"]),
         scope=scope, created=created, derived_from=derived_from)
+
+
+def appearance_colors():
+    """Only bundled base colors cross into the worker, never local custom finishes."""
+    from ..facility_layout.appearance_library import load_library
+    entries = load_library()["appearances"]
+    return job_io.validate_appearance_colors({key: row["color"] for key, row in entries.items()
+                                              if isinstance(row.get("color"), str)})
+
+
+def run_focus(job_dir, dependency_root, payload, parts, *, cancel_event=None, timeout=WALL_SECONDS):
+    """Re-render a pinned GLB in the same contained build launch as draft pictures."""
+    event = cancel_event if cancel_event is not None else threading.Event()
+    if event.is_set():
+        raise ModelImportError("model_cancelled")
+    if type(payload) is not bytes or not 0 < len(payload) <= protocol.GLB_BYTES:
+        raise ModelBuildError("job_invalid", "$.focus.model", "Focus model exceeds its byte limit")
+    job = job_io.directory(job_dir)
+    dependencies = job_io.directory(dependency_root)
+    if job_io.names(job, 0):
+        raise ModelBuildError("job_invalid", "$.focus", "Focus job must be empty")
+    request = {"modelSha256": sha256(payload).hexdigest(), "parts": parts}
+    if len(json_bytes(request)) > 4096:
+        raise ModelBuildError("job_invalid", "$.focus.parts", "Focus selection is too large")
+    colors = appearance_colors()
+    inputs = (("model.glb", payload), (job_io.FOCUS_REQUEST, json_bytes(request)),
+              (job_io.APPEARANCE_COLORS, json_bytes(colors)))
+    for name, data in inputs:
+        with job_io.file_path(job, name).open("xb") as stream:
+            stream.write(data)
+    job_io.read_focus_inputs(job)
+    before = tuple(sha256(data).hexdigest() for _, data in inputs)
+    launch._launch(job, dependencies, "build", event, timeout, build_error_decoder=decode_error)
+    focus, checked_colors, checked_payload = job_io.read_focus_inputs(job, outputs=True)
+    if (focus != request or checked_colors != colors or checked_payload != payload
+            or before != tuple(sha256(job_io.read_bytes(job, name, len(data))).hexdigest() for name, data in inputs)):
+        raise ModelImportError("model_worker_failed")
+    picture = job_io.read_bytes(job, "preview.png", module("limits").PREVIEW_BYTES)
+    module("pictures").validate_picture(picture, "preview")
+    if event.is_set():
+        raise ModelImportError("model_cancelled")
+    return picture

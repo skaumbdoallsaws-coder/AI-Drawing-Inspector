@@ -99,13 +99,13 @@ def _unit(value):
     return result / np.linalg.norm(result)
 
 
-def _projection(scene, direction, size):
+def _projection(scene, direction, size, frame_box=None):
     view = _unit(direction)
     forward = -view
     right = _unit(np.cross(forward, [0, 1, 0]))
     up = np.cross(right, forward)
     basis = np.stack((right, up, forward), axis=1)
-    box = scene.box @ basis
+    box = (scene.box if frame_box is None else frame_box) @ basis
     low, high = box[:, :2].min(axis=0), box[:, :2].max(axis=0)
     center = (low + high) / 2
     factor = min(size * .72 / max(float(high[0] - low[0]), 1e-12),
@@ -260,9 +260,9 @@ def _splat(indices, centroids, colors, alpha, rgb, nearest, blend):
     flat[target] = total_color + flat[target] * transmission[:, None]
 
 
-def rasterize(scene, images, direction=(0, 0, 1), size=384, grid=True, cache=None):
+def rasterize(scene, images, direction=(0, 0, 1), size=384, grid=True, cache=None, frame_box=None):
     cache = TextureCache(images) if cache is None else cache
-    screen, basis, center, factor, view = _projection(scene, direction, size)
+    screen, basis, center, factor, view = _projection(scene, direction, size, frame_box)
     rgb, nearest = _background(scene, basis, center, factor, size, grid)
     normal = scene.normals * np.where(scene.normals @ view < 0, -1, 1)[:, None]
     shade_values = AMBIENT + DIFFUSE * np.maximum(normal @ LIGHT, 0)

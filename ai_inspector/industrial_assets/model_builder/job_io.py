@@ -2,6 +2,7 @@
 from hashlib import sha256
 from itertools import islice
 from pathlib import Path
+import re
 import stat
 
 from .errors import ModelBuildError, json_bytes, parse_json, require
@@ -11,6 +12,8 @@ from .recipe import RECIPE_BYTES, normalize_recipe
 INPUT_NAMES = {"recipe.json", "allowed.json", "fonts", "includes"}
 OUTPUT_NAMES = ("model.glb", "result.json", "error.json", "preview.png", "thumbnail.webp")
 PREVIEW_REQUEST = "draft-request.json"
+APPEARANCE_COLORS = "appearance-colors.json"
+FOCUS_REQUEST = "focus-request.json"
 ALLOWED_BYTES = 256 * 1024
 FONT_BYTES = 2 * 1024 * 1024
 FONT_MANIFEST_BYTES = 4096
@@ -71,6 +74,15 @@ def validate_allowed(value):
     return value
 
 
+def validate_appearance_colors(value):
+    require(type(value) is dict and len(value) <= 1024 and len(json_bytes(value)) <= ALLOWED_BYTES,
+            "$.appearances", "Invalid preview appearance colors", "job_invalid")
+    require(all(type(key) is str and 0 < len(key) <= 120 and type(color) is str
+                and re.fullmatch(r"#[0-9a-fA-F]{6}", color) for key, color in value.items()),
+            "$.appearances", "Invalid preview appearance color", "job_invalid")
+    return value
+
+
 def pinned_font():
     """This manifest is installed code, not the job's replaceable copy."""
     folder = Path(__file__).resolve().parent / "fonts"
@@ -123,7 +135,8 @@ def read_inputs(job, *, outputs=False, check_fonts=True):
             request = read_json(job, PREVIEW_REQUEST, 128)
             require(type(request) is dict and set(request) == {"previews"} and request["previews"] is True,
                     "$", "Invalid draft request", "job_invalid")
-            expected = expected | {PREVIEW_REQUEST} | ({"preview.png", "thumbnail.webp"} if outputs else set())
+            expected = expected | {PREVIEW_REQUEST, APPEARANCE_COLORS} | ({"preview.png", "thumbnail.webp"} if outputs else set())
+            validate_appearance_colors(read_json(job, APPEARANCE_COLORS, ALLOWED_BYTES))
         require(names(job, len(expected)) == expected, "$", "Job has missing or unexpected files", "job_invalid")
         allowed = validate_allowed(read_json(job, "allowed.json", ALLOWED_BYTES))
         raw = read_json(job, "recipe.json", RECIPE_BYTES)
@@ -137,3 +150,30 @@ def read_inputs(job, *, outputs=False, check_fonts=True):
         return normalized, allowed
     except (OSError, module("errors").ModelImportError) as error:
         raise ModelBuildError("job_invalid", "$", "Unsafe or missing build input") from error
+
+
+def read_focus_inputs(job, *, outputs=False):
+    from .protocol import GLB_BYTES
+    try:
+        expected = {"model.glb", FOCUS_REQUEST, APPEARANCE_COLORS}
+        if outputs:
+            expected.add("preview.png")
+        require(names(job, len(expected)) == expected, "$", "Unexpected focus job files", "job_invalid")
+        request = read_json(job, FOCUS_REQUEST, 4096)
+        require(type(request) is dict and set(request) == {"modelSha256", "parts"}
+                and type(request["modelSha256"]) is str
+                and re.fullmatch(r"[0-9a-f]{64}", request["modelSha256"]),
+                "$.focus", "Invalid focus request", "job_invalid")
+        parts = request["parts"]
+        require(type(parts) is list and 1 <= len(parts) <= 64 and all(
+            type(part) is dict and set(part) == {"index", "name"} and type(part["index"]) is int
+            and 0 <= part["index"] <= 100000 and type(part["name"]) is str and 0 < len(part["name"]) <= 512
+            for part in parts) and len({part["index"] for part in parts}) == len(parts),
+            "$.focus.parts", "Invalid focus part selection", "job_invalid")
+        colors = validate_appearance_colors(read_json(job, APPEARANCE_COLORS, ALLOWED_BYTES))
+        payload = read_bytes(job, "model.glb", GLB_BYTES)
+        require(sha256(payload).hexdigest() == request["modelSha256"], "$.focus.modelSha256",
+                "Focus model bytes changed", "job_invalid")
+        return request, colors, payload
+    except (OSError, module("errors").ModelImportError) as error:
+        raise ModelBuildError("job_invalid", "$.focus", "Unsafe or missing focus input") from error

@@ -155,6 +155,11 @@ class ModelImportHooks:
         return self.store.list_build_drafts(self._scope(principal, reference))
 
     @host_errors
+    def focus_build_view(self, principal, reference, draft_id, focus, cancel=None):
+        scope = self._scope(principal, reference)
+        return self.store.focus_build_view(scope, draft_id, focus, self.host._component_visual_root, cancel)
+
+    @host_errors
     def register(self, principal, reference, draft_id: str) -> dict:
         self._scope(principal, reference, write=True)
         return self.register_imported_asset(principal, reference["siteId"], reference["layoutId"], draft_id,

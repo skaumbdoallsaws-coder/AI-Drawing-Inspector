@@ -6,7 +6,7 @@ import numpy as np
 
 from .adapt import to_model
 from .budgets import MAX_MATERIALS, MAX_PRIMITIVES, MAX_TRIANGLES, estimate
-from .errors import require
+from .errors import ModelBuildError, require
 from .imports import module
 from .lints import lint_model
 from .recipe import ENGINE_VERSION, normalize_recipe, portable_recipe
@@ -31,6 +31,10 @@ class BuildResult:
     budgets: dict
     provenance: dict
     prints: dict
+    includes: list
+    attribution: dict | None
+    include_sources: dict
+    image_ids: list
 
     @property
     def triangles(self):
@@ -49,22 +53,30 @@ def canonical_check(model, dimensions, base_height):
                 "Output dimensions do not match its bounds", "geometry_invalid")
 
 
-def build_model(recipe, *, allowed_categories=None, allowed_appearance_ids=(), font_directory=None):
+def build_model(recipe, *, allowed_categories=None, allowed_appearance_ids=(), font_directory=None, include_sources=None):
     normalized = normalize_recipe(recipe, allowed_categories=allowed_categories,
                                   allowed_appearance_ids=allowed_appearance_ids)
-    budgets = estimate(normalized)
-    components = expand(normalized)
+    from .include_contract import entries, prepare_sources
+    from .composition import load_models, include_results
+    include_sources, attribution = prepare_sources(normalized, include_sources)
+    budgets = estimate(normalized, include_stats={k: v["info"]["stats"] for k, v in include_sources.items()})
+    loaded = load_models(normalized, include_sources, allowed_appearance_ids)
+    components = expand(normalized, loaded)
     low, high = bounds(components)
     dimensions = dict(zip(("width", "height", "depth"), (high-low).tolist()))
     shift = np.array([-(low[0]+high[0])/2, normalized["hangHeight"]-low[1], -(low[2]+high[2])/2])
     components = [c.transformed(np.eye(3), shift) for c in components]
     prints = render_prints(components, font_directory=font_directory)
-    model, part_map = to_model(components, normalized, prints)
+    model, part_map, include_maps, image_ids = to_model(components, normalized, prints, loaded)
     canonical_check(model, dimensions, normalized["hangHeight"])
     count = sum(len(p.indices) for p in model.parts)
     require(count <= MAX_TRIANGLES and len(model.parts) <= MAX_PRIMITIVES, "$",
             "Output exceeds its geometry budget", "budget_exceeded")
-    glb = module("writer").write_glb(model, generator=ENGINE_VERSION, grouped=True, extended_materials=True)
+    try:
+        glb = module("writer").write_glb(model, generator=ENGINE_VERSION, grouped=True, extended_materials=True)
+    except module("errors").ModelImportError as error:
+        code = "budget_exceeded" if error.code == "model_output_too_large" else "geometry_invalid"
+        raise ModelBuildError(code, "$", "GLB writer refused " + error.code) from None
     # Cheap GLB JSON read, no application imports and no filesystem access.
     import json
     import struct
@@ -85,9 +97,17 @@ def build_model(recipe, *, allowed_categories=None, allowed_appearance_ids=(), f
     footprint = module("footprint").footprint(model.parts, normalized["footprint"])
     lints, warnings = lint_model(components, normalized, dimensions, shift, count)
     lints.extend(print_lints(components, prints))
+    for entry, _, _ in entries(normalized):
+        if include_sources[entry["id"]]["manifest"]["hasSurfaces"]:
+            lints.append({"code": "include_surfaces_dropped", "entryIds": [entry["id"]], "instances": []})
+    for item in loaded.values():
+        for warning in item["model"].warnings:
+            if warning not in warnings and len(warnings) < 20:
+                warnings.append(warning[:300])
     portable, metadata = portable_recipe(normalized)
     provenance = {"generator": ENGINE_VERSION, "hangHeight": normalized["hangHeight"],
                   "sizeBasis": portable["sizeBasis"], "sources": metadata["sources"],
                   "sitePrivate": {"references": metadata["references"]}}
     return BuildResult(normalized, model, glb, dimensions, catalog_dimensions, shift.tolist(), part_map,
-                        lints, warnings, surfaces, footprint, components, budgets, provenance, prints)
+                        lints, warnings, surfaces, footprint, components, budgets, provenance, prints,
+                        include_results(normalized, components, loaded, include_maps), attribution, include_sources, image_ids)

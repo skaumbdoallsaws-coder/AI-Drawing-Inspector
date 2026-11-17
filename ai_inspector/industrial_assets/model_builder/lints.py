@@ -32,7 +32,7 @@ def _clip(subject, clip):
 
 def _planes(component):
     """Coalesce the two triangles of each box/plate face into a convex polygon."""
-    if component.entry["shape"] not in ("box", "panel"):
+    if component.entry.get("shape") not in ("box", "panel"):
         return []
     points = component.mesh.positions
     groups = {}
@@ -84,7 +84,7 @@ def lint_model(components, recipe, dimensions, shift, triangle_count):
         low, high = boxes[i]
         if bool(np.all(high-low < .002)):
             add("tiny_part", (c,))
-        name = c.entry["name"]
+        name = c.output_name or c.entry["name"]
         if name not in checked_names and re.fullmatch(r"(part|box|cylinder|mesh|object)[ _-]*\d*", name, re.I):
             add("generic_name", (c,))
         checked_names.add(name)

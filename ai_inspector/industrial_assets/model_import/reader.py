@@ -28,7 +28,7 @@ def read_model(payload: bytes, name: str = "Imported model", *,
         materials = read_materials(document, limits, warnings, extended_materials=extended_materials)
         parts = flatten(document, accessors, materials, limits, quantized, warnings,
                         preserve_node_names=extended_materials)
-        images = read_images(container, accessors, materials, limits, texture_max_px)
+        images = read_images(container, accessors, materials, limits, texture_max_px, lossless=extended_materials)
         container.validate_resources()
         return Model(clean_text(name.replace("\\", "/").rsplit("/", 1)[-1]) or "Imported model",
                      container.format, len(payload), sha256(payload).hexdigest(), clean_text(asset.get("generator"), 300),

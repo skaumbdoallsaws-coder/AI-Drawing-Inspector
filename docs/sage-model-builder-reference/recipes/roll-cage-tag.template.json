@@ -18,5 +18,5 @@
     {"rect": [0.024, 0.043, 0.976, 0.957], "stroke": "#ffffff", "lineMm": 4, "radiusMm": 9},
     {"text": "OUTBOUND", "box": [0.08, 0.20, 0.92, 0.80], "color": "#ffffff", "weight": "bold"}]}},
   {"id": "clips", "name": "tag clips", "shape": "box", "material": "clips",
-   "center": [-0.12, 0.955, 0.331], "size": [0.032, 0.05, 0.012], "repeat": {"count": 2, "step": [0.24, 0, 0]}}],
+   "center": [-0.12, 0.955, 0.3315], "size": [0.032, 0.05, 0.011], "repeat": {"count": 2, "step": [0.24, 0, 0]}}],
  "footprint": "box"}

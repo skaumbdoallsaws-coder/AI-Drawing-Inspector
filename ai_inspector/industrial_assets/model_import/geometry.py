@@ -200,7 +200,7 @@ def flatten(document, accessors, materials, limits, quantized, warnings, *, pres
             faces = _triangles(indices, mode)
             if np.linalg.slogdet(world[:3, :3])[0] < 0:
                 faces[:, [1, 2]] = faces[:, [2, 1]]
-            part_name = ((clean_text(node.get("name")) if preserve_node_names else "")
+            part_name = ((clean_text(node.get("name"), 512) if preserve_node_names else "")
                          or material["name"] or clean_text(mesh.get("name")) or key)
             parts.append(Part(key, part_name,
                               clean_text(node.get("name")), clean_text(mesh.get("name")), material_index,

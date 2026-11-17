@@ -69,7 +69,11 @@ def triangles(entry):
 
 
 def estimate(recipe, *, include_stats=None):
-    """Stats for later MB3 are host/reader-validated, never supplied by recipe fields."""
+    """Scalar include preflight stats, never supplied by recipe fields.
+
+    Include entry/byte quotas charge the three copied inputs. Geometry, material
+    and pixel estimates conservatively charge every pattern copy before merging.
+    """
     result = {"components": 0, "triangles": 0, "primitives": 0, "materials": 0,
               "printedPanels": 0, "printPixels": 0, "texturePixels": 0, "includes": 0, "includeBytes": 0}
     slots = set()
@@ -86,12 +90,15 @@ def estimate(recipe, *, include_stats=None):
                 continue
             result["components"] += count * (2 if entry.get("shape") == "panel" else 1)
             if "include" in entry:
-                result["includes"] += count
+                result["includes"] += 1
                 stats = includes.get(entry["id"])
                 if stats is not None:
                     require(stats["bytes"] <= INCLUDE_BYTES, p, "Include exceeds 8 MiB", "budget_exceeded")
-                    result["includeBytes"] += stats["bytes"] * count
+                    result["includeBytes"] += stats["bytes"]
                     result["texturePixels"] += stats["texturePixels"] * count
+                    result["printedPanels"] += stats.get("printedPanels", 0) * count
+                    result["printPixels"] += stats.get("printPixels", 0) * count
+                    result["components"] += (stats["primitives"] - 1) * count
                     result["triangles"] += stats["triangles"] * count
                     result["primitives"] += stats["primitives"] * count
                     result["materials"] += stats["materials"] * count
@@ -107,12 +114,13 @@ def estimate(recipe, *, include_stats=None):
                     material_slots.add((entry["name"], "print:" + entry["id"]))
                     result["printedPanels"] += count
                     result["printPixels"] += math.prod(panel_pixels(entry)) * count
+                    own_print_pixels[0] += math.prod(panel_pixels(entry)) * count
             check(p)
 
     def check(path):
         if result["triangles"] > MAX_TRIANGLES:
             raise ModelBuildError("budget_exceeded", path, "triangles exceeds 60000",
-                                  triangles=result["triangles"])
+                                  triangles=result["triangles"] if result["triangles"] <= 30_000_000 else None)
         checks = (("components", MAX_COMPONENTS), ("triangles", MAX_TRIANGLES),
                   ("printedPanels", MAX_PRINTS), ("printPixels", MAX_PRINT_PIXELS),
                   ("includes", 3), ("includeBytes", TOTAL_INCLUDE_BYTES))
@@ -122,11 +130,12 @@ def estimate(recipe, *, include_stats=None):
                 "Output exceeds 400 primitives", "budget_exceeded")
         require(result["materials"] + len(material_slots) <= MAX_MATERIALS, path,
                 "Output exceeds 64 materials", "budget_exceeded")
-        require(result["texturePixels"] + result["printPixels"] <= MAX_TEXTURE_PIXELS, path,
+        require(result["texturePixels"] + own_print_pixels[0] <= MAX_TEXTURE_PIXELS, path,
                 "Decoded textures exceed 16 megapixels", "budget_exceeded")
 
+    own_print_pixels = [0]
     visit(recipe["entries"], 1, "$.entries")
     result["primitives"] += len(slots)
     result["materials"] += len(material_slots)
-    result["texturePixels"] += result["printPixels"]
+    result["texturePixels"] += own_print_pixels[0]
     return result

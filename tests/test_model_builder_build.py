@@ -142,12 +142,11 @@ def test_verify_refuses_invalid_base_height(base_height):
         verify(b"", base_height=base_height)
 
 
-def test_includes_refuse_composition_until_mb3():
+def test_includes_require_pinned_catalog_sources():
     with pytest.raises(Error) as caught:
         builder.build_model(recipe({"id": "assembly", "group": [include()]}))
-    assert caught.value.code == "composition_unavailable"
-    assert caught.value.path == "$.entries[0].group[0].include"
-    assert "MB3" in str(caught.value)
+    assert caught.value.code == "include_missing"
+    assert caught.value.path == "$.includes"
 
 
 def test_budget_refuses_before_geometry_expands(monkeypatch):

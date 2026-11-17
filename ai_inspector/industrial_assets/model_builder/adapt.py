@@ -9,6 +9,8 @@ from .imports import module
 
 def material_key(component):
     entry = component.entry
+    if component.role == "include":
+        return component.include_material_key
     if component.role == "print":
         return "print:" + entry["id"]
     if component.role == "back":
@@ -18,7 +20,14 @@ def material_key(component):
 
 def material_value(component, recipe, image_indices):
     entry = component.entry
-    value = deepcopy(recipe["materials"][entry["material"]])
+    if component.include_material is not None:
+        result = deepcopy(component.include_material)
+        for key in ("texture", "emissiveTexture"):
+            if result.get(key) is not None:
+                source = result[key]["image"]
+                result[key]["image"] = image_indices[f"include:{entry['id']}:{source}"]
+        return result
+    value = deepcopy(recipe["materials"][component.include_material_key if component.role == "include" else entry["material"]])
     result = module("materials").default_material()
     color = module("transforms").linear_color
     if component.role == "print":
@@ -46,19 +55,25 @@ def encode_name(name):
                    else f"%{c:02X}" for c in name.encode("utf-8"))
 
 
-def to_model(components, recipe, prints):
+def to_model(components, recipe, prints, includes=None):
     api = module("model")
     image_indices = {entry_id: i for i, entry_id in enumerate(prints)}
     images = [api.ModelImage(p.data, "image/png", p.width, p.height, p.width, p.height) for p in prints.values()]
+    for entry_id, item in (includes or {}).items():
+        used = sorted({m[key]["image"] for m in item["materials"].values() for key in ("texture", "emissiveTexture")
+                       if m.get(key) is not None})
+        for source in used:
+            image_indices[f"include:{entry_id}:{source}"] = len(images)
+            images.append(item["model"].images[source])
     materials, material_indices, groups = [], {}, OrderedDict()
     for component in components:
         key = material_key(component)
         if key not in material_indices:
             material_indices[key] = len(materials)
             materials.append(material_value(component, recipe, image_indices))
-        group = (component.entry["name"], key)
+        group = (component.output_name or component.entry["name"], key)
         groups.setdefault(group, []).append(component)
-    parts, entries, instances, node_ordinals = [], {}, {}, {}
+    parts, entries, instances, node_ordinals, include_maps = [], {}, {}, {}, {}
     node_indices = {name: i for i, name in enumerate(sorted({name for name, _ in groups}))}
     for (name, material), batch in sorted(groups.items()):
         primitive = node_ordinals.get(name, 0)
@@ -76,13 +91,16 @@ def to_model(components, recipe, prints):
             normal /= np.linalg.norm(normal, axis=1)[:, None]
             points = triangles.reshape(-1, 3)
             positions.append(points)
-            normals.append(np.repeat(normal, 3, axis=0))
+            normals.append(mesh.normals[mesh.indices].reshape(-1, 3) if mesh.normals is not None
+                           else np.repeat(normal, 3, axis=0))
             if any_uv:
                 uv.append(mesh.uv[mesh.indices].reshape(-1, 2) if mesh.uv is not None else np.zeros((len(points), 2)))
             indices.append(np.arange(offset, offset+len(points), dtype=np.uint32).reshape(-1, 3))
             offset += len(points)
             for entry_id in (*component.ancestors, component.entry["id"]):
                 entries.setdefault(entry_id, set()).add(key)
+            if component.include_key is not None:
+                include_maps.setdefault(component.entry["id"], {})[component.include_key] = key
             segments = component.instance.split("/")
             for length in range(1, len(segments)+1):
                 instances.setdefault("/".join(segments[:length]), set()).add(key)
@@ -92,4 +110,4 @@ def to_model(components, recipe, prints):
     model = api.Model(recipe["name"], "recipe", 0, "", "model-builder-1", parts, materials, images, {})
     mapping = {"entries": {k: sorted(v) for k, v in sorted(entries.items())},
                "instances": {k: sorted(v) for k, v in sorted(instances.items())}}
-    return model, mapping
+    return model, mapping, include_maps, list(image_indices)

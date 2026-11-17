@@ -107,7 +107,7 @@ class RecipeTests(unittest.TestCase):
         self.refused(recipe(include(repeat={"count": 2, "step": [1, 0, 0]})))
         self.refused(recipe(include(recolor=[{"select": {"all": True, "node": "x"}, "material": "paint"}])))
         value = recipe({"id": "assembly", "group": [include()], "mirror": {"plane": "x"}})
-        self.assertEqual(budgets.estimate(normalizer.normalize_recipe(value))["includes"], 2)
+        self.assertEqual(budgets.estimate(normalizer.normalize_recipe(value))["includes"], 1)
 
     def test_print_forms_and_covered_glyphs(self):
         items = [{"text": "OUTBOUND\nA1", "box": [0, 0, 1, 1], "color": "#ffffff"},
@@ -205,7 +205,7 @@ class RecipeTests(unittest.TestCase):
         value = recipe(description="x" * 24576)
         self.refused(value, "budget_exceeded", "$")
 
-    def test_future_include_aggregate_budgets_without_geometry(self):
+    def test_include_aggregate_budgets_without_geometry(self):
         self.refused(recipe(*[include(id=f"i-{i}") for i in range(4)]), "budget_exceeded")
         value = normalizer.normalize_recipe(recipe(include()))
         valid = dict(bytes=1, texturePixels=0, triangles=12, primitives=1, materials=1)

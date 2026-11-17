@@ -145,7 +145,7 @@ def _magic(data: bytes) -> str:
     raise ModelImportError("image_unsafe")
 
 
-def read_images(container, accessors, materials, limits, texture_max_px: int = 1024) -> list[ModelImage]:
+def read_images(container, accessors, materials, limits, texture_max_px: int = 1024, *, lossless=False) -> list[ModelImage]:
     require(texture_max_px in (256, 512, 1024, 2048))
     alpha_images = {m["texture"]["image"] for m in materials if m["texture"] and m["alphaMode"] != "OPAQUE"}
     output, pixels = [], 0
@@ -171,9 +171,9 @@ def read_images(container, accessors, materials, limits, texture_max_px: int = 1
                     with source.convert(mode) as resized:
                         alpha_used = mode == "RGBA" and resized.getextrema()[3] != (255, 255)
                         with BytesIO() as stream:
-                            if alpha_used:
+                            if alpha_used or lossless:
                                 # A fresh image drops all source metadata.
-                                with Image.frombytes("RGBA", resized.size, resized.tobytes()) as clean:
+                                with Image.frombytes(mode, resized.size, resized.tobytes()) as clean:
                                     clean.save(stream, format="PNG")
                                 mime = "image/png"
                             else:

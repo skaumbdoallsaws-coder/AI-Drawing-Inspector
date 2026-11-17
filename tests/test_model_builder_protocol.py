@@ -40,7 +40,7 @@ def sample():
               "images": [], "surfaces": [], "footprint": [[{"x": -.5, "z": -.5}, {"x": .5, "z": -.5},
                                            {"x": .5, "z": .5}, {"x": -.5, "z": .5}]],
              "lints": [], "warnings": [], "budgets": module("budgets").estimate(raw),
-             "provenance": protocol.provenance(raw)}
+             "provenance": protocol.provenance(raw), "includes": [], "attribution": None}
     return raw, value
 
 
@@ -134,10 +134,10 @@ class ProtocolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="mb1b-") as temp:
             directory = Path(temp).resolve()
             inputs(directory)
-            (directory / "includes/0.glb").write_bytes(b"not yet supported")
+            (directory / "includes/0.glb").write_bytes(b"not declared by the recipe")
             with self.assertRaises(BuilderError) as caught:
                 jobs.read_inputs(directory)
-            self.assertEqual(caught.exception.code, "composition_unavailable")
+            self.assertEqual(caught.exception.code, "job_invalid")
             self.assertEqual(caught.exception.path, "$.includes")
 
     def test_symlinks_are_not_read(self):

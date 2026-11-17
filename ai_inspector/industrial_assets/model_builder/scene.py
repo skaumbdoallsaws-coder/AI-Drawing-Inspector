@@ -7,7 +7,7 @@ import numpy as np
 
 from .errors import ModelBuildError, require
 from .schema import PATTERNS
-from .shapes import make_shape
+from .shapes import Mesh, make_shape
 
 
 def rotation(value):
@@ -25,13 +25,24 @@ class Component:
     instance: str
     ancestors: tuple[str, ...]
     path: str = "$"
+    output_name: str | None = None
+    include_key: str | None = None
+    include_material_key: str | None = None
+    include_material: dict | None = None
+    include_frame: np.ndarray | None = None
+    anchorable: bool = False
 
     @property
     def bounds(self):
         return self.mesh.positions.min(axis=0), self.mesh.positions.max(axis=0)
 
     def transformed(self, matrix, offset):
-        return replace(self, mesh=self.mesh.transformed(matrix, offset))
+        frame = self.include_frame
+        if frame is not None:
+            transform = np.eye(4)
+            transform[:3, :3], transform[:3, 3] = matrix, offset
+            frame = transform @ frame
+        return replace(self, mesh=self.mesh.transformed(matrix, offset), include_frame=frame)
 
 
 def bounds(components):
@@ -92,11 +103,13 @@ def _pattern(entry, components, path):
     return [[c.transformed(matrix, offset) for c in components] for matrix, offset in matrices]
 
 
-def expand(recipe):
+def expand(recipe, includes=None):
     def visit(entry, ancestors, path):
         if "include" in entry:
-            raise ModelBuildError("composition_unavailable", path + ".include")
-        if "group" in entry:
+            from .composition import components_for
+            components = components_for(entry, ancestors, path, includes or {})
+            matrix, offset = rotation({"y": entry["rotateY"]}), np.asarray(entry["position"])
+        elif "group" in entry:
             components = [c for i, child in enumerate(entry["group"])
                           for c in visit(child, ancestors + (entry["id"],), f"{path}.group[{i}]")]
             matrix, offset = rotation(entry["rotate"]), np.asarray(entry["position"])

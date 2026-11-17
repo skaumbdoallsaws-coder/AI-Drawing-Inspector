@@ -119,25 +119,15 @@ def read_inputs(job, *, outputs=False, check_fonts=True):
         job = directory(job)
         expected = INPUT_NAMES | ({"model.glb", "result.json"} if outputs else set())
         require(names(job, len(expected)) == expected, "$", "Job has missing or unexpected files", "job_invalid")
-        include_dir = directory(job / "includes")
-        require(next(include_dir.iterdir(), None) is None, "$.includes",
-                "Composition arrives in MB3; includes must be empty", "composition_unavailable")
         allowed = validate_allowed(read_json(job, "allowed.json", ALLOWED_BYTES))
         raw = read_json(job, "recipe.json", RECIPE_BYTES)
         normalized = normalize_recipe(raw, allowed_categories=allowed["categories"],
                                       allowed_appearance_ids=allowed["appearanceIds"])
         require(json_bytes(raw) == json_bytes(normalized), "$", "recipe.json must contain the normalized recipe")
+        from .include_contract import read_sources
+        read_sources(job, normalized)
         if check_fonts:
             validate_fonts(job)
         return normalized, allowed
     except (OSError, module("errors").ModelImportError) as error:
         raise ModelBuildError("job_invalid", "$", "Unsafe or missing build input") from error
-
-
-def refuse_includes(entries, path="$.entries"):
-    for i, entry in enumerate(entries):
-        location = f"{path}[{i}]"
-        if "include" in entry:
-            raise ModelBuildError("composition_unavailable", location + ".include")
-        if "group" in entry:
-            refuse_includes(entry["group"], location + ".group")

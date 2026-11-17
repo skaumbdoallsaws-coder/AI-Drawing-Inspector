@@ -2,19 +2,21 @@
 import sys
 
 from .errors import require, json_bytes
-from .job_io import directory, file_path, read_inputs, refuse_includes
+from .job_io import directory, file_path, read_inputs
+from .include_contract import read_sources, prepare_sources
 from .protocol import make_result
 
 
 def execute_build(job_dir):
     job = directory(job_dir)
     recipe, allowed = read_inputs(job)
-    refuse_includes(recipe["entries"])
+    sources, _ = prepare_sources(recipe, read_sources(job, recipe))
     require(not any(name == "ai_inspector" or name.startswith("ai_inspector.") for name in sys.modules),
             "$", "Application parents must not be loaded by the build worker", "job_invalid")
     from .build import build_model
     result = build_model(recipe, allowed_categories=allowed["categories"],
-                          allowed_appearance_ids=allowed["appearanceIds"], font_directory=job / "fonts")
+                          allowed_appearance_ids=allowed["appearanceIds"], font_directory=job / "fonts",
+                          include_sources=sources)
     require(not any(name == "ai_inspector" or name.startswith("ai_inspector.") for name in sys.modules),
             "$", "Application parents must not be loaded by the build worker", "job_invalid")
     summary = make_result(result, allowed)

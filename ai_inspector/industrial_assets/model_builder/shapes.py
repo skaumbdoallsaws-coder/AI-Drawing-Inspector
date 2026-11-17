@@ -14,6 +14,7 @@ class Mesh:
     indices: np.ndarray
     uv: np.ndarray | None = None
     closed: bool = True
+    normals: np.ndarray | None = None
 
     def transformed(self, matrix, offset):
         positions = self.positions @ matrix.T + offset
@@ -23,7 +24,11 @@ class Mesh:
             indices[:, [1, 2]] = indices[:, [2, 1]]
             if uv is not None:
                 uv[:, 0] = 1 - uv[:, 0]  # Printed fronts retain readable handedness.
-        return Mesh(positions, indices, uv, self.closed)
+        normals = None
+        if self.normals is not None:
+            normals = self.normals @ np.linalg.inv(matrix)
+            normals /= np.linalg.norm(normals, axis=1)[:, None]
+        return Mesh(positions, indices, uv, self.closed, normals)
 
 
 class Builder:

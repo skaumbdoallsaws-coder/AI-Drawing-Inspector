@@ -40,19 +40,20 @@ def outside_panel(item, size):
     return a < -1e-9 or b < -1e-9 or c > 1+1e-9 or d > 1+1e-9
 
 
-def png_dimensions(data):
+def png_dimensions(data, *, included=False):
     """Accept only bounded metadata-free, non-interlaced RGB PNGs made by prints.
 
     Hashing alone does not validate a worker-supplied image. Check chunks, CRCs
     and the exact bounded decoded scanline size without loading Pillow in hosts.
     """
-    if not isinstance(data, bytes) or len(data) > 4*1024*1024 + 65536 or data[:8] != b"\x89PNG\r\n\x1a\n":
+    side = 2048 if included else 1024
+    if not isinstance(data, bytes) or len(data) > 4*side*side + 65536 or data[:8] != b"\x89PNG\r\n\x1a\n":
         raise ValueError("Invalid print PNG")
     offset, width, height, seen_end, chunks = 8, 0, 0, False, 0
     compressed = bytearray()
     while offset < len(data):
         chunks += 1
-        if chunks > 256:
+        if chunks > (1024 if included else 256):
             raise ValueError("Too many print PNG chunks")
         if len(data)-offset < 12:
             raise ValueError("Truncated print PNG")
@@ -64,10 +65,12 @@ def png_dimensions(data):
         if zlib.crc32(kind+chunk) & 0xffffffff != struct.unpack_from(">I", data, end-4)[0]:
             raise ValueError("Invalid print PNG CRC")
         if kind == b"IHDR":
-            if offset != 8 or length != 13 or chunk[8:] != b"\x08\x02\x00\x00\x00":
+            if (offset != 8 or length != 13 or chunk[8] != 8 or chunk[9] not in ((2, 6) if included else (2,))
+                    or chunk[10:] != b"\x00\x00\x00"):
                 raise ValueError("Invalid print PNG header")
             width, height = struct.unpack_from(">II", chunk)
-            if not (1 <= width <= 1024 and 1 <= height <= 1024 and max(width, height) >= 64):
+            channels = 4 if chunk[9] == 6 else 3
+            if not (1 <= width <= side and 1 <= height <= side and max(width, height) >= (1 if included else 64)):
                 raise ValueError("Invalid print PNG size")
         elif kind == b"IDAT":
             if not width or seen_end:
@@ -80,7 +83,7 @@ def png_dimensions(data):
         offset = end
     if not seen_end:
         raise ValueError("Incomplete print PNG")
-    stride = 3*width+1
+    stride = channels*width+1
     decoder = zlib.decompressobj()
     try:
         pixels = decoder.decompress(compressed, stride*height+1)

@@ -56,7 +56,7 @@ def test_real_worker_matches_kernel_and_host_verifies_hang_height(tmp_path, monk
 @pytest.mark.parametrize("case,code,path", [
     ("schema", "schema_invalid", "$.entries[0].unknown"),
     ("complexity", "budget_exceeded", "$.entries[2]"),
-    ("include", "composition_unavailable", "$.entries[0].include"),
+    ("include", "include_missing", "$.includes"),
     ("font", "font_missing", "$.fonts")])
 def test_host_decodes_real_refusal_and_cleans_only_outputs(tmp_path, case, code, path):
     directory, raw = job(tmp_path, recipe())

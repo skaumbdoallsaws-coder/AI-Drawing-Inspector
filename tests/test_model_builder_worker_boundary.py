@@ -63,9 +63,9 @@ class WorkerBoundaryTests(unittest.TestCase):
         self.assertEqual(error.triangles, 60001)
         self.assertEqual(error.to_dict()["details"]["limit"], 60000)
 
-    def test_include_refuses_before_loading_numerical_dependencies(self):
+    def test_missing_include_refuses_before_loading_numerical_dependencies(self):
         (self.job / "recipe.json").write_bytes(errors.json_bytes(normalize(recipe(include()))))
-        self.refusal("composition_unavailable", "$.entries[0].include")
+        self.refusal("include_missing", "$.includes")
 
     def test_wrong_font_hash_refuses_in_real_worker(self):
         path = self.job / "fonts/Aileron-Regular-subset.ttf"
